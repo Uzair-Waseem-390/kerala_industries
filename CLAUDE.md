@@ -20,6 +20,6 @@ failing the assignment, not taking a shortcut.
   - Exception: `instructions/performance-review-reviewer-role-and-goal.md` is ONLY for a dedicated independent-reviewer agent auditing a first agent's performance-review plan — never read it otherwise, and a reviewer agent must not read the other `performance-review-*.md` files in turn (see the file's own header).
 - **ANY frontend change** → must read `instructions/frontend.md` before making any changes.
 - **ANY frontend redesign or new page** → must read `instructions/frontend_redesign.md` AND `instructions/architecture.md` before making any changes.
-- **Client requirements** → `instructions/client_requirements.md`. read it when user ask to read it and when you're going to build or change something else and if your ask something different then these requirements point-out user that what's requirements are.
+- **Client requirements** → `docs/client_requirements.md`. read it when user ask to read it and when you're going to build or change something else and if your ask something different then these requirements point-out user that what's requirements are.
 
 Skip these for unrelated tasks (styling tweaks, questions, isolated unrelated bugfixes) — but when in doubt about whether a task counts, read the file. The cost of reading is a few seconds; the cost of repeating a fixed mistake is a full review cycle.
