@@ -117,7 +117,7 @@ DATABASES = {
 # BACKUP_DATABASE in .env.local. Optional: if unset, the remote backup
 # endpoints simply aren't usable (checked at request time in backups/services.py),
 # local backups are unaffected either way.
-BACKUP_DATABASE_URL = os.getenv("BACKUP_DATABASE")
+# BACKUP_DATABASE_URL = os.getenv("BACKUP_DATABASE")
 
 if BACKUP_DATABASE_URL:
     _backup_db_parsed = urlparse(BACKUP_DATABASE_URL)
