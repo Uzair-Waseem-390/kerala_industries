@@ -282,7 +282,7 @@ def _reverse_fifo(*, invoice_item: InvoiceItem, return_quantity: int) -> None:
     # Increment inventory — through the shared writer so the inventory
     # stats counters stay in sync (user=None: this path never recorded
     # last_updated_by, and the writer preserves that).
-    from purchases.services import sync_inventory
+    from inventory.services import sync_inventory
     sync_inventory(product=product, quantity_delta=return_quantity, user=None)
 
 
@@ -919,8 +919,8 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
         # Deduct from inventory (global) and the specific shelf(s) this sale
         # line is fulfilled from — through the shared writers so the
         # inventory stats counters and shelf ledger stay in sync.
-        from purchases.services import apply_shelf_allocations, sync_inventory
-        from purchases.models import ShelfStockMovement
+        from inventory.services import apply_shelf_allocations, sync_inventory
+        from inventory.models import ShelfStockMovement
         sync_inventory(product=product, quantity_delta=-item.quantity, user=user)
         apply_shelf_allocations(
             product=product,
@@ -932,7 +932,7 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
         # Stock Movement Report — bootstrap opening-balance invoices aren't
         # real sales, mirrors every other report's is_data_entry exclusion.
         if not invoice.is_data_entry:
-            from purchases.services import _adjust_stock_movement
+            from inventory.services import _adjust_stock_movement
             _adjust_stock_movement(product_id=item.product_id, sold_delta=item.quantity)
 
     _recalculate_invoice_totals(invoice)
@@ -1401,8 +1401,8 @@ def accept_return(*, return_id: int, user) -> Return:
         # Reverse FIFO and restore inventory (global), then put the returned
         # quantity away on the shelf(s) the user chose (any shelf is valid).
         _reverse_fifo(invoice_item=invoice_item, return_quantity=qty)
-        from purchases.services import apply_shelf_allocations
-        from purchases.models import ShelfStockMovement
+        from inventory.services import apply_shelf_allocations
+        from inventory.models import ShelfStockMovement
         apply_shelf_allocations(
             product=invoice_item.product,
             allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in return_item.shelf_allocations.all()],
@@ -1416,7 +1416,7 @@ def accept_return(*, return_id: int, user) -> Return:
 
         # Stock Movement Report
         if not invoice_item.invoice.is_data_entry:
-            from purchases.services import _adjust_stock_movement
+            from inventory.services import _adjust_stock_movement
             _adjust_stock_movement(product_id=invoice_item.product_id, sale_returned_delta=qty)
 
         total_return_amount += line_total

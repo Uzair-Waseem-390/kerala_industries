@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    Category, Inventory, LostInventoryFIFOConsumption, LostInventoryItem,
+    Category, LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, Product, PurchaseItem, PurchaseOrder,
     PurchaseReturn, PurchaseReturnItem, SavedPurchaseOrderPDF,
     Shelf, Supplier, SupplierPayment,
@@ -163,14 +163,4 @@ class SavedPurchaseOrderPDFAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(Inventory)
-class InventoryAdmin(admin.ModelAdmin):
-    list_display  = ["product", "quantity", "last_updated_by", "last_updated_at"]
-    search_fields = ["product__name", "product__code"]
-    readonly_fields = ["quantity", "last_updated_at", "last_updated_by"]
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
+# InventoryAdmin moved to inventory/admin.py — mechanical extraction.

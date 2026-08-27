@@ -14,10 +14,15 @@ from rest_framework.exceptions import ValidationError
 from payment_methods.models import PaymentMethod
 
 from .models import (
-    LOW_STOCK_THRESHOLD, Category, Inventory, InventoryStatsFlow, Product,
-    ProductStockMovement, PurchaseOrder, PurchaseReturn, Shelf, ShelfStock,
-    StockMovementFlow, Supplier,
+    Category, Product,
+    PurchaseOrder, PurchaseReturn, Shelf,
+    Supplier,
 )
+from inventory.models import (
+    LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow,
+    ProductStockMovement, ShelfStock, StockMovementFlow,
+)
+from inventory.services import sync_inventory
 from .selectors import compute_auto_shelf_allocation
 from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
@@ -25,14 +30,17 @@ from .services import (
     create_supplier, create_supplier_payment, delete_product,
     delete_supplier_payment, mark_lost_inventory_found,
     set_purchase_item_shelf_allocations,
-    set_purchase_return_item_shelf_allocations, sync_inventory,
+    set_purchase_return_item_shelf_allocations,
     update_purchase_return_items,
 )
 from .views import (
-    AutoAllocateShelvesView, DraftPurchaseOrderListView, InventoryListView,
-    InventoryStatsView, LowStockInventoryListView, OutOfStockInventoryListView,
+    AutoAllocateShelvesView, DraftPurchaseOrderListView,
     PurchaseOrderListCreateView, PurchaseOrderPaymentSummaryView,
     SupplierPaymentListCreateView,
+)
+from inventory.views import (
+    InventoryListView, InventoryStatsView, LowStockInventoryListView,
+    OutOfStockInventoryListView,
 )
 
 

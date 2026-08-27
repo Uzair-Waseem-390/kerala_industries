@@ -38,6 +38,7 @@ INSTALLED_APPS = [
 EXTERNAL_APPS = [
     'users',
     'purchases',
+    'inventory',
     'rates',
     'billing',
     'cash_flow',
@@ -118,6 +119,15 @@ DATABASES = {
 # endpoints simply aren't usable (checked at request time in backups/services.py),
 # local backups are unaffected either way.
 # BACKUP_DATABASE_URL = os.getenv("BACKUP_DATABASE")
+# Local dev fix (pre-existing bug, unrelated to this task): the line above
+# was commented out but BACKUP_DATABASE_URL is referenced unconditionally
+# below, so every manage.py invocation crashed with NameError before this
+# was touched at all. Defining it as None (never reading the real
+# BACKUP_DATABASE env var) keeps the `if BACKUP_DATABASE_URL:` block a
+# no-op locally — .env's BACKUP_DATABASE points at a real remote Postgres
+# (Neon), and manage.py test would otherwise try to create/connect to a
+# "backup_remote" test database on that real remote instance.
+BACKUP_DATABASE_URL = None
 
 if BACKUP_DATABASE_URL:
     _backup_db_parsed = urlparse(BACKUP_DATABASE_URL)

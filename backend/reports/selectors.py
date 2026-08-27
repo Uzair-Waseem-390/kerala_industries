@@ -10,7 +10,8 @@ from cash_flow.models import CashFlow, Expense
 # midnight) — same ones billing/ledger/cash_flow use for datetime-column
 # date filters.
 from purchases.selectors import _day_start, _next_day_start
-from purchases.models import Inventory, LostInventoryItem, PurchaseItem, PurchaseOrder, PurchaseReturn
+from purchases.models import LostInventoryItem, PurchaseItem, PurchaseOrder, PurchaseReturn
+from inventory.models import Inventory
 
 
 def _clean(value):
@@ -865,7 +866,7 @@ def get_stock_movement_report_stats(rows: list) -> dict:
 
 def get_stock_movement_report_stats_all_time() -> dict:
     """No-filter case — reads the pre-synced StockMovementFlow totals, O(1)."""
-    from purchases.models import StockMovementFlow
+    from inventory.models import StockMovementFlow
 
     flow = StockMovementFlow.get_instance()
     return {
@@ -892,7 +893,8 @@ def get_stock_movement_report_rows(
     Any date filter -> live aggregation for that window (see above).
     `search` matches product name or code, applied either way.
     """
-    from purchases.models import Product, ProductStockMovement
+    from purchases.models import Product
+    from inventory.models import ProductStockMovement
 
     has_date_filter = bool(_clean(date) or _clean(date_from) or _clean(date_to))
 

@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db.models import Count, Q
 
-from purchases.models import LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow
+from inventory.models import LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow
 
 
 class Command(BaseCommand):

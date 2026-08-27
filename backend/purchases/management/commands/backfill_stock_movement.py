@@ -8,9 +8,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **kwargs):
         from purchases.models import (
-            LostInventoryItem, LostInventoryRecovery, Product, ProductStockMovement,
-            PurchaseItem, PurchaseReturnItem, StockMovementFlow,
+            LostInventoryItem, LostInventoryRecovery, Product,
+            PurchaseItem, PurchaseReturnItem,
         )
+        from inventory.models import ProductStockMovement, StockMovementFlow
         from billing.models import Invoice, InvoiceItem, ReturnItem
 
         self.stdout.write("Starting stock movement backfill...\n")

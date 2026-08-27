@@ -10,7 +10,8 @@ urlpatterns = [
     path(f"{PATH_ADMIN}/", admin.site.urls),
     path("api/auth/",      include((auth_urlpatterns, "auth"))),
     path("api/users/",     include((user_urlpatterns, "users"))),
-    path("api/",           include("purchases.urls")),     # categories, shelves, suppliers, products, orders, inventory
+    path("api/",           include("purchases.urls")),     # categories, shelves, suppliers, products, orders
+    path("api/",           include("inventory.urls")),     # inventory, shelf stock
     path("api/rates/",     include("rates.urls")),
     path("api/billing/",   include("billing.urls")),
     path("api/cash-flow/", include("cash_flow.urls")),

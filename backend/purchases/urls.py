@@ -6,7 +6,6 @@ from .views import (
     CategoryRetrieveUpdateDestroyView,
     ShelfListCreateView,
     ShelfRetrieveUpdateDestroyView,
-    ShelfStockListView,
     CandidateShelvesForProductView,
     AutoAllocateShelvesView,
     MoveStockView,
@@ -52,13 +51,6 @@ from .views import (
     PurchaseOrderSavedPDFListView,
     SavedPurchaseOrderPDFDeleteView,
 
-    # Inventory
-    InventoryListView,
-    InventoryRetrieveView,
-    InventoryStatsView,
-    LowStockInventoryListView,
-    OutOfStockInventoryListView,
-
     # Lost Inventory
     LostInventoryFifoPreviewView,
     LostInventoryListCreateView,
@@ -82,7 +74,8 @@ urlpatterns = [
     path("shelves/move/",        MoveStockView.as_view(),                      name="shelf-move-stock"),
 
     path("shelves/<int:pk>/",    ShelfRetrieveUpdateDestroyView.as_view(),     name="shelf-detail"),
-    path("shelves/<int:pk>/stock/", ShelfStockListView.as_view(),              name="shelf-stock-list"),
+    # shelves/<pk>/stock/ moved to inventory.urls (mechanical extraction) —
+    # mounted at the same "api/" prefix, so the final path is unchanged.
 
     # -----------------------------------------------------------------------
     # Supplier
@@ -211,27 +204,11 @@ urlpatterns = [
          name="purchase-order-pdf-delete"),
 
     # -----------------------------------------------------------------------
-    # Inventory
+    # Inventory routes (inventory/, inventory/stats/, inventory/low-stock/,
+    # inventory/out-of-stock/, inventory/<product_id>/) moved to
+    # inventory.urls — mounted at the same "api/" prefix in backend/urls.py,
+    # so the final paths are unchanged.
     # -----------------------------------------------------------------------
-    path("inventory/",
-         InventoryListView.as_view(),
-         name="inventory-list"),
-
-    path("inventory/stats/",
-         InventoryStatsView.as_view(),
-         name="inventory-stats"),
-
-    path("inventory/low-stock/",
-         LowStockInventoryListView.as_view(),
-         name="inventory-low-stock"),
-
-    path("inventory/out-of-stock/",
-         OutOfStockInventoryListView.as_view(),
-         name="inventory-out-of-stock"),
-
-    path("inventory/<int:product_id>/",
-         InventoryRetrieveView.as_view(),
-         name="inventory-detail"),
 
     # -----------------------------------------------------------------------
     # Lost Inventory

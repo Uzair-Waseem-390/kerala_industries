@@ -40,7 +40,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from purchases.models import Inventory, LostInventoryFIFOConsumption, PurchaseItem, PurchaseOrder
+        from purchases.models import LostInventoryFIFOConsumption, PurchaseItem, PurchaseOrder
+        from inventory.models import Inventory
         from billing.models import FIFOLedger
 
         apply_changes = options["apply"]

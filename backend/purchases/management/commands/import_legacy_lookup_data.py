@@ -249,7 +249,7 @@ class Command(BaseCommand):
 
     def _import_product(self, Product, Category, migration_user, dry_run, dry_run_names=None):
         # NOTE: Product.shelf was removed (shelves are now decoupled from
-        # products — see purchases.ShelfStock). This import used to also
+        # products — see inventory.ShelfStock). This import used to also
         # look up the legacy row's shelf and link it via Product.shelf;
         # that product-shelf-linking logic has been removed. The Shelf
         # lookup-table import itself (TABLE_ORDER "shelf" step, _import_simple)

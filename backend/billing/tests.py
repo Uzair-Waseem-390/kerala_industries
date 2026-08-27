@@ -10,7 +10,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from payment_methods.models import PaymentMethod
-from purchases.models import Category, Inventory, Product, PurchaseReturn, Shelf
+from purchases.models import Category, Product, PurchaseReturn, Shelf
+from inventory.models import Inventory
 from purchases.services import (
     confirm_purchase_order, create_purchase_order, create_supplier,
     set_purchase_item_shelf_allocations,

@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 
 class Command(BaseCommand):
     help = (
-        "Backfills purchases.ShelfStock from existing Inventory rows — every "
+        "Backfills inventory.ShelfStock from existing Inventory rows — every "
         "product with Inventory.quantity > 0 gets one ShelfStock row on the "
         "default shelf (get_default_shelf(), the earliest non-deleted shelf), "
         "via apply_shelf_delta (single writer, logs a ShelfStockMovement audit "
@@ -15,8 +15,9 @@ class Command(BaseCommand):
     )
 
     def handle(self, *args, **kwargs):
-        from purchases.models import Inventory, ShelfStockMovement
-        from purchases.services import apply_shelf_delta, get_default_shelf
+        from inventory.models import Inventory, ShelfStockMovement
+        from inventory.services import apply_shelf_delta
+        from purchases.services import get_default_shelf
 
         self.stdout.write("Starting shelf_stock backfill...\n")
 
