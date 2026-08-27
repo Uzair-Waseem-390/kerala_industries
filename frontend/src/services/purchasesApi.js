@@ -23,11 +23,8 @@ export const purchasesApi = {
         create: (data) => api.post('/shelves/', data),
         update: (id, data) => api.patch(`/shelves/${id}/`, data),
         delete: (id) => api.delete(`/shelves/${id}/`),
-        // Products + quantities currently physically on one shelf.
-        getStock: (shelfId, params = {}) => {
-            const query = new URLSearchParams(params).toString();
-            return api.get(`/shelves/${shelfId}/stock/${query ? `?${query}` : ''}`);
-        },
+        // Products + quantities currently on one shelf — moved to
+        // inventoryApi.shelfStock.getByShelf() (inventory app concern).
         // Shelves that currently hold stock (qty > 0) of a given product —
         // the backend search source for consumption allocations (sale,
         // purchase return, lost inventory). search narrows by shelf name.
@@ -186,28 +183,8 @@ export const purchasesApi = {
         cancel: (returnId) => api.delete(`/returns/${returnId}/`),
     },
 
-    // Inventory
-    inventory: {
-        getAll: (params = {}) => {
-            const query = new URLSearchParams(params).toString();
-            return api.get(`/inventory/${query ? `?${query}` : ''}`);
-        },
-        // O(1) whole-inventory stats for the summary cards — served off a
-        // stored counter, not a live count, so it's always global (not
-        // affected by search/category/shelf filters).
-        getStats: () => api.get('/inventory/stats/'),
-        // Breakdown lists behind the Low Stock / Out of Stock cards.
-        // Same search/category/shelf params as getAll, paginated.
-        getLowStock: (params = {}) => {
-            const query = new URLSearchParams(params).toString();
-            return api.get(`/inventory/low-stock/${query ? `?${query}` : ''}`);
-        },
-        getOutOfStock: (params = {}) => {
-            const query = new URLSearchParams(params).toString();
-            return api.get(`/inventory/out-of-stock/${query ? `?${query}` : ''}`);
-        },
-        getByProduct: (productId) => api.get(`/inventory/${productId}/`),
-    },
+    // Inventory — moved to services/inventoryApi.js (inventoryApi.inventory)
+    // when inventory-tracking code was split into its own backend app.
 
     // Lost Inventory
     lostInventory: {

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Package, DollarSign } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { purchasesApi } from '../../services/purchasesApi';
+import { inventoryApi } from '../../services/inventoryApi';
 import { ratesApi } from '../../services/ratesApi';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { extractErrorMessage } from '../../utils/errorMessage';
@@ -35,7 +35,7 @@ const NormalUserDashboard = () => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
         if (categoryFilter) p.category = categoryFilter;
-        return purchasesApi.inventory.getAll(p);
+        return inventoryApi.inventory.getAll(p);
     };
 
     const {
@@ -54,9 +54,9 @@ const NormalUserDashboard = () => {
             // fetch rather than calling purchasesApi.categories (admin-only)
             // — kept separate from the paginated table fetch.
             const [fullInventoryData, ratesData, statsData] = await Promise.all([
-                purchasesApi.inventory.getAll({ page_size: 500 }),
+                inventoryApi.inventory.getAll({ page_size: 500 }),
                 ratesApi.getAll(),
-                purchasesApi.inventory.getStats(),
+                inventoryApi.inventory.getStats(),
             ]);
             const fullInventory = fullInventoryData?.results || fullInventoryData || [];
             setRates(ratesData?.results || ratesData || []);

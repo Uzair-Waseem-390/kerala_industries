@@ -24,12 +24,14 @@ import ReturnsPage from './pages/purchases/ReturnsPage';
 import AllReturnsPage from './pages/purchases/AllReturnsPage';
 import PurchaseReturnDetailPage from './pages/purchases/PurchaseReturnDetailPage';
 import SuppliersOutstandingPage from './pages/purchases/SuppliersOutstandingPage';
-import InventoryPage from './pages/purchases/InventoryPage';
 import LostInventoryPage from './pages/purchases/LostInventoryPage';
 import LostInventoryRecordsPage from './pages/purchases/LostInventoryRecordsPage';
 import LostInventoryDetailPage from './pages/purchases/LostInventoryDetailPage';
 import GlobalPaymentsPage from './pages/purchases/GlobalPaymentsPage';
 import PurchasePaymentDetailPage from './pages/purchases/PurchasePaymentDetailPage';
+
+// Inventory pages
+import InventoryPage from './pages/inventory/InventoryPage';
 
 // Rates pages
 import RatesPage from './pages/rates/RatesPage';

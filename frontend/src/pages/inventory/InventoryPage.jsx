@@ -5,7 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { purchasesApi } from '../../services/purchasesApi';
-import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { inventoryApi } from '../../services/inventoryApi';
+import { useInventoryList } from '../../hooks/useInventory';
 import Table from '../../components/ui/Table';
 import SearchBar from '../../components/ui/SearchBar';
 import Button from '../../components/ui/Button';
@@ -48,18 +49,10 @@ const InventoryPage = () => {
     // inventory list endpoints (all / low-stock / out-of-stock). Shelf is
     // no longer a product-level filter here (a product can now span
     // multiple shelves) — see the Shelves page for per-shelf breakdowns.
-    const fetchInventoryPage = (params) => {
-        const p = { ...params };
-        if (searchTerm) p.search = searchTerm;
-        if (stockView === 'low') return purchasesApi.inventory.getLowStock(p);
-        if (stockView === 'out') return purchasesApi.inventory.getOutOfStock(p);
-        return purchasesApi.inventory.getAll(p);
-    };
-
     const {
         data: inventory, meta, page, setPage, loading,
         filters, setFilters,
-    } = usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, stockView]);
+    } = useInventoryList(stockView, searchTerm);
 
     useEffect(() => {
         loadLookups();
@@ -70,7 +63,7 @@ const InventoryPage = () => {
     // numbers, independent of the active search/filters/breakdown view.
     const loadStats = async () => {
         try {
-            const data = await purchasesApi.inventory.getStats();
+            const data = await inventoryApi.inventory.getStats();
             setStats(data);
         } catch (error) {
             console.error('Failed to load inventory stats:', error);
@@ -96,7 +89,7 @@ const InventoryPage = () => {
             try {
                 const params = { ...filters, page_size: 500 };
                 if (searchTerm) params.search = searchTerm;
-                const res = await purchasesApi.inventory.getAll(params);
+                const res = await inventoryApi.inventory.getAll(params);
                 const items = res?.results || res || [];
                 const sum = items.reduce((s, item) => s + (parseFloat(item.quantity) || 0), 0);
                 if (!cancelled) setTotalStock(sum);
@@ -154,7 +147,7 @@ const InventoryPage = () => {
         setDetailLoading(true);
         setShelfBreakdownLoading(true);
         try {
-            const detail = await purchasesApi.inventory.getByProduct(productId);
+            const detail = await inventoryApi.inventory.getByProduct(productId);
             setProductDetail(detail);
         } catch (error) {
             console.error('Failed to fetch product details:', error);

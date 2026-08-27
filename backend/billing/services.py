@@ -155,20 +155,21 @@ def _get_current_selling_price(product) -> Decimal:
 def _validate_stock(product, requested_qty: int, exclude_invoice_id: int = None) -> None:
     """
     Validates that enough stock is available in inventory.
-    On draft edit, exclude the current invoice's already-reserved qty
-    by checking remaining_quantity on purchase batches directly.
     Raises ValidationError with a clear message if stock is insufficient.
     """
     from rest_framework.exceptions import ValidationError
-    from django.db.models import Sum
+    from inventory.models import Inventory
 
-    # Single aggregate instead of loading every batch row to sum in Python.
-    # Deliberately unlocked — this also runs on draft create/edit, which
-    # must never take stock locks. The locked walk in _run_fifo has its own
-    # ran-out guard for the confirm race.
+    # O(1) read off the Inventory singleton — kept in exact 1:1 sync with
+    # sum(PurchaseItem.remaining_quantity) for this product by sync_inventory,
+    # which fires in the same transaction as every batch consumption/reversal
+    # (purchase confirm, invoice confirm, returns, lost/found). Deliberately
+    # unlocked — this also runs on draft create/edit, which must never take
+    # stock locks. The locked walk in _run_fifo has its own ran-out guard for
+    # the confirm race. No row yet (never purchased) => 0, same as before.
     available = (
-        get_available_purchase_batches(product.id)
-        .aggregate(total=Sum("remaining_quantity"))["total"] or 0
+        Inventory.objects.filter(product_id=product.id)
+        .values_list("quantity", flat=True).first() or 0
     )
 
     if available < requested_qty:

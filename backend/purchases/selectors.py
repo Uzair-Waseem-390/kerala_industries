@@ -274,14 +274,17 @@ def get_all_purchase_orders(
         end   = _next_day_start(_clean(date))
         if start and end:
             qs = qs.filter(created_at__gte=start, created_at__lt=end)
-        else:
-            qs = qs.filter(created_at__date=_clean(date))
+        # Unparseable date => no filter applied for this bound (matches
+        # reports.selectors._apply_datetime_range_filter's behavior) instead
+        # of falling back to the index-defeating `created_at__date` cast.
     if _clean(date_from):
         start = _day_start(_clean(date_from))
-        qs = qs.filter(created_at__gte=start) if start else qs.filter(created_at__date__gte=_clean(date_from))
+        if start:
+            qs = qs.filter(created_at__gte=start)
     if _clean(date_to):
         end = _next_day_start(_clean(date_to))
-        qs = qs.filter(created_at__lt=end) if end else qs.filter(created_at__date__lte=_clean(date_to))
+        if end:
+            qs = qs.filter(created_at__lt=end)
     if _clean(payment_status):
         qs = qs.filter(payment_status=_clean(payment_status))
     if _clean(payment_type):
@@ -456,10 +459,12 @@ def get_all_returns(
         qs = qs.filter(search_q(_clean(order_number), "order__order_number"))
     if _clean(date_from):
         start = _day_start(_clean(date_from))
-        qs = qs.filter(created_at__gte=start) if start else qs.filter(created_at__date__gte=_clean(date_from))
+        if start:
+            qs = qs.filter(created_at__gte=start)
     if _clean(date_to):
         end = _next_day_start(_clean(date_to))
-        qs = qs.filter(created_at__lt=end) if end else qs.filter(created_at__date__lte=_clean(date_to))
+        if end:
+            qs = qs.filter(created_at__lt=end)
 
     return qs.order_by("-created_at")
 
@@ -671,14 +676,17 @@ def get_all_lost_inventory_records(
         end   = _next_day_start(_clean(date))
         if start and end:
             qs = qs.filter(created_at__gte=start, created_at__lt=end)
-        else:
-            qs = qs.filter(created_at__date=_clean(date))
+        # Unparseable date => no filter applied for this bound (matches
+        # reports.selectors._apply_datetime_range_filter's behavior) instead
+        # of falling back to the index-defeating `created_at__date` cast.
     if _clean(date_from):
         start = _day_start(_clean(date_from))
-        qs = qs.filter(created_at__gte=start) if start else qs.filter(created_at__date__gte=_clean(date_from))
+        if start:
+            qs = qs.filter(created_at__gte=start)
     if _clean(date_to):
         end = _next_day_start(_clean(date_to))
-        qs = qs.filter(created_at__lt=end) if end else qs.filter(created_at__date__lte=_clean(date_to))
+        if end:
+            qs = qs.filter(created_at__lt=end)
     if _clean(min_amount):
         qs = qs.filter(total_lost_amount__gte=_clean(min_amount))
     if _clean(max_amount):
@@ -776,9 +784,13 @@ def get_all_outstanding_orders(
     if _clean(payment_status):
         qs = qs.filter(payment_status=_clean(payment_status))
     if _clean(date_from):
-        qs = qs.filter(created_at__date__gte=_clean(date_from))
+        start = _day_start(_clean(date_from))
+        if start:
+            qs = qs.filter(created_at__gte=start)
     if _clean(date_to):
-        qs = qs.filter(created_at__date__lte=_clean(date_to))
+        end = _next_day_start(_clean(date_to))
+        if end:
+            qs = qs.filter(created_at__lt=end)
     if _clean(min_outstanding):
         qs = qs.filter(payable_outstanding__gte=_clean(min_outstanding))
     if _clean(max_outstanding):

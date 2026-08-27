@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { ArrowRightLeft, LayoutGrid, PackageSearch } from 'lucide-react';
 import { purchasesApi } from '../../services/purchasesApi';
-import { usePaginatedList } from '../../hooks/usePaginatedList';
+import { useShelfStock } from '../../hooks/useInventory';
 import Table from '../../components/ui/Table';
 import Button from '../../components/ui/Button';
 import BackLink from '../../components/ui/BackLink';
@@ -43,15 +43,9 @@ const ShelfDetailPage = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    const fetchStockPage = (params) => {
-        const p = { ...params };
-        if (searchTerm) p.search = searchTerm;
-        return purchasesApi.shelves.getStock(id, p);
-    };
-
     const {
         data: stock, meta, page, setPage, loading, error: stockError, refetch,
-    } = usePaginatedList(fetchStockPage, {}, 25, [id, searchTerm]);
+    } = useShelfStock(id, searchTerm);
 
     const handleSearch = (value) => {
         setSearchTerm(value);

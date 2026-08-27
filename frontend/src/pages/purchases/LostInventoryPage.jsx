@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { purchasesApi } from '../../services/purchasesApi';
+import { inventoryApi } from '../../services/inventoryApi';
 import Card from '../../components/ui/Card';
 import SearchBar from '../../components/ui/SearchBar';
 import Input from '../../components/ui/Input';
@@ -41,7 +42,7 @@ const LostInventoryPage = () => {
         }
         let cancelled = false;
         setSearching(true);
-        purchasesApi.inventory.getAll({ search: searchTerm, page_size: 8 })
+        inventoryApi.inventory.getAll({ search: searchTerm, page_size: 8 })
             .then((res) => {
                 if (cancelled) return;
                 const items = res?.results || res || [];

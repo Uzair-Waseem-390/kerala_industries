@@ -22,8 +22,18 @@ class AuditAdminMixin:
 
 
 class SoftDeleteAdminMixin:
+    # Set on a subclass to select_related() the FK columns shown in
+    # list_display — avoids Django admin's default one-query-per-row-per-FK
+    # N+1 on the changelist. Optional/low-priority (superuser-only backoffice
+    # tool, not a production hot path), but free to add where the FK is
+    # already known from list_display.
+    list_select_related = ()
+
     def get_queryset(self, request):
-        return self.model.all_objects.all()
+        qs = self.model.all_objects.all()
+        if self.list_select_related:
+            qs = qs.select_related(*self.list_select_related)
+        return qs
 
 
 @admin.register(Category)
@@ -56,6 +66,7 @@ class ProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     list_filter   = ["is_deleted", "category"]
     search_fields = ["name", "code"]
     readonly_fields = AuditAdminMixin.readonly_fields
+    list_select_related = ["category"]
 
 
 class PurchaseItemInline(admin.TabularInline):
@@ -83,6 +94,7 @@ class PurchaseOrderAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin
         "payable_outstanding", "total_paid", "payment_status", "payment_type",
     )
     inlines = [PurchaseItemInline]
+    list_select_related = ["supplier"]
 
 
 @admin.register(SupplierPayment)
@@ -91,6 +103,7 @@ class SupplierPaymentAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdm
     list_filter   = ["method", "is_deleted"]
     search_fields = ["order__order_number", "order__supplier__name"]
     readonly_fields = AuditAdminMixin.readonly_fields
+    list_select_related = ["order"]
 
 
 class PurchaseReturnItemInline(admin.TabularInline):
@@ -116,6 +129,7 @@ class PurchaseReturnAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmi
         "total_return_wht", "total_return_amount",
     )
     inlines = [PurchaseReturnItemInline]
+    list_select_related = ["order"]
 
 
 class LostInventoryItemInline(admin.TabularInline):
