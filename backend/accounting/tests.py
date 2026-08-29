@@ -13,7 +13,7 @@ from billing.services import (
     set_invoice_item_shelf_allocations, update_invoice_due_date,
 )
 from cash_flow.services import create_expense, create_expense_category
-from purchases.models import Product, Shelf
+from purchases.models import Family, Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_opening_stock_order, create_purchase_order,
     create_supplier, set_purchase_item_shelf_allocations,
@@ -71,7 +71,9 @@ class AccountingTestBase(TestCase):
         return [(self.cash, Decimal(amount))]
 
     def make_stocked_product(self, code="P001", stock=10, unit_cost="50", selling_price="100"):
-        product = Product.objects.create(name="Product 1", code=code)
+        product = Product.objects.create(
+            name="Product 1", code=code, family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
@@ -711,7 +713,9 @@ class BalanceSheetTests(AccountingTestBase):
         supplier2 = create_supplier(name="Old Supplier", code="OLDS", user=self.admin)
         create_supplier_opening_balance(supplier_id=supplier2.id, amount=Decimal("8000"), user=self.admin)
 
-        product = Product.objects.create(name="Legacy Stock", code="LEGACY")
+        product = Product.objects.create(
+            name="Legacy Stock", code="LEGACY", family=Family.objects.get(name="Raw Material"),
+        )
         system_supplier = create_supplier(name="System", code="SYS", user=self.admin)
         create_opening_stock_order(
             supplier=system_supplier,

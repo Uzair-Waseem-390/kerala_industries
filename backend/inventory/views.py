@@ -34,6 +34,7 @@ class InventoryListView(generics.ListAPIView):
 
     Filter params:
         search      : product name or code (partial match)
+        family      : product family id
         shelf       : shelf id
 
     Stats cards moved to GET /purchases/inventory/stats/ (O(1) singleton
@@ -45,7 +46,7 @@ class InventoryListView(generics.ListAPIView):
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_all_inventory(search=p.get("search"))
+        return get_all_inventory(search=p.get("search"), family_id=p.get("family"))
 
 
 class InventoryStatsView(APIView):
@@ -66,28 +67,28 @@ class LowStockInventoryListView(generics.ListAPIView):
     """
     GET /purchases/inventory/low-stock/
     Breakdown behind the "Low Stock" card (0 < quantity <= threshold).
-    Same filters as the main inventory list: search, shelf.
+    Same filters as the main inventory list: search, family, shelf.
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
     serializer_class   = InventoryReadSerializer
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_low_stock_inventory(search=p.get("search"))
+        return get_low_stock_inventory(search=p.get("search"), family_id=p.get("family"))
 
 
 class OutOfStockInventoryListView(generics.ListAPIView):
     """
     GET /purchases/inventory/out-of-stock/
     Breakdown behind the "Out of Stock" card (quantity <= 0).
-    Same filters as the main inventory list: search, shelf.
+    Same filters as the main inventory list: search, family, shelf.
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
     serializer_class   = InventoryReadSerializer
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_out_of_stock_inventory(search=p.get("search"))
+        return get_out_of_stock_inventory(search=p.get("search"), family_id=p.get("family"))
 
 
 class InventoryRetrieveView(generics.RetrieveAPIView):

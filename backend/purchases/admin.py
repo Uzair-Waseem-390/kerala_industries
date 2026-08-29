@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
     LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, PackingSize, Product, PurchaseItem, PurchaseOrder,
     PurchaseReturn, PurchaseReturnItem, SavedPurchaseOrderPDF,
@@ -91,12 +91,21 @@ class SupplierAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     readonly_fields = AuditAdminMixin.readonly_fields
 
 
+@admin.register(Family)
+class FamilyAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display  = ["name", "is_deleted", "created_by", "created_at"]
+    list_filter   = ["is_deleted"]
+    search_fields = ["name"]
+    readonly_fields = AuditAdminMixin.readonly_fields
+
+
 @admin.register(Product)
 class ProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display  = ["name", "code", "is_deleted", "created_by", "created_at"]
-    list_filter   = ["is_deleted"]
+    list_display  = ["name", "code", "family", "is_deleted", "created_by", "created_at"]
+    list_filter   = ["is_deleted", "family"]
     search_fields = ["name", "code"]
     readonly_fields = AuditAdminMixin.readonly_fields
+    list_select_related = ["family"]
 
 
 class PurchaseItemInline(admin.TabularInline):

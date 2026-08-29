@@ -12,7 +12,7 @@ from billing.services import (
     confirm_invoice, create_customer, create_invoice,
     set_invoice_item_shelf_allocations,
 )
-from purchases.models import LostInventoryRecord, Product, Shelf
+from purchases.models import Family, LostInventoryRecord, Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_lost_inventory_record, create_purchase_order,
     create_supplier, set_purchase_item_shelf_allocations,
@@ -42,7 +42,9 @@ class ReportsTestBase(TestCase):
         self.customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
 
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=10):
-        product = Product.objects.create(name=name, code=code)
+        product = Product.objects.create(
+            name=name, code=code, family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
@@ -178,7 +180,9 @@ class SearchTests(ReportsTestBase):
         # showed it correctly.
         from data_entry.services import create_opening_stock
 
-        product = Product.objects.create(name="Max Blue", code="MAX-BLU")
+        product = Product.objects.create(
+            name="Max Blue", code="MAX-BLU", family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         sys_supplier = create_supplier(name="Opening Stock", code="SYS-OPENING", user=self.admin)
 

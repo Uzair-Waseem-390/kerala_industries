@@ -11,7 +11,7 @@ from django.utils.dateparse import parse_date
 from backend.search import search_q
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product, PurchaseItem,
     PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation, Shelf,
@@ -208,19 +208,36 @@ def get_supplier_by_id(pk: int) -> Supplier:
 
 
 # ---------------------------------------------------------------------------
+# Family — read-only, no create/update/delete selectors (fixed/seeded,
+# mirrors Product: no API-driven mutation at all).
+# ---------------------------------------------------------------------------
+
+def get_all_families():
+    return Family.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_family_by_id(pk: int) -> Family:
+    return get_object_or_404(Family, pk=pk, is_deleted=False)
+
+
+# ---------------------------------------------------------------------------
 # Product
 # ---------------------------------------------------------------------------
 
-# ProductReadSerializer only nests the product's own audit users — no
-# category anymore (removed; Product is capped at exactly 4 fixed rows).
-# Product also has no shelf (shelves are decoupled — physical location
-# lives in ShelfStock, per-product-per-shelf, not on Product).
-_PRODUCT_RELATED = ("created_by", "updated_by")
+# ProductReadSerializer nests family (with its own audit users) plus the
+# product's own audit users — everything here is serialized, nothing extra.
+# Product has no shelf (shelves are decoupled — physical location lives in
+# ShelfStock, per-product-per-shelf, not on Product).
+_PRODUCT_RELATED = (
+    "family", "created_by", "updated_by",
+    "family__created_by", "family__updated_by",
+)
 
-def get_all_products(*, search: str = None) -> QuerySet:
+def get_all_products(*, search: str = None, family_id: str = None) -> QuerySet:
     qs = Product.objects.select_related(*_PRODUCT_RELATED).filter(is_deleted=False)
     if search:
         qs = qs.filter(search_q(search, "name", "code"))
+    if _clean(family_id):
+        qs = qs.filter(family_id=_clean(family_id))
     return qs
 
 def get_product_by_id(pk: int) -> Product:

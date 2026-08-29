@@ -24,6 +24,7 @@ from .selectors import (
     get_carton_size_by_id, get_core_length_by_id,
     get_core_thickness_by_id,
     get_confirmed_purchase_orders, get_draft_purchase_orders,
+    get_all_families, get_family_by_id,
     get_fifo_cost_preview,
     get_jumbo_binding_by_id, get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_lost_inventory_record_by_id,
@@ -41,6 +42,7 @@ from .serializers import (
     CartonSizeReadSerializer, CartonSizeWriteSerializer,
     CoreLengthReadSerializer, CoreLengthWriteSerializer,
     CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
+    FamilyReadSerializer,
     JumboBindingReadSerializer, JumboBindingWriteSerializer,
     JumboNameReadSerializer, JumboNameWriteSerializer,
     LostInventoryCreateSerializer,
@@ -107,6 +109,27 @@ class ReadWriteSerializerMixin:
         if self.request.method in ("GET", "HEAD", "OPTIONS"):
             return self.read_serializer_class
         return self.write_serializer_class
+
+
+# ---------------------------------------------------------------------------
+# Family — read-only, no create/update/delete (fixed/seeded, mirrors
+# Product's read-only views below).
+# ---------------------------------------------------------------------------
+
+class FamilyListView(generics.ListAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = FamilyReadSerializer
+
+    def get_queryset(self):
+        return get_all_families()
+
+
+class FamilyRetrieveView(generics.RetrieveAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = FamilyReadSerializer
+
+    def get_object(self):
+        return get_family_by_id(self.kwargs["pk"])
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +510,8 @@ class ProductListView(generics.ListAPIView):
     serializer_class    = ProductReadSerializer
 
     def get_queryset(self):
-        return get_all_products(search=self.request.query_params.get("search"))
+        p = self.request.query_params
+        return get_all_products(search=p.get("search"), family_id=p.get("family"))
 
 
 class ProductRetrieveView(generics.RetrieveAPIView):

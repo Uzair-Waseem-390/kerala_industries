@@ -50,8 +50,10 @@ class CreditScoreTestBase(TestCase):
 
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=20,
                              unit_cost="50", selling_price="100"):
-        from purchases.models import Product
-        product = Product.objects.create(name=name, code=code)
+        from purchases.models import Family, Product
+        product = Product.objects.create(
+            name=name, code=code, family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,

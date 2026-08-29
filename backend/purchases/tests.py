@@ -14,7 +14,7 @@ from rest_framework.exceptions import ValidationError
 from payment_methods.models import PaymentMethod
 
 from .models import (
-    Product,
+    Family, Product,
     PurchaseOrder, PurchaseReturn, Shelf,
     Supplier,
 )
@@ -73,7 +73,9 @@ class PurchasesTestBase(TestCase):
         return [(self.cash, Decimal(amount))]
 
     def make_product(self, code="P001", name="Product 1"):
-        return Product.objects.create(name=name, code=code)
+        return Product.objects.create(
+            name=name, code=code, family=Family.objects.get(name="Raw Material"),
+        )
 
     def make_order(self, product, quantity=10, unit_price="100"):
         return create_purchase_order(

@@ -8,7 +8,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from purchases.models import Product, Shelf
+from purchases.models import Family, Product, Shelf
 from users.models import User
 
 from .models import ProductRate, ProductRateHistory
@@ -37,7 +37,9 @@ class RatesTestBase(TestCase):
         self.shelf = Shelf.objects.create(name="Shelf A")
 
     def make_product(self, code="P001", name="Product 1"):
-        return Product.objects.create(name=name, code=code)
+        return Product.objects.create(
+            name=name, code=code, family=Family.objects.get(name="Raw Material"),
+        )
 
 
 class RateServiceTests(RatesTestBase):

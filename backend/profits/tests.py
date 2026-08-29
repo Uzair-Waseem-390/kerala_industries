@@ -11,7 +11,7 @@ from billing.services import (
     confirm_invoice, create_customer, create_invoice, set_invoice_item_shelf_allocations,
 )
 from cash_flow.models import CashFlow
-from purchases.models import Product, Shelf
+from purchases.models import Family, Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_purchase_order, create_supplier,
     set_purchase_item_shelf_allocations,
@@ -51,7 +51,9 @@ class ProfitsTestBase(TestCase):
         supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
 
-        product = Product.objects.create(name="Product 1", code="P001")
+        product = Product.objects.create(
+            name="Product 1", code="P001", family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=supplier.id,

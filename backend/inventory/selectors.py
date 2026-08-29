@@ -21,22 +21,28 @@ def _clean(value):
 def get_all_inventory(
     *,
     search      : str = None,
+    family_id   : str = None,
 ) -> QuerySet:
     """
     Returns inventory (global per-product total) with optional filters:
-        search : product name or product code (partial, case-insensitive)
+        search    : product name or product code (partial, case-insensitive)
+        family_id : filter by the product's family
     Filtering by shelf no longer applies here — a product's stock can now
     span multiple shelves. Use get_shelf_stock_rows for "what's on shelf X".
     """
-    # InventoryReadSerializer nests the full ProductReadSerializer — without
-    # these, each row costs extra queries (N+1).
+    # InventoryReadSerializer nests the full ProductReadSerializer (which in
+    # turn nests family with its audit users) — without these, each row
+    # costs extra queries (N+1).
     qs = Inventory.objects.select_related(
         "product", "last_updated_by",
         "product__created_by", "product__updated_by",
+        "product__family", "product__family__created_by", "product__family__updated_by",
     ).filter(product__is_deleted=False)
 
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "product__name", "product__code"))
+    if _clean(family_id):
+        qs = qs.filter(product__family_id=_clean(family_id))
 
     return qs.order_by("product__name")
 
@@ -58,20 +64,22 @@ def get_inventory_stats() -> InventoryStatsFlow:
     return InventoryStatsFlow.get_instance()
 
 
-def get_low_stock_inventory(*, search: str = None) -> QuerySet:
+def get_low_stock_inventory(*, search: str = None, family_id: str = None) -> QuerySet:
     """
     Breakdown behind the "Low Stock" card: 0 < quantity <= LOW_STOCK_THRESHOLD.
     Same filters as the main inventory list; quantity is indexed.
     """
-    return get_all_inventory(search=search).filter(quantity__gt=0, quantity__lte=LOW_STOCK_THRESHOLD)
+    return get_all_inventory(search=search, family_id=family_id).filter(
+        quantity__gt=0, quantity__lte=LOW_STOCK_THRESHOLD,
+    )
 
 
-def get_out_of_stock_inventory(*, search: str = None) -> QuerySet:
+def get_out_of_stock_inventory(*, search: str = None, family_id: str = None) -> QuerySet:
     """
     Breakdown behind the "Out of Stock" card: quantity <= 0.
     Same filters as the main inventory list; quantity is indexed.
     """
-    return get_all_inventory(search=search).filter(quantity__lte=0)
+    return get_all_inventory(search=search, family_id=family_id).filter(quantity__lte=0)
 
 
 # ---------------------------------------------------------------------------

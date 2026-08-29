@@ -10,7 +10,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from payment_methods.models import PaymentMethod
-from purchases.models import Product, PurchaseReturn, Shelf
+from purchases.models import Family, Product, PurchaseReturn, Shelf
 from inventory.models import Inventory
 from purchases.services import (
     confirm_purchase_order, create_purchase_order, create_supplier,
@@ -71,7 +71,9 @@ class BillingTestBase(TestCase):
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=10,
                              unit_cost="50", selling_price="100"):
         """Product with a rate and a confirmed PO providing FIFO stock."""
-        product = Product.objects.create(name=name, code=code)
+        product = Product.objects.create(
+            name=name, code=code, family=Family.objects.get(name="Raw Material"),
+        )
         create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,

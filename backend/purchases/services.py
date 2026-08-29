@@ -24,7 +24,7 @@ from inventory.services import (
 )
 from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
-    get_core_length_by_id, get_core_thickness_by_id,
+    get_core_length_by_id, get_core_thickness_by_id, get_family_by_id,
     get_jumbo_binding_by_id, get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_id,
     get_purchase_item_by_id,
@@ -537,8 +537,11 @@ def delete_supplier(*, pk: int, user) -> None:
 # ---------------------------------------------------------------------------
 
 @transaction.atomic
-def create_product(*, name: str, code: str, user) -> Product:
-    product = Product.objects.create(name=name, code=code, created_by=user, updated_by=user)
+def create_product(*, name: str, code: str, family_id: int, user) -> Product:
+    get_family_by_id(family_id)
+    product = Product.objects.create(
+        name=name, code=code, family_id=family_id, created_by=user, updated_by=user,
+    )
     # A brand-new product has no price yet — queue it for the Rates app.
     # Lazy import: purchases stays unaware rates exists at module load time.
     from rates.services import add_to_unpriced_queue
@@ -546,14 +549,17 @@ def create_product(*, name: str, code: str, user) -> Product:
     return product
 
 
-def update_product(*, pk: int, name: str = None, code: str = None, user) -> Product:
+def update_product(*, pk: int, name: str = None, code: str = None, family_id: int = None, user) -> Product:
     product = get_product_by_id(pk)
     if name is not None:
         product.name = name
     if code is not None:
         product.code = code
+    if family_id is not None:
+        get_family_by_id(family_id)
+        product.family_id = family_id
     product.updated_by = user
-    product.save(update_fields=["name", "code", "updated_by", "updated_at"])
+    product.save(update_fields=["name", "code", "family_id", "updated_by", "updated_at"])
     return product
 
 

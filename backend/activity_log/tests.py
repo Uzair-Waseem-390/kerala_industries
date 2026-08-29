@@ -99,9 +99,12 @@ class SignalTrackingTests(TestCase):
         # never in TRACKED_MODELS — while Shelf/Product (used to build it)
         # are tracked, so this confirms the whitelist actually discriminates
         # rather than tracking everything.
-        from purchases.models import Product, Shelf as ShelfModel
+        from purchases.models import Family, Product, Shelf as ShelfModel
         from inventory.models import ShelfStock
-        product = Product.objects.create(name="Untracked Product Test", code="UPT1")
+        product = Product.objects.create(
+            name="Untracked Product Test", code="UPT1",
+            family=Family.objects.get(name="Raw Material"),
+        )
         shelf = ShelfModel.objects.create(name="Untracked Shelf")
         ShelfStock.objects.create(shelf=shelf, product=product, quantity=5)
 

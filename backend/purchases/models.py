@@ -166,12 +166,35 @@ class Supplier(AuditMixin):
 
 
 # ---------------------------------------------------------------------------
+# Family — fixed/seeded, mirrors Product: exactly 3 rows (Raw Material, WIP,
+# Finished Goods — the inventory stage from client_requirements.md), no
+# create/update/delete API. All 4 current Product rows are tagged
+# "Raw Material" today; WIP/Finished Goods get their own separate product +
+# inventory models later (per instructions/multi-inventory-expansion.md —
+# not this field), but the field exists now so cross-stage reporting has
+# somewhere to read "which stage" from without waiting on that build.
+# ---------------------------------------------------------------------------
+
+class Family(AuditMixin):
+    name = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Family"
+        verbose_name_plural = "Families"
+        ordering            = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+# ---------------------------------------------------------------------------
 # Product
 # ---------------------------------------------------------------------------
 
 class Product(AuditMixin):
-    name = models.CharField(max_length=255)
-    code = models.CharField(max_length=100, unique=True)
+    name   = models.CharField(max_length=255)
+    code   = models.CharField(max_length=100, unique=True)
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="products")
 
     class Meta:
         verbose_name        = "Product"

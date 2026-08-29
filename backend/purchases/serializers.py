@@ -3,7 +3,7 @@ from rest_framework import serializers
 from payment_methods.serializers import MethodAllocationInputSerializer
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
@@ -20,6 +20,16 @@ class AuditReadMixin(serializers.Serializer):
     updated_by = serializers.StringRelatedField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
+
+
+# ---------------------------------------------------------------------------
+# Family — read-only, no write serializer (fixed/seeded, mirrors Product).
+# ---------------------------------------------------------------------------
+
+class FamilyReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = Family
+        fields = ["id", "name", "created_by", "updated_by", "created_at", "updated_at"]
 
 
 # ---------------------------------------------------------------------------
@@ -285,9 +295,11 @@ class SupplierPayableSummarySerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class ProductReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    family = FamilyReadSerializer(read_only=True)
+
     class Meta:
         model  = Product
-        fields = ["id", "name", "code",
+        fields = ["id", "name", "code", "family",
                   "created_by", "updated_by", "created_at", "updated_at"]
 
 

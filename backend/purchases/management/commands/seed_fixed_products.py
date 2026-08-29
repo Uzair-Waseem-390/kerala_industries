@@ -1,7 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from purchases.models import Product
+from purchases.models import Family, Product
 from purchases.services import create_product
 
 # The ONLY 4 products this system will ever have. Product create/edit/delete
@@ -34,12 +34,15 @@ class Command(BaseCommand):
         # (AuditMixin's created_by/updated_by are SET_NULL), same convention
         # as data_entry.create_system_supplier.
         user = None
+        raw_material = Family.objects.get(name="Raw Material")
 
         for spec in FIXED_PRODUCTS:
             if Product.all_objects.filter(code=spec["code"]).exists():
                 self.stdout.write(f"'{spec['name']}' ({spec['code']}) already exists — skipped.")
                 continue
-            product = create_product(name=spec["name"], code=spec["code"], user=user)
+            product = create_product(
+                name=spec["name"], code=spec["code"], family_id=raw_material.id, user=user,
+            )
             self.stdout.write(self.style.SUCCESS(
                 f"Created '{product.name}' ({product.code}), id={product.pk}."
             ))

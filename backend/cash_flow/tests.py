@@ -366,7 +366,7 @@ class DraftAdvanceQuirkFixTests(CashFlowTestBase):
     def test_deleting_draft_po_cancels_advance_everywhere(self):
         from data_entry.services import create_opening_cash
         from ledger.models import SupplierLedgerEntry
-        from purchases.models import SupplierPayment
+        from purchases.models import Family, SupplierPayment
         from purchases.services import (
             create_product, create_purchase_order,
             create_shelf, create_supplier, delete_purchase_order,
@@ -375,7 +375,8 @@ class DraftAdvanceQuirkFixTests(CashFlowTestBase):
 
         create_opening_cash(amount=Decimal("50000"), user=self.admin)
         supplier = create_supplier(name="Karachi Metals", code="SUP1", user=self.admin)
-        product = create_product(name="Steel Rod", code="PRD1", user=self.admin)
+        raw_material = Family.objects.get(name="Raw Material")
+        product = create_product(name="Steel Rod", code="PRD1", family_id=raw_material.id, user=self.admin)
         shelf = create_shelf(name="Shelf A", user=self.admin)
         cash_start = self.cash()
 
