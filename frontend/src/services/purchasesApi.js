@@ -131,6 +131,38 @@ export const purchasesApi = {
     purchaseItems: {
         setShelfAllocations: (purchaseItemId, allocations) =>
             api.post(`/purchase-items/${purchaseItemId}/shelf-allocations/`, { allocations }),
+        // Jumbo exact-length correction — confirmed Jumbo items only (items
+        // with expected_length_m set). Recomputes yards from exact_length_m
+        // and applies shelf_allocations to cover the shortfall/surplus vs.
+        // the item's current quantity.
+        correctJumboLength: (purchaseItemId, data) =>
+            api.post(`/purchase-items/${purchaseItemId}/correct-jumbo-length/`, data),
+    },
+
+    // Raw-material purchase intake — 4 family-specific create endpoints.
+    // Each returns the created PurchaseOrder (nested items) in DRAFT status;
+    // shelf allocation + confirm still go through the existing order flow
+    // (purchasesApi.orders / purchasesApi.purchaseItems above).
+    jumboPurchases: {
+        create: (data) => api.post('/jumbo-purchases/', data),
+    },
+    corePurchases: {
+        create: (data) => api.post('/core-purchases/', data),
+    },
+    packingPurchases: {
+        create: (data) => api.post('/packing-purchases/', data),
+    },
+    cartonPurchases: {
+        create: (data) => api.post('/carton-purchases/', data),
+    },
+
+    // Purchase Batches — read-only combined view across all 4 RM families
+    // (Jumbo/Cores/Packing/Cartons), one table per client requirement.
+    purchaseBatches: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/purchase-batches/${query ? `?${query}` : ''}`);
+        },
     },
 
     // Purchase Return Item shelf allocations (consumption plan while pending)

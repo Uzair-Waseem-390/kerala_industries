@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from decimal import ROUND_HALF_UP, Decimal
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .models import (
@@ -657,9 +658,26 @@ def get_or_create_product_variant(
                 **attribute_ids,
             )
     except IntegrityError:
-        # Lost a create race against a concurrent identical purchase —
-        # same variant, reuse it instead of erroring.
-        return Product.objects.get(variant_key=variant_key)
+        # Lost a create race against a concurrent identical purchase — same
+        # variant, reuse it instead of erroring. Looked up via all_objects
+        # (not the soft-delete-filtered default manager) because the row
+        # occupying variant_key in the unique constraint might be a
+        # soft-deleted variant — the pre-check above wouldn't have found it
+        # either, so Product.objects.get() here would 404 with an unhandled
+        # DoesNotExist instead of surfacing what's actually blocking the purchase.
+        from rest_framework.exceptions import ValidationError
+        existing = Product.all_objects.filter(variant_key=variant_key).first()
+        if existing is None:
+            raise
+        if existing.is_deleted:
+            raise ValidationError({
+                "variant": (
+                    f"A previously deleted product variant ('{existing.name}', {existing.code}) "
+                    f"already used this exact attribute combination. Restore it before purchasing "
+                    f"this combination again."
+                )
+            })
+        return existing
 
     from rates.services import add_to_unpriced_queue
     add_to_unpriced_queue(product)
@@ -1072,10 +1090,13 @@ def correct_jumbo_exact_length(
     Recomputes a confirmed Jumbo purchase item's yard quantity from the
     supervisor-measured exact_length_m instead of the printed
     expected_length_m. gross_amount (what was actually paid, based on
-    weight) is held fixed — only unit_price (cost per yard) and the stored
-    quantity move to match. The correction is against the item's CURRENT
-    quantity, not the original expected length, so a second correction on
-    the same batch is relative to the first.
+    weight) is held fixed up to 4dp rounding — unit_price (cost per yard)
+    is re-derived from it, so the stored gross_amount can drift by a
+    sub-cent rounding residual after PurchaseItem.save() recomputes it from
+    the rounded unit_price, same as create_jumbo_purchase's own residual.
+    The correction is against the item's CURRENT quantity, not the original
+    expected length, so a second correction on the same batch is relative
+    to the first.
 
     shelf_allocations names which shelf(s) absorb the change — required in
     both directions, same as every other stock movement in this app: a
@@ -1085,16 +1106,29 @@ def correct_jumbo_exact_length(
     """
     from rest_framework.exceptions import ValidationError
 
-    purchase_item = get_purchase_item_by_id(purchase_item_id)
-    if purchase_item.expected_length_m is None:
+    # Locked FIRST — everything below (old_quantity, delta, the shelf-sum
+    # validation, remaining_quantity, sync_inventory, apply_shelf_allocations)
+    # must be derived from this same locked read. Locking only after
+    # computing delta from an earlier unlocked fetch would let two
+    # concurrent corrections on the same item both compute delta against
+    # the same stale quantity — the second writer's delta would then be
+    # wrong relative to what the first writer already committed, silently
+    # drifting remaining_quantity/Inventory/ShelfStock out of sync with the
+    # item's final quantity.
+    locked_item = get_object_or_404(
+        PurchaseItem.objects.select_for_update().select_related("order", "product"),
+        pk=purchase_item_id, is_deleted=False,
+    )
+
+    if locked_item.expected_length_m is None:
         raise ValidationError({"purchase_item": "This is not a Jumbo purchase item."})
-    if purchase_item.order.status != PurchaseOrder.Status.CONFIRMED:
+    if locked_item.order.status != PurchaseOrder.Status.CONFIRMED:
         raise ValidationError({"status": "Exact-length correction can only be applied to a confirmed purchase."})
     if exact_length_m <= 0:
         raise ValidationError({"exact_length_m": "Exact length must be greater than zero."})
 
     new_quantity = meters_to_yards(exact_length_m)
-    old_quantity = purchase_item.quantity
+    old_quantity = locked_item.quantity
     delta = new_quantity - old_quantity
     if delta == 0:
         raise ValidationError({"exact_length_m": "This measurement produces the same quantity already on record."})
@@ -1111,8 +1145,6 @@ def correct_jumbo_exact_length(
                 f"{'shortfall' if delta < 0 else 'surplus'} ({abs(delta)}), got {total_specified}."
             )
         })
-
-    locked_item = PurchaseItem.objects.select_for_update().get(pk=purchase_item.pk)
 
     if delta < 0:
         shortfall = abs(delta)

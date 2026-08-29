@@ -357,11 +357,13 @@ class PurchaseBatchSerializer(serializers.ModelSerializer):
     Flattens whichever attribute the product actually carries; the other
     families' attribute fields are simply null on a given row.
     """
+    order_id      = serializers.IntegerField(source="order.id", read_only=True)
     order_number  = serializers.CharField(source="order.order_number", read_only=True)
     order_status  = serializers.CharField(source="order.status", read_only=True)
     order_date    = serializers.DateTimeField(source="order.created_at", read_only=True)
     supplier_name = serializers.CharField(source="order.supplier.name", read_only=True)
     supplier_code = serializers.CharField(source="order.supplier.code", read_only=True)
+    product_id    = serializers.IntegerField(source="product.id", read_only=True)
     product_name  = serializers.CharField(source="product.name", read_only=True)
     product_code  = serializers.CharField(source="product.code", read_only=True)
 
