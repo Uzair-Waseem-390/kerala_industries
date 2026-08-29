@@ -12,7 +12,7 @@ from billing.services import (
     create_payment, create_return, set_invoice_item_shelf_allocations,
     set_return_item_shelf_allocations, update_invoice_due_date,
 )
-from purchases.models import Category, Shelf
+from purchases.models import Shelf
 from purchases.services import (
     confirm_purchase_order, create_purchase_order, create_supplier,
     set_purchase_item_shelf_allocations,
@@ -38,7 +38,6 @@ class CreditScoreTestBase(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
-        self.category = Category.objects.create(name="Cat A")
         self.shelf = Shelf.objects.create(name="Shelf A")
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         self.customer = create_customer(
@@ -52,9 +51,7 @@ class CreditScoreTestBase(TestCase):
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=20,
                              unit_cost="50", selling_price="100"):
         from purchases.models import Product
-        product = Product.objects.create(
-            name=name, code=code, category=self.category,
-        )
+        product = Product.objects.create(name=name, code=code)
         create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,

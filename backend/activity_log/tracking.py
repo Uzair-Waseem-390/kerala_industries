@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 # absent — they're accounting detail of an already-tracked parent action,
 # not their own reportable event.
 TRACKED_MODELS = {
-    ("purchases", "category"),
     ("purchases", "shelf"),
     ("purchases", "supplier"),
     ("purchases", "product"),

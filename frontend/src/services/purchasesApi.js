@@ -15,17 +15,6 @@ const createLookupApi = (path) => ({
 
 // Base API functions for purchases app
 export const purchasesApi = {
-    // Categories
-    categories: {
-        getAll: (params = {}) => {
-            const query = new URLSearchParams(params).toString();
-            return api.get(`/categories/${query ? `?${query}` : ''}`);
-        },
-        create: (data) => api.post('/categories/', data),
-        update: (id, data) => api.patch(`/categories/${id}/`, data),
-        delete: (id) => api.delete(`/categories/${id}/`),
-    },
-
     // Shelves
     shelves: {
         getAll: (params = {}) => {

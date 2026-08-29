@@ -15,13 +15,13 @@ from .pdf_service import (
 from .permissions import IsAdminOrSuperuser
 from .selectors import (
     compute_auto_shelf_allocation,
-    get_all_carton_sizes, get_all_categories, get_all_core_lengths,
+    get_all_carton_sizes, get_all_core_lengths,
     get_all_core_thicknesses, get_all_jumbo_bindings, get_all_jumbo_names,
     get_all_lost_inventory_records,
     get_all_packing_sizes,
     get_all_products, get_all_purchase_orders, get_all_returns,
     get_all_shelves, get_all_suppliers, get_candidate_shelves_for_product,
-    get_carton_size_by_id, get_category_by_id, get_core_length_by_id,
+    get_carton_size_by_id, get_core_length_by_id,
     get_core_thickness_by_id,
     get_confirmed_purchase_orders, get_draft_purchase_orders,
     get_fifo_cost_preview,
@@ -39,7 +39,6 @@ from .serializers import (
     AutoAllocateShelvesRequestSerializer, AutoAllocateShelvesResponseSerializer,
     CandidateShelfSerializer,
     CartonSizeReadSerializer, CartonSizeWriteSerializer,
-    CategoryReadSerializer, CategoryWriteSerializer,
     CoreLengthReadSerializer, CoreLengthWriteSerializer,
     CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
     JumboBindingReadSerializer, JumboBindingWriteSerializer,
@@ -66,20 +65,20 @@ from .serializers import (
 )
 from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
-    create_carton_size, create_category, create_core_length,
+    create_carton_size, create_core_length,
     create_core_thickness, create_jumbo_binding, create_jumbo_name,
     create_lost_inventory_record,
     create_packing_size,
     create_purchase_order, create_purchase_return, create_shelf,
     create_supplier, create_supplier_payment, delete_carton_size,
-    delete_category, delete_core_length, delete_core_thickness,
+    delete_core_length, delete_core_thickness,
     delete_jumbo_binding, delete_jumbo_name,
     delete_packing_size,
     delete_purchase_order, delete_shelf, delete_supplier,
     delete_supplier_payment, mark_lost_inventory_found, move_shelf_stock,
     set_purchase_item_shelf_allocations,
     set_purchase_return_item_shelf_allocations, update_carton_size,
-    update_category, update_core_length, update_core_thickness,
+    update_core_length, update_core_thickness,
     update_jumbo_binding, update_jumbo_name,
     update_packing_size, update_purchase_order_items,
     update_purchase_return_items, update_shelf, update_supplier,
@@ -114,47 +113,11 @@ class ReadWriteSerializerMixin:
 # Category
 # ---------------------------------------------------------------------------
 
-class CategoryListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
-    permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = CategoryReadSerializer
-    write_serializer_class = CategoryWriteSerializer
-
-    def get_queryset(self):
-        return get_all_categories()
-
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        obj = create_category(**serializer.validated_data, user=request.user)
-        return Response(CategoryReadSerializer(obj).data, status=status.HTTP_201_CREATED)
-
-
-class CategoryRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
-    permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = CategoryReadSerializer
-    write_serializer_class = CategoryWriteSerializer
-    http_method_names      = ["get", "patch", "delete"]
-
-    def get_object(self):
-        return get_category_by_id(self.kwargs["pk"])
-
-    def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        obj = update_category(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
-        return Response(CategoryReadSerializer(obj).data)
-
-    def destroy(self, request, *args, **kwargs):
-        delete_category(pk=self.kwargs["pk"], user=request.user)
-        return Response({"detail": "Category deleted."}, status=status.HTTP_200_OK)
-
-
 # ---------------------------------------------------------------------------
 # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
 # ---------------------------------------------------------------------------
-# Six identically-shaped list-create + retrieve-update-destroy view pairs —
-# same pattern as Category above, hand-written per lookup to match this
-# app's existing convention.
+# Six identically-shaped list-create + retrieve-update-destroy view pairs,
+# hand-written per lookup to match this app's existing convention.
 
 class JumboNameListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
     permission_classes     = [IsAdminOrSuperuser]

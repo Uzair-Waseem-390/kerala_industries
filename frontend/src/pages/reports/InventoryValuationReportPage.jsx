@@ -25,7 +25,6 @@ const formatCurrency = (value) => {
 const columns = [
     { key: 'product_name', label: 'Product' },
     { key: 'product_code', label: 'Code' },
-    { key: 'category_name', label: 'Category' },
     { key: 'quantity_on_hand', label: 'Quantity On Hand' },
     { key: 'avg_unit_cost', label: 'Avg Unit Cost (PKR)', render: formatCurrency },
     { key: 'total_value', label: 'Total Value (PKR)', render: formatCurrency },

@@ -5,7 +5,7 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import (
-    CartonSize, Category, CoreLength, CoreThickness, DocumentCounter,
+    CartonSize, CoreLength, CoreThickness, DocumentCounter,
     JumboBinding, JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, LostInventoryRecovery, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
@@ -24,7 +24,7 @@ from inventory.services import (
 )
 from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
-    get_category_by_id, get_core_length_by_id, get_core_thickness_by_id,
+    get_core_length_by_id, get_core_thickness_by_id,
     get_jumbo_binding_by_id, get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_id,
     get_purchase_item_by_id,
@@ -56,8 +56,8 @@ def _unique_constraint_guard(message: str):
     into the SAME clean ValidationError the pre-check would have raised,
     instead of an unhandled 500 — per architecture.md's
     "check-then-act uniqueness violation" rule. Used by every simple
-    id+value/id+name lookup's create_*/update_* (Category, Shelf, and the
-    six Jumbo/Core/Packing/Carton attribute lookups).
+    id+value/id+name lookup's create_*/update_* (Shelf and the six
+    Jumbo/Core/Packing/Carton attribute lookups).
     """
     from rest_framework.exceptions import ValidationError
     try:
@@ -350,37 +350,12 @@ def move_shelf_stock(*, from_shelf_id: int, to_shelf_id: int, product_id: int, q
 
 
 # ---------------------------------------------------------------------------
-# Category services
-# ---------------------------------------------------------------------------
-
-def create_category(*, name: str, description: str = "", user) -> Category:
-    with _unique_constraint_guard("A category with this name already exists."):
-        return Category.objects.create(name=name, description=description, created_by=user, updated_by=user)
-
-
-def update_category(*, pk: int, name: str = None, description: str = None, user) -> Category:
-    category = get_category_by_id(pk)
-    if name is not None:
-        category.name = name
-    if description is not None:
-        category.description = description
-    category.updated_by = user
-    with _unique_constraint_guard("A category with this name already exists."):
-        category.save(update_fields=["name", "description", "updated_by", "updated_at"])
-    return category
-
-
-def delete_category(*, pk: int, user) -> None:
-    _soft_delete(get_category_by_id(pk), user)
-
-
-# ---------------------------------------------------------------------------
 # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons) — services
 # ---------------------------------------------------------------------------
-# Six identically-shaped lookups (create/update/delete), same pattern as
-# Category above. Written out explicitly per lookup (not a generic factory)
-# to match this app's existing convention (Category/Shelf are equally
-# hand-written despite being near-identical shapes).
+# Six identically-shaped lookups (create/update/delete). Written out
+# explicitly per lookup (not a generic factory) to match this app's
+# existing convention (Shelf is equally hand-written despite being a
+# near-identical shape).
 
 def create_jumbo_name(*, value: str, user) -> JumboName:
     with _unique_constraint_guard("A Jumbo Name with this value already exists."):
@@ -562,13 +537,8 @@ def delete_supplier(*, pk: int, user) -> None:
 # ---------------------------------------------------------------------------
 
 @transaction.atomic
-def create_product(*, name: str, code: str, category_id: int = None, user) -> Product:
-    if category_id is not None:
-        get_category_by_id(category_id)
-    product = Product.objects.create(
-        name=name, code=code, category_id=category_id,
-        created_by=user, updated_by=user,
-    )
+def create_product(*, name: str, code: str, user) -> Product:
+    product = Product.objects.create(name=name, code=code, created_by=user, updated_by=user)
     # A brand-new product has no price yet — queue it for the Rates app.
     # Lazy import: purchases stays unaware rates exists at module load time.
     from rates.services import add_to_unpriced_queue
@@ -576,20 +546,14 @@ def create_product(*, name: str, code: str, category_id: int = None, user) -> Pr
     return product
 
 
-def update_product(
-    *, pk: int, name: str = None, code: str = None,
-    category_id: int = None, user,
-) -> Product:
+def update_product(*, pk: int, name: str = None, code: str = None, user) -> Product:
     product = get_product_by_id(pk)
     if name is not None:
         product.name = name
     if code is not None:
         product.code = code
-    if category_id is not None:
-        get_category_by_id(category_id)
-        product.category_id = category_id
     product.updated_by = user
-    product.save(update_fields=["name", "code", "category_id", "updated_by", "updated_at"])
+    product.save(update_fields=["name", "code", "updated_by", "updated_at"])
     return product
 
 

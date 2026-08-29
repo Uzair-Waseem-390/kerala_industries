@@ -177,7 +177,6 @@ class InventoryValuationReportItemSerializer(serializers.Serializer):
     product_id       = serializers.IntegerField()
     product_name     = serializers.CharField()
     product_code     = serializers.CharField()
-    category_name    = serializers.CharField()
     quantity_on_hand = serializers.IntegerField()
     avg_unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4)
     total_value      = serializers.DecimalField(max_digits=20, decimal_places=4)

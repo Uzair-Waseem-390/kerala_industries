@@ -1,13 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useUnpricedProducts } from '../../hooks/useRates';
 import { ratesApi } from '../../services/ratesApi';
-import { purchasesApi } from '../../services/purchasesApi';
 import RateTable from '../../components/rates/RateTable';
 import RateFormModal from '../../components/rates/RateFormModal';
 import SearchBar from '../../components/ui/SearchBar';
-import Select from '../../components/ui/Select';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Pagination from '../../components/ui/Pagination';
 import BackLink from '../../components/ui/BackLink';
@@ -25,31 +23,12 @@ const UnpricedProductsPage = () => {
     } = useUnpricedProducts();
     const data = products.map(product => ({ product, rate: null }));
 
-    // Small, bounded list (same pattern as Products/Suppliers pages) — just
-    // for the category filter dropdown, fetched once.
-    const [categories, setCategories] = useState([]);
-    useEffect(() => {
-        let cancelled = false;
-        purchasesApi.categories.getAll({ page_size: 500 })
-            .then(res => {
-                if (cancelled) return;
-                const cats = res?.results || res || [];
-                setCategories(cats.filter(c => !c.is_deleted));
-            })
-            .catch(() => { if (!cancelled) setCategories([]); });
-        return () => { cancelled = true; };
-    }, []);
-
     const [showModal, setShowModal] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [formLoading, setFormLoading] = useState(false);
 
     const handleSearch = (value) => {
         setFilters({ ...filters, search: value });
-    };
-
-    const handleFilterChange = (key, value) => {
-        setFilters({ ...filters, [key]: value });
     };
 
     const handleResetFilters = () => {
@@ -111,15 +90,6 @@ const UnpricedProductsPage = () => {
                     onSearch={handleSearch}
                     placeholder="Search by product name or code..."
                     className="flex-1"
-                />
-                <Select
-                    value={filters.category || ''}
-                    onChange={(e) => handleFilterChange('category', e.target.value)}
-                    options={[
-                        { value: '', label: 'All Categories' },
-                        ...categories.map(c => ({ value: c.id, label: c.name })),
-                    ]}
-                    className="w-48"
                 />
                 {(Object.keys(filters).length > 0) && (
                     <button

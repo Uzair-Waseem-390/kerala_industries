@@ -13,7 +13,7 @@ from billing.services import (
     set_invoice_item_shelf_allocations, update_invoice_due_date,
 )
 from cash_flow.services import create_expense, create_expense_category
-from purchases.models import Category, Product, Shelf
+from purchases.models import Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_opening_stock_order, create_purchase_order,
     create_supplier, set_purchase_item_shelf_allocations,
@@ -60,7 +60,6 @@ class AccountingTestBase(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
-        self.category = Category.objects.create(name="Cat A")
         self.shelf = Shelf.objects.create(name="Shelf A")
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         self.customer = create_customer(
@@ -72,7 +71,7 @@ class AccountingTestBase(TestCase):
         return [(self.cash, Decimal(amount))]
 
     def make_stocked_product(self, code="P001", stock=10, unit_cost="50", selling_price="100"):
-        product = Product.objects.create(name="Product 1", code=code, category=self.category)
+        product = Product.objects.create(name="Product 1", code=code)
         create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
@@ -712,7 +711,7 @@ class BalanceSheetTests(AccountingTestBase):
         supplier2 = create_supplier(name="Old Supplier", code="OLDS", user=self.admin)
         create_supplier_opening_balance(supplier_id=supplier2.id, amount=Decimal("8000"), user=self.admin)
 
-        product = Product.objects.create(name="Legacy Stock", code="LEGACY", category=self.category)
+        product = Product.objects.create(name="Legacy Stock", code="LEGACY")
         system_supplier = create_supplier(name="System", code="SYS", user=self.admin)
         create_opening_stock_order(
             supplier=system_supplier,

@@ -21,7 +21,6 @@ from django.db import migrations
 # _unique_constraint_guard's IntegrityError catch closes the race for
 # real instead of only for exact-case collisions.
 _INDEXED_COLUMNS = [
-    ("purchases_category", "name"),
     ("purchases_shelf", "name"),
     ("purchases_supplier", "code"),
     ("purchases_jumboname", "value"),

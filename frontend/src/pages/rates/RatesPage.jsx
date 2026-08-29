@@ -7,7 +7,6 @@ import { ratesApi } from '../../services/ratesApi';
 import RateTable from '../../components/rates/RateTable';
 import RateFormModal from '../../components/rates/RateFormModal';
 import SearchBar from '../../components/ui/SearchBar';
-import Select from '../../components/ui/Select';
 import Button from '../../components/ui/Button';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Pagination from '../../components/ui/Pagination';
@@ -21,7 +20,7 @@ const RatesPage = () => {
 
     const {
         data, meta, page, setPage, loading,
-        filters, setFilters, categories, create, update,
+        filters, setFilters, create, update,
     } = useRates();
 
     // Just the count for the button label — page_size:1 keeps this a cheap,
@@ -43,10 +42,6 @@ const RatesPage = () => {
 
     const handleSearch = (value) => {
         setFilters({ ...filters, search: value });
-    };
-
-    const handleFilterChange = (key, value) => {
-        setFilters({ ...filters, [key]: value });
     };
 
     const handleResetFilters = () => {
@@ -124,15 +119,6 @@ const RatesPage = () => {
                     onSearch={handleSearch}
                     placeholder="Search by product name or code..."
                     className="flex-1"
-                />
-                <Select
-                    value={filters.category || ''}
-                    onChange={(e) => handleFilterChange('category', e.target.value)}
-                    options={[
-                        { value: '', label: 'All Categories' },
-                        ...categories.map(c => ({ value: c.id, label: c.name })),
-                    ]}
-                    className="w-48"
                 />
                 {(Object.keys(filters).length > 0) && (
                     <button

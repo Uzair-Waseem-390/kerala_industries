@@ -81,12 +81,6 @@ const PriceHistoryPage = () => {
                             <p className="font-medium text-neutral-900">{product.code}</p>
                         </div>
                         <div>
-                            <p className="text-sm text-neutral-500">Category</p>
-                            <p className="font-medium text-neutral-900">
-                                {product.category?.name || 'N/A'}
-                            </p>
-                        </div>
-                        <div>
                             <p className="text-sm text-neutral-500">Current Price</p>
                             <p className="font-medium text-primary-600 text-lg">
                                 {currentPrice !== null ? `Rs. ${currentPrice.toFixed(2)}` : 'No price set'}

@@ -11,7 +11,7 @@ from billing.services import (
     confirm_invoice, create_customer, create_invoice, set_invoice_item_shelf_allocations,
 )
 from cash_flow.models import CashFlow
-from purchases.models import Category, Product, Shelf
+from purchases.models import Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_purchase_order, create_supplier,
     set_purchase_item_shelf_allocations,
@@ -47,12 +47,11 @@ class ProfitsTestBase(TestCase):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
 
-        category = Category.objects.create(name="Cat A")
         shelf = Shelf.objects.create(name="Shelf A")
         supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
 
-        product = Product.objects.create(name="Product 1", code="P001", category=category)
+        product = Product.objects.create(name="Product 1", code="P001")
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=supplier.id,

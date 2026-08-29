@@ -39,7 +39,6 @@ export const navGroups = [
         icon: ShoppingCart,
         adminOnly: true,
         items: [
-            { name: 'Categories', path: '/purchases/categories', icon: FolderOpen },
             { name: 'Shelves', path: '/purchases/shelves', icon: Library },
             { name: 'Suppliers', path: '/purchases/suppliers', icon: Building2 },
             { name: 'Products', path: '/purchases/products', icon: Package },

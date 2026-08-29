@@ -9,7 +9,6 @@ import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import Card from '../ui/Card';
 import SearchBar from '../ui/SearchBar';
-import Select from '../ui/Select';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Badge from '../ui/Badge';
 import Table from '../ui/Table';
@@ -21,8 +20,6 @@ const NormalUserDashboard = () => {
     const [rates, setRates] = useState([]);
     const [ratesLoading, setRatesLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [categoryFilter, setCategoryFilter] = useState('');
-    const [categories, setCategories] = useState([]);
     const [invStats, setInvStats] = useState(null);
     const [activeTab, setActiveTab] = useState('inventory');
 
@@ -34,13 +31,12 @@ const NormalUserDashboard = () => {
     const fetchInventoryPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
-        if (categoryFilter) p.category = categoryFilter;
         return inventoryApi.inventory.getAll(p);
     };
 
     const {
         data: inventory, meta, page, setPage, loading: inventoryLoading,
-    } = usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, categoryFilter]);
+    } = usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm]);
 
     useEffect(() => {
         loadLookupsAndRates();
@@ -49,25 +45,12 @@ const NormalUserDashboard = () => {
     const loadLookupsAndRates = async () => {
         setRatesLoading(true);
         try {
-            // Normal users have no Purchases app access, so category
-            // filter options are derived from a full (page_size:500) inventory
-            // fetch rather than calling purchasesApi.categories (admin-only)
-            // — kept separate from the paginated table fetch.
-            const [fullInventoryData, ratesData, statsData] = await Promise.all([
-                inventoryApi.inventory.getAll({ page_size: 500 }),
+            const [ratesData, statsData] = await Promise.all([
                 ratesApi.getAll(),
                 inventoryApi.inventory.getStats(),
             ]);
-            const fullInventory = fullInventoryData?.results || fullInventoryData || [];
             setRates(ratesData?.results || ratesData || []);
             setInvStats(statsData);
-
-            const categoryMap = new Map();
-            fullInventory.forEach(item => {
-                const category = item.product?.category;
-                if (category?.id) categoryMap.set(category.id, category);
-            });
-            setCategories([...categoryMap.values()]);
         } catch (error) {
             console.error('Failed to load data:', error);
             toast.error(extractErrorMessage(error, 'Failed to load dashboard data'));
@@ -85,7 +68,6 @@ const NormalUserDashboard = () => {
     const inventoryColumns = [
         { key: 'product', label: 'Code', render: (value) => value?.code || 'N/A' },
         { key: 'product', label: 'Name', render: (value) => value?.name || 'N/A' },
-        { key: 'product', label: 'Category', render: (value) => value?.category?.name || 'N/A' },
         {
             key: 'quantity',
             label: 'Quantity',
@@ -103,7 +85,6 @@ const NormalUserDashboard = () => {
     const ratesColumns = [
         { key: 'product', label: 'Code', render: (value) => value?.code || 'N/A' },
         { key: 'product', label: 'Name', render: (value) => value?.name || 'N/A' },
-        { key: 'product', label: 'Category', render: (value) => value?.category?.name || 'N/A' },
         {
             key: 'rate',
             label: 'Selling Price',
@@ -188,15 +169,6 @@ const NormalUserDashboard = () => {
                             onSearch={(value) => { setSearchTerm(value); setPage(1); }}
                             placeholder="Search by name or code..."
                             className="flex-1 min-w-[200px]"
-                        />
-                        <Select
-                            value={categoryFilter}
-                            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
-                            options={[
-                                { value: '', label: 'All Categories' },
-                                ...categories.map(c => ({ value: c.id, label: c.name })),
-                            ]}
-                            className="w-48"
                         />
                     </div>
                     {inventoryLoading ? (

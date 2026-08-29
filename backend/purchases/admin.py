@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    CartonSize, Category, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
     LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, PackingSize, Product, PurchaseItem, PurchaseOrder,
     PurchaseReturn, PurchaseReturnItem, SavedPurchaseOrderPDF,
@@ -35,14 +35,6 @@ class SoftDeleteAdminMixin:
         if self.list_select_related:
             qs = qs.select_related(*self.list_select_related)
         return qs
-
-
-@admin.register(Category)
-class CategoryAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display  = ["name", "is_deleted", "created_by", "created_at"]
-    list_filter   = ["is_deleted"]
-    search_fields = ["name"]
-    readonly_fields = AuditAdminMixin.readonly_fields
 
 
 class _LookupAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
@@ -101,11 +93,10 @@ class SupplierAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display  = ["name", "code", "category", "is_deleted", "created_by", "created_at"]
-    list_filter   = ["is_deleted", "category"]
+    list_display  = ["name", "code", "is_deleted", "created_by", "created_at"]
+    list_filter   = ["is_deleted"]
     search_fields = ["name", "code"]
     readonly_fields = AuditAdminMixin.readonly_fields
-    list_select_related = ["category"]
 
 
 class PurchaseItemInline(admin.TabularInline):

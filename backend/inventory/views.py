@@ -34,7 +34,6 @@ class InventoryListView(generics.ListAPIView):
 
     Filter params:
         search      : product name or code (partial match)
-        category    : category id
         shelf       : shelf id
 
     Stats cards moved to GET /purchases/inventory/stats/ (O(1) singleton
@@ -46,10 +45,7 @@ class InventoryListView(generics.ListAPIView):
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_all_inventory(
-            search      = p.get("search"),
-            category_id = p.get("category"),
-        )
+        return get_all_inventory(search=p.get("search"))
 
 
 class InventoryStatsView(APIView):
@@ -70,34 +66,28 @@ class LowStockInventoryListView(generics.ListAPIView):
     """
     GET /purchases/inventory/low-stock/
     Breakdown behind the "Low Stock" card (0 < quantity <= threshold).
-    Same filters as the main inventory list: search, category, shelf.
+    Same filters as the main inventory list: search, shelf.
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
     serializer_class   = InventoryReadSerializer
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_low_stock_inventory(
-            search      = p.get("search"),
-            category_id = p.get("category"),
-        )
+        return get_low_stock_inventory(search=p.get("search"))
 
 
 class OutOfStockInventoryListView(generics.ListAPIView):
     """
     GET /purchases/inventory/out-of-stock/
     Breakdown behind the "Out of Stock" card (quantity <= 0).
-    Same filters as the main inventory list: search, category, shelf.
+    Same filters as the main inventory list: search, shelf.
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
     serializer_class   = InventoryReadSerializer
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_out_of_stock_inventory(
-            search      = p.get("search"),
-            category_id = p.get("category"),
-        )
+        return get_out_of_stock_inventory(search=p.get("search"))
 
 
 class InventoryRetrieveView(generics.RetrieveAPIView):

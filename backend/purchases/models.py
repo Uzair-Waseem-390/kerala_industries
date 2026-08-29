@@ -49,25 +49,11 @@ class AuditMixin(models.Model):
 
 
 # ---------------------------------------------------------------------------
-# Lookup tables
-# ---------------------------------------------------------------------------
-
-class Category(AuditMixin):
-    name        = models.CharField(max_length=255, unique=True)
-    description = models.TextField(blank=True, default="")
-
-    class Meta:
-        verbose_name        = "Category"
-        verbose_name_plural = "Categories"
-        ordering            = ["name"]
-
-    def __str__(self):
-        return self.name
-
-
-# ---------------------------------------------------------------------------
 # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
 # ---------------------------------------------------------------------------
+# Category (a flat product-catalog classification) was removed — Product is
+# capped at exactly 4 fixed rows now, so a general-purpose category no
+# longer serves a purpose; these 6 lookups are its replacement.
 # Standalone lookup tables — NOT a FK on Product. Product is capped at
 # exactly 4 fixed rows (seeded by seed_fixed_products, never created via
 # API); these are simple, user-manageable value lists that future
@@ -184,12 +170,8 @@ class Supplier(AuditMixin):
 # ---------------------------------------------------------------------------
 
 class Product(AuditMixin):
-    name     = models.CharField(max_length=255)
-    code     = models.CharField(max_length=100, unique=True)
-    category = models.ForeignKey(
-        Category, on_delete=models.PROTECT, related_name="products",
-        null=True, blank=True,
-    )
+    name = models.CharField(max_length=255)
+    code = models.CharField(max_length=100, unique=True)
 
     class Meta:
         verbose_name        = "Product"

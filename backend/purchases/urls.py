@@ -2,8 +2,6 @@ from django.urls import path
 
 from .views import (
     # Lookup tables
-    CategoryListCreateView,
-    CategoryRetrieveUpdateDestroyView,
     ShelfListCreateView,
     ShelfRetrieveUpdateDestroyView,
     CandidateShelvesForProductView,
@@ -77,8 +75,6 @@ urlpatterns = [
     # -----------------------------------------------------------------------
     # Lookup tables
     # -----------------------------------------------------------------------
-    path("categories/",          CategoryListCreateView.as_view(),             name="category-list-create"),
-    path("categories/<int:pk>/", CategoryRetrieveUpdateDestroyView.as_view(), name="category-detail"),
 
     # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
     path("jumbo-names/",             JumboNameListCreateView.as_view(),             name="jumbo-name-list-create"),

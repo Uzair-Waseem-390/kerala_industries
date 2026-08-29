@@ -19,14 +19,12 @@ def _clean(value):
     return s if s else None
 
 
-# ProductRateReadSerializer nests the full ProductReadSerializer (which in
-# turn nests category with its audit users) — everything here is
-# serialized; without the user relations each row costs extra queries (N+1).
-# Product no longer has a shelf (shelves are decoupled from Product).
+# ProductRateReadSerializer nests the full ProductReadSerializer — everything
+# here is serialized; without the user relations each row costs extra
+# queries (N+1). Product no longer has a shelf (shelves are decoupled from
+# Product) or a category (removed — Product is capped at 4 fixed rows).
 _RATE_RELATED = (
-    "product", "product__category",
-    "product__created_by", "product__updated_by",
-    "product__category__created_by", "product__category__updated_by",
+    "product", "product__created_by", "product__updated_by",
     "updated_by", "created_by",
 )
 
@@ -34,7 +32,6 @@ _RATE_RELATED = (
 def get_all_rates(
     *,
     search      : str = None,
-    category_id : str = None,
     min_price   : str = None,
     max_price   : str = None,
 ) -> QuerySet:
@@ -42,7 +39,7 @@ def get_all_rates(
     Returns current active rates with optional filtering and searching.
 
     Search  : product name or product code (case-insensitive, partial match)
-    Filters : category id, min/max selling price
+    Filters : min/max selling price
     """
     from backend.search import search_q
 
@@ -52,8 +49,6 @@ def get_all_rates(
 
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "product__name", "product__code"))
-    if _clean(category_id):
-        qs = qs.filter(product__category_id=_clean(category_id))
     if _clean(min_price):
         qs = qs.filter(selling_price__gte=_clean(min_price))
     if _clean(max_price):
@@ -62,7 +57,7 @@ def get_all_rates(
     return qs
 
 
-def get_unpriced_products(*, search: str = None, category_id: str = None) -> QuerySet:
+def get_unpriced_products(*, search: str = None) -> QuerySet:
     """
     Products with no ProductRate yet — the "needs a price set" queue.
     Joins through UnpricedProduct (a materialized, explicitly-synced set —
@@ -75,16 +70,13 @@ def get_unpriced_products(*, search: str = None, category_id: str = None) -> Que
     from purchases.models import Product
 
     # Mirrors purchases.selectors._PRODUCT_RELATED — ProductReadSerializer
-    # nests category (with its own audit users) plus the product's own audit
-    # users; without these every row costs N+1 queries.
+    # nests only the product's own audit users; without these every row
+    # costs N+1 queries.
     qs = Product.objects.select_related(
-        "category", "created_by", "updated_by",
-        "category__created_by", "category__updated_by",
+        "created_by", "updated_by",
     ).filter(is_deleted=False, unpriced_entry__isnull=False)
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "name", "code"))
-    if _clean(category_id):
-        qs = qs.filter(category_id=_clean(category_id))
     return qs
 
 

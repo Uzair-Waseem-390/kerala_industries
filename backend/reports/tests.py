@@ -12,7 +12,7 @@ from billing.services import (
     confirm_invoice, create_customer, create_invoice,
     set_invoice_item_shelf_allocations,
 )
-from purchases.models import Category, LostInventoryRecord, Product, Shelf
+from purchases.models import LostInventoryRecord, Product, Shelf
 from purchases.services import (
     confirm_purchase_order, create_lost_inventory_record, create_purchase_order,
     create_supplier, set_purchase_item_shelf_allocations,
@@ -37,15 +37,12 @@ class ReportsTestBase(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
-        self.category = Category.objects.create(name="Cat A")
         self.shelf = Shelf.objects.create(name="Shelf A")
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         self.customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
 
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=10):
-        product = Product.objects.create(
-            name=name, code=code, category=self.category,
-        )
+        product = Product.objects.create(name=name, code=code)
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
@@ -181,7 +178,7 @@ class SearchTests(ReportsTestBase):
         # showed it correctly.
         from data_entry.services import create_opening_stock
 
-        product = Product.objects.create(name="Max Blue", code="MAX-BLU", category=self.category)
+        product = Product.objects.create(name="Max Blue", code="MAX-BLU")
         create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         sys_supplier = create_supplier(name="Opening Stock", code="SYS-OPENING", user=self.admin)
 

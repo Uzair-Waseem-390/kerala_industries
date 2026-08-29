@@ -31,7 +31,6 @@ class ProductRateListCreateView(generics.ListCreateAPIView):
 
     Query params for GET:
         search      : product name or code (partial, case-insensitive)
-        category    : category id
         min_price   : minimum selling price
         max_price   : maximum selling price
     """
@@ -47,7 +46,6 @@ class ProductRateListCreateView(generics.ListCreateAPIView):
         params = self.request.query_params
         return get_all_rates(
             search=params.get("search"),
-            category_id=params.get("category"),
             min_price=params.get("min_price"),
             max_price=params.get("max_price"),
         )
@@ -113,7 +111,6 @@ class UnpricedProductListView(generics.ListAPIView):
 
     Query params:
         search   : product name or code (partial, case-insensitive)
-        category : category id
     """
 
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
@@ -121,7 +118,7 @@ class UnpricedProductListView(generics.ListAPIView):
 
     def get_queryset(self):
         p = self.request.query_params
-        return get_unpriced_products(search=p.get("search"), category_id=p.get("category"))
+        return get_unpriced_products(search=p.get("search"))
 
 
 # ---------------------------------------------------------------------------

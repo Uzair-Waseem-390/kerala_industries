@@ -1,90 +1,31 @@
-import { useState, useEffect } from 'react';
-import { SlidersHorizontal, X, PackageSearch } from 'lucide-react';
+import { PackageSearch } from 'lucide-react';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { purchasesApi } from '../../services/purchasesApi';
 import Table from '../../components/ui/Table';
-import Button from '../../components/ui/Button';
 import SearchBar from '../../components/ui/SearchBar';
-import FilterBar from '../../components/ui/FilterBar';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Badge from '../../components/ui/Badge';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
-import { useToast } from '../../context/ToastContext';
-import { extractErrorMessage } from '../../utils/errorMessage';
 
 // Product is now a frozen catalog of 4 fixed rows (Jumbo, Cores, Packing,
 // Cartons), seeded by a management command — create/edit/delete were
 // deliberately removed from both the backend and this page. This is a
 // read-only list + filter view; nothing here mutates a Product.
 const ProductsPage = () => {
-    const { toast } = useToast();
-
     const { data, meta, page, setPage, loading, error, filters, setFilters, refetch } = usePaginatedList(
         (params) => purchasesApi.products.getAll(params),
-        { search: '', category: '' }
+        { search: '' }
     );
 
-    const [categories, setCategories] = useState([]);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [categoryFilter, setCategoryFilter] = useState('');
-    const [showFilters, setShowFilters] = useState(false);
-    const [activeFilters, setActiveFilters] = useState({});
-
-    useEffect(() => {
-        loadLookups();
-    }, []);
-
-    const loadLookups = async () => {
-        try {
-            // page_size override — dropdown needs every category, not
-            // just the first paginated page.
-            const catsRes = await purchasesApi.categories.getAll({ page_size: 500 });
-            const cats = catsRes.results || catsRes;
-            setCategories(cats.filter(c => !c.is_deleted));
-        } catch (error) {
-            console.error('Failed to load lookups:', error);
-            toast.error(extractErrorMessage(error, 'Failed to load categories'));
-        }
-    };
-
-    // Search now goes to the backend (see handleSearch) — only category
-    // is still narrowed client-side, over whatever page the backend returned.
-    const filteredData = data.filter(item => {
-        let matches = true;
-        const catId = activeFilters.category || categoryFilter;
-        if (catId) {
-            matches = matches && item.category?.id === parseInt(catId);
-        }
-        return matches;
-    });
-
     const handleSearch = (value) => {
-        setSearchTerm(value);
         setFilters({ ...filters, search: value });
-    };
-
-    const handleApplyFilters = (filterValues) => {
-        setActiveFilters(filterValues);
-        setCategoryFilter(filterValues.category || '');
-    };
-
-    const handleResetFilters = () => {
-        setActiveFilters({});
-        setCategoryFilter('');
-        setSearchTerm('');
-        setFilters({ ...filters, search: '' });
     };
 
     const columns = [
         { key: 'code', label: 'Code', width: '120px' },
         { key: 'name', label: 'Name' },
-        {
-            key: 'category',
-            label: 'Category',
-            render: (value) => value?.name || 'N/A'
-        },
         {
             key: 'is_deleted',
             label: 'Status',
@@ -117,59 +58,22 @@ const ProductsPage = () => {
                 <InlineAlert variant="error" message={error} onRetry={refetch} />
             )}
 
-            <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row gap-3">
-                    <SearchBar
-                        onSearch={handleSearch}
-                        placeholder="Search products..."
-                        className="flex-1"
-                    />
-                    <div className="flex gap-3">
-                        <Button
-                            variant="secondary"
-                            onClick={() => setShowFilters(!showFilters)}
-                            icon={SlidersHorizontal}
-                            className="flex-1 sm:flex-none"
-                        >
-                            {showFilters ? 'Hide Filters' : 'Filters'}
-                        </Button>
-                        {(Object.keys(activeFilters).length > 0 || searchTerm) && (
-                            <Button variant="secondary" onClick={handleResetFilters} icon={X} className="flex-1 sm:flex-none">
-                                Clear
-                            </Button>
-                        )}
-                    </div>
-                </div>
+            <SearchBar
+                onSearch={handleSearch}
+                placeholder="Search products..."
+                className="w-full sm:max-w-md"
+            />
 
-                {showFilters && (
-                    <FilterBar
-                        filters={[
-                            {
-                                name: 'category',
-                                label: 'Category',
-                                type: 'select',
-                                options: [
-                                    { value: '', label: 'All Categories' },
-                                    ...categories.map(c => ({ value: c.id, label: c.name })),
-                                ],
-                            },
-                        ]}
-                        onApply={handleApplyFilters}
-                        onReset={handleResetFilters}
-                    />
-                )}
-            </div>
-
-            {filteredData.length === 0 ? (
+            {data.length === 0 ? (
                 <EmptyState
                     title="No products found"
-                    description="Try adjusting your search or filters."
+                    description="Try adjusting your search."
                     icon={<PackageSearch className="w-8 h-8 text-neutral-400" />}
                 />
             ) : (
                 <Table
                     columns={columns}
-                    data={filteredData}
+                    data={data}
                 />
             )}
 

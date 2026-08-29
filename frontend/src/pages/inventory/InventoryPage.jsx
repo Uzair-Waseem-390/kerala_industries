@@ -14,7 +14,6 @@ import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Badge from '../../components/ui/Badge';
 import Card from '../../components/ui/Card';
 import Modal from '../../components/ui/Modal';
-import FilterBar from '../../components/ui/FilterBar';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 
@@ -25,8 +24,6 @@ const InventoryPage = () => {
     const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [categories, setCategories] = useState([]);
-    const [showFilters, setShowFilters] = useState(false);
     const [totalStock, setTotalStock] = useState(0);
     const [stats, setStats] = useState(null);
     // Which list the table shows: 'all' | 'low' | 'out'. Driven by clicking
@@ -44,8 +41,7 @@ const InventoryPage = () => {
     const [shelfBreakdown, setShelfBreakdown] = useState([]);
     const [shelfBreakdownLoading, setShelfBreakdownLoading] = useState(false);
 
-    // Search is routed through the same query params as the category
-    // filter — the backend supports search/category on all three
+    // Search is routed through the same query params on all three
     // inventory list endpoints (all / low-stock / out-of-stock). Shelf is
     // no longer a product-level filter here (a product can now span
     // multiple shelves) — see the Shelves page for per-shelf breakdowns.
@@ -55,7 +51,6 @@ const InventoryPage = () => {
     } = useInventoryList(stockView, searchTerm);
 
     useEffect(() => {
-        loadLookups();
         loadStats();
     }, []);
 
@@ -101,41 +96,15 @@ const InventoryPage = () => {
         return () => { cancelled = true; };
     }, [filters, searchTerm]);
 
-    const loadLookups = async () => {
-        try {
-            // page_size override — dropdown needs every category, not
-            // just one paginated page of them.
-            const catsRes = await purchasesApi.categories.getAll({ page_size: 500 });
-            const cats = catsRes?.results || catsRes || [];
-            setCategories(cats.filter(c => !c.is_deleted));
-        } catch (error) {
-            console.error('Failed to load lookups:', error);
-            toast.error(extractErrorMessage(error, 'Failed to load categories'));
-        }
-    };
-
     const handleSearch = (value) => {
         setSearchTerm(value);
         setPage(1);
-    };
-
-    const handleApplyFilters = (filterValues) => {
-        setFilters(filterValues);
     };
 
     const handleResetFilters = () => {
         setFilters({});
         setSearchTerm('');
     };
-
-    const filterConfig = [
-        {
-            name: 'category',
-            label: 'Category',
-            type: 'select',
-            options: categories.map(c => ({ value: c.id, label: c.name })),
-        },
-    ];
 
     const handleRowClick = async (row) => {
         // Get the product ID from the row
@@ -184,11 +153,6 @@ const InventoryPage = () => {
             key: 'product',
             label: 'Product Name',
             render: (value) => value?.name || 'N/A'
-        },
-        {
-            key: 'product',
-            label: 'Category',
-            render: (value) => value?.category?.name || 'N/A'
         },
         {
             key: 'quantity',
@@ -299,40 +263,19 @@ const InventoryPage = () => {
                 </div>
             )}
 
-            {/* Filters */}
-            <div className="space-y-4">
-                <div className="flex gap-4">
-                    <div className="flex-1">
-                        <SearchBar
-                            onSearch={handleSearch}
-                            placeholder="Search products by name or code..."
-                            className="w-full"
-                        />
-                    </div>
-                    <Button
-                        variant="secondary"
-                        onClick={() => setShowFilters(!showFilters)}
-                        icon={({ className }) => (
-                            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                            </svg>
-                        )}
-                    >
-                        {showFilters ? 'Hide Filters' : 'Show Filters'}
-                    </Button>
-                    {(Object.keys(filters).length > 0 || searchTerm) && (
-                        <Button variant="secondary" onClick={handleResetFilters}>
-                            Clear All
-                        </Button>
-                    )}
-                </div>
-
-                {showFilters && (
-                    <FilterBar
-                        filters={filterConfig}
-                        onApply={handleApplyFilters}
-                        onReset={handleResetFilters}
+            {/* Search */}
+            <div className="flex gap-4">
+                <div className="flex-1">
+                    <SearchBar
+                        onSearch={handleSearch}
+                        placeholder="Search products by name or code..."
+                        className="w-full"
                     />
+                </div>
+                {(Object.keys(filters).length > 0 || searchTerm) && (
+                    <Button variant="secondary" onClick={handleResetFilters}>
+                        Clear All
+                    </Button>
                 )}
             </div>
 
@@ -381,10 +324,6 @@ const InventoryPage = () => {
                             <div>
                                 <p className="text-sm text-neutral-500">Product Code</p>
                                 <p className="font-medium">{productDetail.product?.code || 'N/A'}</p>
-                            </div>
-                            <div>
-                                <p className="text-sm text-neutral-500">Category</p>
-                                <p className="font-medium">{productDetail.product?.category?.name || 'N/A'}</p>
                             </div>
                             <div>
                                 <p className="text-sm text-neutral-500">Current Quantity</p>

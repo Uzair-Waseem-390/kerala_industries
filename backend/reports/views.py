@@ -893,7 +893,7 @@ class InventoryValuationReportPrintView(APIView):
             filter_description=filter_description,
             columns=[
                 {"key": "product_name", "label": "Product"}, {"key": "product_code", "label": "Code"},
-                {"key": "category_name", "label": "Category"}, {"key": "quantity_on_hand", "label": "Qty on Hand"},
+                {"key": "quantity_on_hand", "label": "Qty on Hand"},
                 {"key": "avg_unit_cost", "label": "Avg Unit Cost"}, {"key": "total_value", "label": "Total Value"},
             ],
             rows=rows,

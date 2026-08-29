@@ -407,7 +407,7 @@ def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
     request; this is now 2 queries total regardless of catalog size.
     """
     inventory_qs = Inventory.objects.filter(quantity__gt=0).select_related(
-        "product", "product__category",
+        "product",
     ).order_by("product__name")
 
     if _clean(search):
@@ -437,7 +437,6 @@ def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
             "product_id": inv.product_id,
             "product_name": inv.product.name,
             "product_code": inv.product.code,
-            "category_name": inv.product.category.name,
             "quantity_on_hand": inv.quantity,
             "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
             "total_value": total_value,

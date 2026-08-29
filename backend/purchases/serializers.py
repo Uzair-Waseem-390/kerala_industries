@@ -3,7 +3,7 @@ from rest_framework import serializers
 from payment_methods.serializers import MethodAllocationInputSerializer
 
 from .models import (
-    CartonSize, Category, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
@@ -20,30 +20,6 @@ class AuditReadMixin(serializers.Serializer):
     updated_by = serializers.StringRelatedField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
-
-
-# ---------------------------------------------------------------------------
-# Category
-# ---------------------------------------------------------------------------
-
-class CategoryReadSerializer(AuditReadMixin, serializers.ModelSerializer):
-    class Meta:
-        model  = Category
-        fields = ["id", "name", "description", "created_by", "updated_by", "created_at", "updated_at"]
-
-
-class CategoryWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Category
-        fields = ["name", "description"]
-
-    def validate_name(self, value):
-        qs = Category.objects.filter(name__iexact=value.strip(), is_deleted=False)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("A category with this name already exists.")
-        return value.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -309,11 +285,9 @@ class SupplierPayableSummarySerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class ProductReadSerializer(AuditReadMixin, serializers.ModelSerializer):
-    category = CategoryReadSerializer(read_only=True)
-
     class Meta:
         model  = Product
-        fields = ["id", "name", "code", "category",
+        fields = ["id", "name", "code",
                   "created_by", "updated_by", "created_at", "updated_at"]
 
 

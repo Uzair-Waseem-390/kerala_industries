@@ -7,14 +7,16 @@ MIGRATION_USER_EMAIL = DATA_GMAIL
 if not MIGRATION_USER_EMAIL:
     raise CommandError("DATA_GMAIL is not set in settings.py")
 
-# Order matters: Product depends on Category/Shelf, and Ledger depends on
-# Supplier, already existing in the new DB (looked up by name/code).
-TABLE_ORDER = ["category", "shelf", "supplier", "product", "ledger"]
+# Order matters: Ledger depends on Supplier, already existing in the new DB
+# (looked up by name/code). "category" and "product" were removed —
+# Category no longer exists, and Product is capped at exactly 4 fixed rows
+# seeded by seed_fixed_products, so it can no longer be legacy-imported.
+TABLE_ORDER = ["shelf", "supplier", "ledger"]
 
 
 class Command(BaseCommand):
     help = (
-        "One-off/reusable import of lookup data (Category, Shelf, Supplier, Product) "
+        "One-off/reusable import of lookup data (Shelf, Supplier) "
         "and supplier ledgers (SupplierLedger + SupplierLedgerEntry) from the legacy DB "
         "(settings.DATABASES['legacy']) into the current default DB. Schema/relationships "
         "are identical between the two DBs for these tables. Safe to re-run: existing rows "
@@ -32,7 +34,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from purchases.models import Category, Shelf, Supplier, Product
+        from purchases.models import Shelf, Supplier
 
         requested = set(options["tables"] or TABLE_ORDER)
         dry_run = options["dry_run"]
@@ -47,25 +49,14 @@ class Command(BaseCommand):
             )
 
         summary = {}
-        # In --dry-run, category/shelf rows are never actually written, so the
-        # product step (which looks them up by name) needs to know what this
-        # same run *would have* created, on top of what already exists.
-        dry_run_names = {"category": set(), "shelf": set()}
+        dry_run_names = {"shelf": set()}
 
-        if "category" in requested:
-            summary["category"] = self._import_simple(
-                Category, "name", migration_user, dry_run, dry_run_names["category"],
-            )
         if "shelf" in requested:
             summary["shelf"] = self._import_simple(
                 Shelf, "name", migration_user, dry_run, dry_run_names["shelf"],
             )
         if "supplier" in requested:
             summary["supplier"] = self._import_supplier(Supplier, migration_user, dry_run)
-        if "product" in requested:
-            summary["product"] = self._import_product(
-                Product, Category, migration_user, dry_run, dry_run_names,
-            )
         if "ledger" in requested:
             summary["ledger"] = self._import_ledger(Supplier, migration_user, dry_run)
 
@@ -247,54 +238,3 @@ class Command(BaseCommand):
 
         return {"created": created, "skipped": skipped, "errors": errors}
 
-    def _import_product(self, Product, Category, migration_user, dry_run, dry_run_names=None):
-        # NOTE: Product.shelf was removed (shelves are now decoupled from
-        # products — see inventory.ShelfStock). This import used to also
-        # look up the legacy row's shelf and link it via Product.shelf;
-        # that product-shelf-linking logic has been removed. The Shelf
-        # lookup-table import itself (TABLE_ORDER "shelf" step, _import_simple)
-        # is untouched — it's still a valid standalone lookup table.
-        created = skipped = errors = 0
-        legacy_rows = Product.all_objects.using("legacy").select_related("category").all()
-        dry_run_names = dry_run_names or {"category": set(), "shelf": set()}
-
-        for row in legacy_rows:
-            if Product.all_objects.filter(code=row.code).exists():
-                skipped += 1
-                continue
-
-            new_category = Category.all_objects.filter(name=row.category.name).first()
-            category_ok = new_category is not None or row.category.name in dry_run_names["category"]
-            if not category_ok:
-                errors += 1
-                self.stderr.write(self.style.WARNING(
-                    f"  [Product] skipping '{row.code}': missing category '{row.category.name}' "
-                    f"in target DB (import category first)"
-                ))
-                continue
-
-            if dry_run:
-                created += 1
-                continue
-
-            try:
-                with transaction.atomic():
-                    new_row = Product.all_objects.create(
-                        name=row.name,
-                        code=row.code,
-                        category=new_category,
-                        created_by=migration_user,
-                        updated_by=migration_user,
-                        deleted_by=migration_user if row.is_deleted else None,
-                        deleted_at=row.deleted_at,
-                        is_deleted=row.is_deleted,
-                    )
-                    self._stamp(Product, new_row.pk, row)
-                created += 1
-            except Exception as exc:
-                errors += 1
-                self.stderr.write(self.style.WARNING(
-                    f"  [Product] failed to import '{row.code}': {exc}"
-                ))
-
-        return {"created": created, "skipped": skipped, "errors": errors}

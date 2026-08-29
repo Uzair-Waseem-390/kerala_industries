@@ -11,7 +11,7 @@ from django.utils.dateparse import parse_date
 from backend.search import search_q
 
 from .models import (
-    Category, CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product, PurchaseItem,
     PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation, Shelf,
@@ -49,19 +49,6 @@ def _next_day_start(value):
     if day is None:
         return None
     return timezone.make_aware(datetime.combine(day + timedelta(days=1), time.min))
-
-
-# ---------------------------------------------------------------------------
-# Category
-# ---------------------------------------------------------------------------
-
-def get_all_categories():
-    # created_by/updated_by are serialized on every row — select_related
-    # avoids 2 extra queries per category (N+1).
-    return Category.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
-
-def get_category_by_id(pk: int) -> Category:
-    return get_object_or_404(Category, pk=pk, is_deleted=False)
 
 
 # ---------------------------------------------------------------------------
@@ -224,14 +211,11 @@ def get_supplier_by_id(pk: int) -> Supplier:
 # Product
 # ---------------------------------------------------------------------------
 
-# ProductReadSerializer nests full category (with its own audit users) plus
-# the product's own audit users — everything here is serialized, nothing
-# extra. Product no longer has a shelf (shelves are decoupled — physical
-# location now lives in ShelfStock, per-product-per-shelf, not on Product).
-_PRODUCT_RELATED = (
-    "category", "created_by", "updated_by",
-    "category__created_by", "category__updated_by",
-)
+# ProductReadSerializer only nests the product's own audit users — no
+# category anymore (removed; Product is capped at exactly 4 fixed rows).
+# Product also has no shelf (shelves are decoupled — physical location
+# lives in ShelfStock, per-product-per-shelf, not on Product).
+_PRODUCT_RELATED = ("created_by", "updated_by")
 
 def get_all_products(*, search: str = None) -> QuerySet:
     qs = Product.objects.select_related(*_PRODUCT_RELATED).filter(is_deleted=False)

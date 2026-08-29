@@ -14,7 +14,7 @@ from rest_framework.exceptions import ValidationError
 from payment_methods.models import PaymentMethod
 
 from .models import (
-    Category, Product,
+    Product,
     PurchaseOrder, PurchaseReturn, Shelf,
     Supplier,
 )
@@ -61,7 +61,6 @@ class PurchasesTestBase(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
-        self.category = Category.objects.create(name="Cat A")
         self.shelf = Shelf.objects.create(name="Shelf A")
         # Through the service so the supplier ledger exists for confirm flows.
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
@@ -74,9 +73,7 @@ class PurchasesTestBase(TestCase):
         return [(self.cash, Decimal(amount))]
 
     def make_product(self, code="P001", name="Product 1"):
-        return Product.objects.create(
-            name=name, code=code, category=self.category,
-        )
+        return Product.objects.create(name=name, code=code)
 
     def make_order(self, product, quantity=10, unit_price="100"):
         return create_purchase_order(

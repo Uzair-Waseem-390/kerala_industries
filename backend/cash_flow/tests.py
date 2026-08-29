@@ -368,17 +368,14 @@ class DraftAdvanceQuirkFixTests(CashFlowTestBase):
         from ledger.models import SupplierLedgerEntry
         from purchases.models import SupplierPayment
         from purchases.services import (
-            create_category, create_product, create_purchase_order,
+            create_product, create_purchase_order,
             create_shelf, create_supplier, delete_purchase_order,
             set_purchase_item_shelf_allocations,
         )
 
         create_opening_cash(amount=Decimal("50000"), user=self.admin)
         supplier = create_supplier(name="Karachi Metals", code="SUP1", user=self.admin)
-        cat = create_category(name="Raw", user=self.admin)
-        product = create_product(
-            name="Steel Rod", code="PRD1", category_id=cat.id, user=self.admin,
-        )
+        product = create_product(name="Steel Rod", code="PRD1", user=self.admin)
         shelf = create_shelf(name="Shelf A", user=self.admin)
         cash_start = self.cash()
 

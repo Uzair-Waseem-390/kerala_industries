@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ratesApi } from '../services/ratesApi';
-import { purchasesApi } from '../services/purchasesApi';
 import { usePaginatedList } from './usePaginatedList';
 
 export const useRates = (initialFilters = {}) => {
@@ -13,22 +12,6 @@ export const useRates = (initialFilters = {}) => {
     } = usePaginatedList(ratesApi.getAll, initialFilters);
 
     const data = rates.map(rate => ({ product: rate.product, rate }));
-
-    // Category filter dropdown — small, bounded list (same pattern as
-    // Suppliers/Products elsewhere), fetched once rather than derived from
-    // a full product prefetch.
-    const [categories, setCategories] = useState([]);
-    useEffect(() => {
-        let cancelled = false;
-        purchasesApi.categories.getAll({ page_size: 500 })
-            .then(res => {
-                if (cancelled) return;
-                const cats = res?.results || res || [];
-                setCategories(cats.filter(c => !c.is_deleted));
-            })
-            .catch(() => { if (!cancelled) setCategories([]); });
-        return () => { cancelled = true; };
-    }, []);
 
     const [mutating, setMutating] = useState(false);
     const [mutationError, setMutationError] = useState(null);
@@ -70,7 +53,6 @@ export const useRates = (initialFilters = {}) => {
         error: listError || mutationError,
         filters,
         setFilters,
-        categories,
         refetch,
         create,
         update,

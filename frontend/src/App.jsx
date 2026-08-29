@@ -11,7 +11,6 @@ import Profile from './pages/Profile';
 import DashboardPage from './pages/DashboardPage';
 
 // Purchases pages
-import CategoriesPage from './pages/purchases/CategoriesPage';
 import ShelvesPage from './pages/purchases/ShelvesPage';
 import ShelfDetailPage from './pages/purchases/ShelfDetailPage';
 import SuppliersPage from './pages/purchases/SuppliersPage';
@@ -204,14 +203,6 @@ const AppContent = () => {
         } />
 
         {/* Purchases Routes */}
-        <Route path="/purchases/categories" element={
-          <ProtectedRoute>
-            <Layout>
-              <CategoriesPage />
-            </Layout>
-          </ProtectedRoute>
-        } />
-
         <Route path="/purchases/shelves" element={
           <ProtectedRoute>
             <Layout>
