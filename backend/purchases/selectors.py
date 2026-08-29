@@ -246,6 +246,12 @@ def get_product_by_id(pk: int) -> Product:
         pk=pk, is_deleted=False,
     )
 
+def get_product_by_code(code: str) -> Product:
+    return get_object_or_404(
+        Product.objects.select_related(*_PRODUCT_RELATED),
+        code=code, is_deleted=False,
+    )
+
 
 # ---------------------------------------------------------------------------
 # PurchaseOrder
@@ -384,6 +390,58 @@ def get_purchase_item_by_id(pk: int) -> PurchaseItem:
         PurchaseItem.objects.select_related("order", "product"),
         pk=pk, is_deleted=False,
     )
+
+
+# Every purchase-intake flow's family-specific attribute — all 6 are
+# nullable and product-scoped, so one select_related list covers Jumbo,
+# Cores, Packing, and Cartons rows alike (only the ones relevant to a given
+# row's product are ever non-null).
+_PURCHASE_BATCH_RELATED = (
+    "order", "order__supplier", "product", "product__family",
+    "product__jumbo_name", "product__core_name", "product__core_length",
+    "product__core_thickness", "product__packing_size", "product__carton_size",
+)
+
+
+def get_purchase_batches(
+    *, search: str = None, status: str = None,
+    date_from: str = None, date_to: str = None,
+) -> QuerySet:
+    """
+    Every purchase line item for the 4 Raw Material families (Jumbo, Cores,
+    Packing, Cartons) in one place — the read-only "Purchase Batches" view
+    the client asked to see all 4 RM families in, instead of 4 separate
+    screens. Data-entry/opening-stock batches are excluded, same as every
+    other purchase list.
+    """
+    qs = (
+        PurchaseItem.objects
+        .filter(
+            is_deleted=False,
+            product__family__name="Raw Material",
+            order__is_deleted=False,
+        )
+        .exclude(order__supplier__code="SYS-OPENING")
+        .select_related(*_PURCHASE_BATCH_RELATED)
+        .order_by("-order__created_at", "-id")
+    )
+    if _clean(status):
+        qs = qs.filter(order__status=_clean(status))
+    if _clean(search):
+        qs = qs.filter(search_q(
+            _clean(search),
+            "product__name", "product__code",
+            "order__order_number", "order__supplier__name",
+        ))
+    if _clean(date_from):
+        start = _day_start(_clean(date_from))
+        if start:
+            qs = qs.filter(order__created_at__gte=start)
+    if _clean(date_to):
+        end = _next_day_start(_clean(date_to))
+        if end:
+            qs = qs.filter(order__created_at__lt=end)
+    return qs
 
 
 def get_purchase_item_with_allocations_by_id(pk: int) -> PurchaseItem:

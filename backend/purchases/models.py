@@ -4,6 +4,15 @@ from django.db import models
 
 from .utils import calculate_total_price
 
+# The 4 fixed family-anchor products' codes (seeded by seed_fixed_products,
+# never re-created) — single source of truth so nothing else hardcodes
+# these strings. Every attribute-bearing variant traces back to one of
+# these via Product.base_product.
+JUMBO_PRODUCT_CODE   = "PRO-1000"
+CORES_PRODUCT_CODE   = "PRO-1001"
+PACKING_PRODUCT_CODE = "PRO-1002"
+CARTONS_PRODUCT_CODE = "PRO-1003"
+
 
 # ---------------------------------------------------------------------------
 # Shared managers
@@ -196,6 +205,42 @@ class Product(AuditMixin):
     code   = models.CharField(max_length=100, unique=True)
     family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="products")
 
+    # Self-FK to one of the 4 canonical family-anchor rows (Jumbo/Cores/
+    # Packing/Cartons — the only rows ever created via create_product()).
+    # Null on the anchors themselves; every attribute-bearing variant points
+    # back to which anchor "line" it belongs to. Needed because Family alone
+    # (Raw Material/WIP/Finished Goods) doesn't disambiguate Jumbo from
+    # Cores — all 4 anchors share family="Raw Material" today.
+    base_product = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="variants",
+    )
+
+    # Attribute-based variant selection — only the field(s) relevant to a
+    # row's base product are ever set; the rest stay null. A different
+    # attribute combination is a different trackable inventory line (a
+    # different Product row), not the same row with a different label — per
+    # the client's explicit instruction. These rows are never created
+    # directly by a user; only purchases.services.get_or_create_product_variant()
+    # creates them, as a side effect of recording a purchase.
+    jumbo_name      = models.ForeignKey(JumboName, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+    core_name       = models.ForeignKey(CoreName, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+    core_length     = models.ForeignKey(CoreLength, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+    core_thickness  = models.ForeignKey(CoreThickness, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+    packing_size    = models.ForeignKey(PackingSize, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+    carton_size     = models.ForeignKey(CartonSize, on_delete=models.PROTECT, null=True, blank=True, related_name="products")
+
+    # Deterministic fingerprint, computed by create_product()/
+    # get_or_create_product_variant() before every create — a real,
+    # DB-enforced uniqueness guarantee. For an anchor row: derived from its
+    # own `code` (already unique). For a variant: derived from
+    # (base_product + every attribute FK above). A plain unique_together
+    # across the attribute columns would NOT reliably catch duplicate
+    # variants — Postgres/SQLite treat every NULL as distinct for
+    # uniqueness purposes, so two rows sharing one populated attribute but
+    # NULL on the rest would never collide under a plain composite
+    # constraint.
+    variant_key = models.CharField(max_length=500, unique=True, editable=False)
+
     class Meta:
         verbose_name        = "Product"
         verbose_name_plural = "Products"
@@ -298,7 +343,7 @@ class PurchaseItem(AuditMixin):
 
     order      = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name="items")
     product    = models.ForeignKey(Product,       on_delete=models.PROTECT, related_name="purchase_items")
-    quantity   = models.PositiveIntegerField()
+    quantity   = models.DecimalField(max_digits=14, decimal_places=4)
     unit_price = models.DecimalField(max_digits=14, decimal_places=4)
     gst        = models.DecimalField(max_digits=5, decimal_places=2, default=0,
                      help_text="GST percentage e.g. 18.5 means 18.5%")
@@ -313,10 +358,26 @@ class PurchaseItem(AuditMixin):
     total_price  = models.DecimalField(max_digits=18, decimal_places=4, default=0, editable=False)
 
     # FIFO tracking — set on confirmation, consumed by billing
-    remaining_quantity = models.PositiveIntegerField(default=0)
+    remaining_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
 
     # Tracks how much of this line has been returned to supplier
-    returned_quantity = models.PositiveIntegerField(default=0)
+    returned_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+
+    # Jumbo/Packing purchase intake — only populated for those two families'
+    # specialized "punch a purchase" forms (create_jumbo_purchase/
+    # create_packing_purchase in services.py). Null for every other item.
+    # total_cost (Jumbo) = rate_per_kg × weight_kg + freight_cost.
+    weight_kg   = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    rate_per_kg = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    freight_cost = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, default=0)
+
+    # Jumbo only. expected_length_m is what's printed on the jumbo roll
+    # (converted to yards via purchases.utils.meters_to_yards — that's what
+    # `quantity` above is stored in). exact_length_m is set later, only if
+    # the supervisor measures the roll and finds the printed length wrong —
+    # see purchases.services.correct_jumbo_exact_length. Null until then.
+    expected_length_m = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    exact_length_m    = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
     class Meta:
         verbose_name        = "Purchase Item"
@@ -367,7 +428,7 @@ class PurchaseItemShelfAllocation(models.Model):
     """
     purchase_item = models.ForeignKey(PurchaseItem, on_delete=models.CASCADE, related_name="shelf_allocations")
     shelf         = models.ForeignKey(Shelf, on_delete=models.PROTECT, related_name="purchase_item_allocations")
-    quantity      = models.PositiveIntegerField()
+    quantity      = models.DecimalField(max_digits=14, decimal_places=4)
     created_at    = models.DateTimeField(auto_now_add=True)
     updated_at    = models.DateTimeField(auto_now=True)
 
@@ -435,7 +496,7 @@ class PurchaseReturnItem(models.Model):
 
     return_record  = models.ForeignKey(PurchaseReturn, on_delete=models.CASCADE, related_name="items")
     purchase_item  = models.ForeignKey(PurchaseItem,   on_delete=models.PROTECT, related_name="return_items")
-    quantity       = models.PositiveIntegerField()
+    quantity       = models.DecimalField(max_digits=14, decimal_places=4)
     gst            = models.DecimalField(max_digits=5, decimal_places=2, default=0,
                          help_text="GST on return (optional, default 0)")
     wht            = models.DecimalField(max_digits=5, decimal_places=2, default=0,
@@ -475,7 +536,7 @@ class PurchaseReturnItemShelfAllocation(models.Model):
     """
     return_item = models.ForeignKey(PurchaseReturnItem, on_delete=models.CASCADE, related_name="shelf_allocations")
     shelf       = models.ForeignKey(Shelf, on_delete=models.PROTECT, related_name="purchase_return_item_allocations")
-    quantity    = models.PositiveIntegerField()
+    quantity    = models.DecimalField(max_digits=14, decimal_places=4)
     created_at  = models.DateTimeField(auto_now_add=True)
     updated_at  = models.DateTimeField(auto_now=True)
 
@@ -539,7 +600,7 @@ class LostInventoryItem(models.Model):
 
     record   = models.ForeignKey(LostInventoryRecord, on_delete=models.CASCADE, related_name="items")
     product  = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="lost_inventory_items")
-    quantity = models.PositiveIntegerField()
+    quantity = models.DecimalField(max_digits=14, decimal_places=4)
     reason   = models.CharField(max_length=255, blank=True, default="",
                    help_text="Optional reason e.g. damaged, expired, stolen, misplaced.")
 
@@ -548,7 +609,7 @@ class LostInventoryItem(models.Model):
     total_cost = models.DecimalField(max_digits=18, decimal_places=4, default=0, editable=False)
 
     # How much of this loss has been reversed via "mark as found"
-    found_quantity = models.PositiveIntegerField(default=0)
+    found_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
 
     class Meta:
         verbose_name        = "Lost Inventory Item"
@@ -585,7 +646,7 @@ class LostInventoryRecovery(models.Model):
     convention as everything else in this app.
     """
     lost_item        = models.ForeignKey(LostInventoryItem, on_delete=models.CASCADE, related_name="recoveries")
-    quantity          = models.PositiveIntegerField()
+    quantity          = models.DecimalField(max_digits=14, decimal_places=4)
     recovered_amount  = models.DecimalField(max_digits=18, decimal_places=4, editable=False)
     recovered_at      = models.DateField(db_index=True)
     recovered_by      = models.ForeignKey(
@@ -619,9 +680,9 @@ class LostInventoryFIFOConsumption(models.Model):
 
     lost_item     = models.ForeignKey(LostInventoryItem, on_delete=models.CASCADE, related_name="fifo_consumptions")
     purchase_item = models.ForeignKey(PurchaseItem, on_delete=models.PROTECT, related_name="lost_inventory_consumptions")
-    quantity      = models.PositiveIntegerField(help_text="Quantity originally drawn from this batch when marked lost.")
+    quantity      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Quantity originally drawn from this batch when marked lost.")
     unit_cost     = models.DecimalField(max_digits=14, decimal_places=4, help_text="Tax-inclusive unit cost of this batch at the time of loss.")
-    restored_quantity = models.PositiveIntegerField(default=0)
+    restored_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     created_at    = models.DateTimeField(auto_now_add=True)
 
     class Meta:

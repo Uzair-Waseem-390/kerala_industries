@@ -48,6 +48,14 @@ from .views import (
     ConfirmedPurchaseOrderListView,
     AllOutstandingOrdersView,
 
+    # Family-specific purchase intake
+    JumboPurchaseCreateView,
+    CorePurchaseCreateView,
+    PackingPurchaseCreateView,
+    CartonPurchaseCreateView,
+    JumboExactLengthCorrectionView,
+    PurchaseBatchListView,
+
     # Supplier Payments
     SupplierPaymentListCreateView,
     SupplierPaymentDestroyView,
@@ -155,6 +163,13 @@ urlpatterns = [
          AllOutstandingOrdersView.as_view(),
          name="all-outstanding-orders"),
 
+    # Family-specific purchase intake
+    path("jumbo-purchases/",   JumboPurchaseCreateView.as_view(),   name="jumbo-purchase-create"),
+    path("core-purchases/",    CorePurchaseCreateView.as_view(),    name="core-purchase-create"),
+    path("packing-purchases/", PackingPurchaseCreateView.as_view(), name="packing-purchase-create"),
+    path("carton-purchases/",  CartonPurchaseCreateView.as_view(),  name="carton-purchase-create"),
+    path("purchase-batches/",  PurchaseBatchListView.as_view(),     name="purchase-batch-list"),
+
     path("orders/<int:pk>/",
          PurchaseOrderRetrieveUpdateDestroyView.as_view(),
          name="purchase-order-detail"),
@@ -185,6 +200,10 @@ urlpatterns = [
     path("purchase-items/<int:pk>/shelf-allocations/",
          SetPurchaseItemShelfAllocationsView.as_view(),
          name="purchase-item-shelf-allocations"),
+
+    path("purchase-items/<int:pk>/correct-jumbo-length/",
+         JumboExactLengthCorrectionView.as_view(),
+         name="purchase-item-correct-jumbo-length"),
 
     path("return-items/<int:pk>/shelf-allocations/",
          SetPurchaseReturnItemShelfAllocationsView.as_view(),

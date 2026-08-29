@@ -1,7 +1,10 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from purchases.models import Family, Product
+from purchases.models import (
+    CARTONS_PRODUCT_CODE, CORES_PRODUCT_CODE, Family, JUMBO_PRODUCT_CODE,
+    PACKING_PRODUCT_CODE, Product,
+)
 from purchases.services import create_product
 
 # The ONLY 4 products this system will ever have. Product create/edit/delete
@@ -9,12 +12,14 @@ from purchases.services import create_product
 # ProductRetrieveView are read-only now) — this command is the sole place new
 # Product rows get created, reusing the existing create_product() service so
 # its side effects (queueing the product into rates' unpriced list, keeping
-# inventory stats in sync) fire exactly as they always have.
+# inventory stats in sync) fire exactly as they always have. Codes are the
+# single source of truth in purchases.models — every attribute-bearing
+# variant traces back to one of these 4 rows via Product.base_product.
 FIXED_PRODUCTS = [
-    {"code": "PRO-1000", "name": "Jumbo"},
-    {"code": "PRO-1001", "name": "Cores"},
-    {"code": "PRO-1002", "name": "Packing"},
-    {"code": "PRO-1003", "name": "Cartons"},
+    {"code": JUMBO_PRODUCT_CODE, "name": "Jumbo"},
+    {"code": CORES_PRODUCT_CODE, "name": "Cores"},
+    {"code": PACKING_PRODUCT_CODE, "name": "Packing"},
+    {"code": CARTONS_PRODUCT_CODE, "name": "Cartons"},
 ]
 
 

@@ -26,6 +26,7 @@ from .selectors import (
     get_confirmed_purchase_orders, get_draft_purchase_orders,
     get_all_families, get_family_by_id,
     get_fifo_cost_preview,
+    get_purchase_batches,
     get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_lost_inventory_record_by_id,
     get_order_payment_summary, get_packing_size_by_id,
@@ -39,19 +40,25 @@ from .selectors import (
 from .serializers import (
     AutoAllocateShelvesRequestSerializer, AutoAllocateShelvesResponseSerializer,
     CandidateShelfSerializer,
+    CartonPurchaseCreateSerializer,
     CartonSizeReadSerializer, CartonSizeWriteSerializer,
     CoreLengthReadSerializer, CoreLengthWriteSerializer,
     CoreNameReadSerializer, CoreNameWriteSerializer,
+    CorePurchaseCreateSerializer,
     CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
     FamilyReadSerializer,
+    JumboExactLengthCorrectionSerializer,
     JumboNameReadSerializer, JumboNameWriteSerializer,
+    JumboPurchaseCreateSerializer,
     LostInventoryCreateSerializer,
     LostInventoryFifoPreviewQuerySerializer,
     LostInventoryFifoPreviewSerializer, LostInventoryItemReadSerializer,
     LostInventoryReadSerializer, MarkLostInventoryFoundSerializer,
     MoveStockSerializer,
+    PackingPurchaseCreateSerializer,
     PackingSizeReadSerializer, PackingSizeWriteSerializer,
     ProductReadSerializer,
+    PurchaseBatchSerializer,
     PurchaseItemReadSerializer, PurchaseOrderCreateSerializer,
     PurchaseOrderPaymentSummarySerializer, PurchaseOrderReadSerializer,
     PurchaseOrderUpdateSerializer, PurchaseReturnCreateSerializer,
@@ -67,10 +74,12 @@ from .serializers import (
 )
 from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
-    create_carton_size, create_core_length, create_core_name,
-    create_core_thickness, create_jumbo_name,
+    correct_jumbo_exact_length,
+    create_carton_purchase, create_carton_size, create_core_length, create_core_name,
+    create_core_purchase, create_core_thickness, create_jumbo_name,
+    create_jumbo_purchase,
     create_lost_inventory_record,
-    create_packing_size,
+    create_packing_purchase, create_packing_size,
     create_purchase_order, create_purchase_return, create_shelf,
     create_supplier, create_supplier_payment, delete_carton_size,
     delete_core_length, delete_core_name, delete_core_thickness,
@@ -570,6 +579,144 @@ class PurchaseOrderListCreateView(generics.ListCreateAPIView):
             user=request.user,
         )
         return Response(PurchaseOrderReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# Family-specific purchase intake — Jumbo/Cores/Packing/Cartons
+# ---------------------------------------------------------------------------
+# Each creates a normal DRAFT PurchaseOrder (same response shape as the
+# generic endpoint above) — shelf allocation/confirm/payment all continue
+# through the existing PurchaseOrder endpoints unchanged.
+
+class JumboPurchaseCreateView(generics.CreateAPIView):
+    """POST /purchases/jumbo-purchases/ — punch a Jumbo purchase."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = JumboPurchaseCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        obj = create_jumbo_purchase(
+            supplier_id=d["supplier_id"], jumbo_name_id=d["jumbo_name_id"],
+            rate_per_kg=d["rate_per_kg"], weight_kg=d["weight_kg"],
+            freight_cost=d.get("freight_cost", Decimal("0")),
+            expected_length_m=d["expected_length_m"],
+            gst=d.get("gst", 0), wht=d.get("wht", 0),
+            description=d.get("description", ""),
+            payment_type=d.get("payment_type", "after_delivery"),
+            advance_amount=d.get("advance_amount", Decimal("0")),
+            method_allocations=_as_splits(d.get("method_allocations")),
+            user=request.user,
+        )
+        return Response(PurchaseOrderReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CorePurchaseCreateView(generics.CreateAPIView):
+    """POST /purchases/core-purchases/ — punch a Cores purchase."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = CorePurchaseCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        obj = create_core_purchase(
+            supplier_id=d["supplier_id"], quantity=d["quantity"], unit_price=d["unit_price"],
+            core_name_id=d.get("core_name_id"), core_length_id=d.get("core_length_id"),
+            core_thickness_id=d.get("core_thickness_id"),
+            gst=d.get("gst", 0), wht=d.get("wht", 0),
+            description=d.get("description", ""),
+            payment_type=d.get("payment_type", "after_delivery"),
+            advance_amount=d.get("advance_amount", Decimal("0")),
+            method_allocations=_as_splits(d.get("method_allocations")),
+            user=request.user,
+        )
+        return Response(PurchaseOrderReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class PackingPurchaseCreateView(generics.CreateAPIView):
+    """POST /purchases/packing-purchases/ — punch a Packing purchase."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = PackingPurchaseCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        obj = create_packing_purchase(
+            supplier_id=d["supplier_id"], packing_size_id=d["packing_size_id"],
+            rate_per_kg=d["rate_per_kg"], weight_kg=d["weight_kg"],
+            gst=d.get("gst", 0), wht=d.get("wht", 0),
+            description=d.get("description", ""),
+            payment_type=d.get("payment_type", "after_delivery"),
+            advance_amount=d.get("advance_amount", Decimal("0")),
+            method_allocations=_as_splits(d.get("method_allocations")),
+            user=request.user,
+        )
+        return Response(PurchaseOrderReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CartonPurchaseCreateView(generics.CreateAPIView):
+    """POST /purchases/carton-purchases/ — punch a Cartons purchase."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = CartonPurchaseCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        obj = create_carton_purchase(
+            supplier_id=d["supplier_id"], carton_size_id=d["carton_size_id"],
+            quantity=d["quantity"], unit_price=d["unit_price"],
+            gst=d.get("gst", 0), wht=d.get("wht", 0),
+            description=d.get("description", ""),
+            payment_type=d.get("payment_type", "after_delivery"),
+            advance_amount=d.get("advance_amount", Decimal("0")),
+            method_allocations=_as_splits(d.get("method_allocations")),
+            user=request.user,
+        )
+        return Response(PurchaseOrderReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class PurchaseBatchListView(generics.ListAPIView):
+    """
+    GET /purchases/purchase-batches/ — read-only, all 4 RM families
+    (Jumbo/Cores/Packing/Cartons) in one list. Client requirement.
+    Query params: search, status (draft/confirmed), date_from, date_to.
+    """
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = PurchaseBatchSerializer
+
+    def get_queryset(self):
+        p = self.request.query_params
+        return get_purchase_batches(
+            search=p.get("search"), status=p.get("status"),
+            date_from=p.get("date_from"), date_to=p.get("date_to"),
+        )
+
+
+class JumboExactLengthCorrectionView(generics.CreateAPIView):
+    """
+    POST /purchases/purchase-items/<pk>/correct-jumbo-length/ — supervisor
+    enters the exact measured length once the printed length turns out
+    wrong. Recomputes yards/cost-per-yard for this batch and adjusts
+    inventory + the caller-chosen shelf(s) accordingly.
+    """
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = JumboExactLengthCorrectionSerializer
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        item = correct_jumbo_exact_length(
+            purchase_item_id=kwargs["pk"],
+            exact_length_m=d["exact_length_m"],
+            shelf_allocations=d["shelf_allocations"],
+            user=request.user,
+        )
+        return Response(PurchaseItemReadSerializer(item).data, status=status.HTTP_200_OK)
 
 
 class DraftPurchaseOrderListView(generics.ListAPIView):

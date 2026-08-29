@@ -16,7 +16,7 @@ class Inventory(models.Model):
     product         = models.OneToOneField("purchases.Product", on_delete=models.PROTECT, related_name="inventory")
     # Indexed — the low-stock / out-of-stock breakdown endpoints filter on
     # quantity thresholds.
-    quantity        = models.PositiveIntegerField(default=0, db_index=True)
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
     last_updated_at = models.DateTimeField(auto_now=True)
     last_updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
@@ -44,7 +44,7 @@ class ShelfStock(models.Model):
     """
     shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="stock_rows")
     product         = models.ForeignKey("purchases.Product", on_delete=models.PROTECT, related_name="shelf_stock_rows")
-    quantity        = models.PositiveIntegerField(default=0)
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -74,11 +74,12 @@ class ShelfStockMovement(models.Model):
         LOST_FOUND_PUTAWAY   = "lost_found_putaway",   "Lost Inventory Found Put-Away"
         MOVE_OUT             = "move_out",             "Manual Move (Out)"
         MOVE_IN              = "move_in",              "Manual Move (In)"
+        JUMBO_LENGTH_CORRECTION = "jumbo_length_correction", "Jumbo Exact-Length Correction"
         BACKFILL             = "backfill",              "Backfill"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="movements")
     product    = models.ForeignKey("purchases.Product", on_delete=models.PROTECT, related_name="shelf_movements")
-    delta      = models.IntegerField(help_text="Positive = added to shelf, negative = removed from shelf.")
+    delta      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Positive = added to shelf, negative = removed from shelf.")
     reason     = models.CharField(max_length=30, choices=Reason.choices, db_index=True)
     reference  = models.CharField(max_length=30, blank=True, default="", help_text="e.g. PO-2026-0001, BILL-2026-0001")
     created_by = models.ForeignKey(
@@ -98,7 +99,7 @@ class ShelfStockMovement(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.shelf.name} — {self.product.name}: {self.delta:+d} ({self.reason})"
+        return f"{self.shelf.name} — {self.product.name}: {self.delta:+} ({self.reason})"
 
 
 class ProductStockMovement(models.Model):
@@ -111,12 +112,12 @@ class ProductStockMovement(models.Model):
     ever undone in this codebase.
     """
     product                 = models.OneToOneField("purchases.Product", on_delete=models.CASCADE, related_name="stock_movement")
-    total_purchased         = models.PositiveIntegerField(default=0)
-    total_purchase_returned = models.PositiveIntegerField(default=0)
-    total_sold               = models.PositiveIntegerField(default=0)
-    total_sale_returned      = models.PositiveIntegerField(default=0)
-    total_lost                = models.PositiveIntegerField(default=0)
-    total_found               = models.PositiveIntegerField(default=0)
+    total_purchased         = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_purchase_returned = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_sold               = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_sale_returned      = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_lost                = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_found               = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at          = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -135,12 +136,12 @@ class StockMovementFlow(models.Model):
     summed across every product, kept in sync by the same
     _adjust_stock_movement() calls.
     """
-    total_purchased         = models.PositiveIntegerField(default=0)
-    total_purchase_returned = models.PositiveIntegerField(default=0)
-    total_sold               = models.PositiveIntegerField(default=0)
-    total_sale_returned      = models.PositiveIntegerField(default=0)
-    total_lost                = models.PositiveIntegerField(default=0)
-    total_found               = models.PositiveIntegerField(default=0)
+    total_purchased         = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_purchase_returned = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_sold               = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_sale_returned      = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_lost                = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_found               = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at          = models.DateTimeField(auto_now=True)
 
     class Meta:

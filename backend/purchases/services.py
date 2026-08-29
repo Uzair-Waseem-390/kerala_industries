@@ -1,13 +1,14 @@
 from contextlib import contextmanager
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import (
-    CartonSize, CoreLength, CoreName, CoreThickness, DocumentCounter,
-    JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
-    LostInventoryRecord, LostInventoryRecovery, PackingSize, Product,
+    CARTONS_PRODUCT_CODE, CORES_PRODUCT_CODE, CartonSize, CoreLength,
+    CoreName, CoreThickness, DocumentCounter,
+    JUMBO_PRODUCT_CODE, JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
+    LostInventoryRecord, LostInventoryRecovery, PACKING_PRODUCT_CODE, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
     SavedPurchaseOrderPDF, Shelf, Supplier, SupplierPayment,
@@ -26,12 +27,16 @@ from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
     get_core_length_by_id, get_core_name_by_id, get_core_thickness_by_id,
     get_family_by_id, get_jumbo_name_by_id,
-    get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_id,
+    get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_code,
+    get_product_by_id,
     get_purchase_item_by_id,
     get_purchase_order_by_id, get_purchase_return_by_id, get_shelf_by_id,
     get_supplier_by_id, get_supplier_payment_by_id,
 )
-from .utils import calculate_total_price
+from .utils import (
+    calculate_total_price, compute_anchor_variant_key, compute_variant_key,
+    meters_to_yards,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +78,7 @@ _DOC_TYPE_SOURCES = {
     "SPY" : (SupplierPayment,     "reference_number"),
     "RTN" : (PurchaseReturn,      "reference_number"),
     "LOSS": (LostInventoryRecord, "reference_number"),
+    "PRO" : (Product,             "code"),
 }
 
 
@@ -149,6 +155,18 @@ def _generate_purchase_return_reference() -> str:
 def _generate_lost_inventory_reference() -> str:
     """Sequential lost inventory reference: LOSS-2026-0001."""
     return _next_reference("LOSS")
+
+
+def _generate_product_variant_code() -> str:
+    """
+    Sequential code for an auto-created product variant: PRO-2026-0001.
+    Deliberately different-looking from the 4 original fixed-family codes
+    (PRO-1000..PRO-1003, hand-assigned when Product was frozen to exactly
+    those 4 rows) — those aren't part of this counter's sequence (the
+    legacy-max seed only scans codes starting "PRO-<year>-", so it can never
+    collide with the PRO-100x codes), and don't need to be.
+    """
+    return _next_reference("PRO")
 
 
 def _recalculate_order_totals(order: PurchaseOrder) -> None:
@@ -538,9 +556,17 @@ def delete_supplier(*, pk: int, user) -> None:
 
 @transaction.atomic
 def create_product(*, name: str, code: str, family_id: int, user) -> Product:
+    """
+    For the 4 canonical family-anchor products only (no attributes,
+    base_product=None) — the seed command's entry point. Attribute-bearing
+    variants are created exclusively by get_or_create_product_variant()
+    below, never here.
+    """
     get_family_by_id(family_id)
     product = Product.objects.create(
-        name=name, code=code, family_id=family_id, created_by=user, updated_by=user,
+        name=name, code=code, family_id=family_id,
+        variant_key=compute_anchor_variant_key(code=code),
+        created_by=user, updated_by=user,
     )
     # A brand-new product has no price yet — queue it for the Rates app.
     # Lazy import: purchases stays unaware rates exists at module load time.
@@ -555,11 +581,88 @@ def update_product(*, pk: int, name: str = None, code: str = None, family_id: in
         product.name = name
     if code is not None:
         product.code = code
+        # variant_key encodes code for anchor rows (base_product is None) —
+        # keep it in sync. Variant rows never go through update_product's
+        # code path in practice (they're only ever created by
+        # get_or_create_product_variant), but guard correctly regardless.
+        if product.base_product_id is None:
+            product.variant_key = compute_anchor_variant_key(code=product.code)
     if family_id is not None:
         get_family_by_id(family_id)
         product.family_id = family_id
     product.updated_by = user
-    product.save(update_fields=["name", "code", "family_id", "updated_by", "updated_at"])
+    product.save(update_fields=["name", "code", "family_id", "variant_key", "updated_by", "updated_at"])
+    return product
+
+
+@transaction.atomic
+def get_or_create_product_variant(
+    *, base_product_id: int, user,
+    jumbo_name_id: int = None, core_name_id: int = None,
+    core_length_id: int = None, core_thickness_id: int = None,
+    packing_size_id: int = None, carton_size_id: int = None,
+) -> Product:
+    """
+    Finds the Product row for this exact (base anchor + attribute
+    combination), creating it if this is the first time it's been
+    purchased. This is the ONLY place attribute-bearing Product rows get
+    created — never a direct API, always a side effect of recording a
+    purchase. "A different attribute combination is a different trackable
+    inventory line" per the client's own instruction.
+
+    base_product_id is the id of one of the 4 canonical anchor rows (the
+    Jumbo/Cores/Packing/Cartons row itself) — identifies which "line" this
+    variant belongs to, since Family alone can't (every anchor shares
+    family="Raw Material"). The variant inherits its base's family.
+    """
+    base_product = get_product_by_id(base_product_id)
+    attribute_ids = {
+        "jumbo_name_id": jumbo_name_id, "core_name_id": core_name_id,
+        "core_length_id": core_length_id, "core_thickness_id": core_thickness_id,
+        "packing_size_id": packing_size_id, "carton_size_id": carton_size_id,
+    }
+    variant_key = compute_variant_key(base_product_id=base_product_id, **attribute_ids)
+
+    existing = Product.objects.filter(variant_key=variant_key).first()
+    if existing:
+        return existing
+
+    # Resolve + validate every attribute id passed, and collect its display
+    # value for the auto-generated name. Skipped (None) attributes contribute
+    # nothing — a purchase flow only ever populates the attributes relevant
+    # to its family (e.g. Jumbo purchases only ever pass jumbo_name_id).
+    name_parts = [base_product.name]
+    if jumbo_name_id is not None:
+        name_parts.append(get_jumbo_name_by_id(jumbo_name_id).value)
+    if core_name_id is not None:
+        name_parts.append(get_core_name_by_id(core_name_id).value)
+    if core_length_id is not None:
+        name_parts.append(get_core_length_by_id(core_length_id).value)
+    if core_thickness_id is not None:
+        name_parts.append(get_core_thickness_by_id(core_thickness_id).value)
+    if packing_size_id is not None:
+        name_parts.append(get_packing_size_by_id(packing_size_id).value)
+    if carton_size_id is not None:
+        name_parts.append(get_carton_size_by_id(carton_size_id).value)
+
+    try:
+        with transaction.atomic():
+            product = Product.objects.create(
+                name=" — ".join(name_parts),
+                code=_generate_product_variant_code(),
+                family_id=base_product.family_id,
+                base_product_id=base_product_id,
+                variant_key=variant_key,
+                created_by=user, updated_by=user,
+                **attribute_ids,
+            )
+    except IntegrityError:
+        # Lost a create race against a concurrent identical purchase —
+        # same variant, reuse it instead of erroring.
+        return Product.objects.get(variant_key=variant_key)
+
+    from rates.services import add_to_unpriced_queue
+    add_to_unpriced_queue(product)
     return product
 
 
@@ -796,6 +899,268 @@ def create_purchase_order(
         )
 
     return order
+
+
+# ---------------------------------------------------------------------------
+# Family-specific purchase intake — Jumbo/Cores/Packing/Cartons
+# ---------------------------------------------------------------------------
+# Each of these is a specialized front door onto create_purchase_order()
+# above: resolve/create the right Product variant, compute quantity +
+# unit_price per the family's own costing formula, then create a normal
+# DRAFT PurchaseOrder+PurchaseItem — every downstream thing (shelf
+# allocation, confirm, FIFO consumption, supplier payment, cash-in-hand)
+# is the existing, unchanged workflow. Nothing here bypasses it.
+
+def create_jumbo_purchase(
+    *, supplier_id: int, jumbo_name_id: int,
+    rate_per_kg: Decimal, weight_kg: Decimal, expected_length_m: Decimal,
+    freight_cost: Decimal = Decimal("0"),
+    gst: Decimal = Decimal("0"), wht: Decimal = Decimal("0"),
+    description: str = "", payment_type: str = "after_delivery",
+    advance_amount: Decimal = Decimal("0"), method_allocations: list = None,
+    user,
+) -> PurchaseOrder:
+    """
+    total_cost = rate_per_kg × weight_kg + freight_cost
+    yards      = meters_to_yards(expected_length_m)
+    unit_price = total_cost / yards   (cost per yard)
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if weight_kg <= 0:
+        raise ValidationError({"weight_kg": "Weight must be greater than zero."})
+    if expected_length_m <= 0:
+        raise ValidationError({"expected_length_m": "Expected length must be greater than zero."})
+    if freight_cost < 0:
+        raise ValidationError({"freight_cost": "Freight cost cannot be negative."})
+
+    jumbo_anchor = get_product_by_code(JUMBO_PRODUCT_CODE)
+    variant = get_or_create_product_variant(
+        base_product_id=jumbo_anchor.id, jumbo_name_id=jumbo_name_id, user=user,
+    )
+
+    total_cost = (Decimal(str(rate_per_kg)) * Decimal(str(weight_kg))) + Decimal(str(freight_cost))
+    yards = meters_to_yards(expected_length_m)
+    unit_price = (total_cost / yards).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    order = create_purchase_order(
+        supplier_id=supplier_id,
+        items=[{
+            "product_id": variant.id, "quantity": yards, "unit_price": unit_price,
+            "gst": gst, "wht": wht, "description": description,
+        }],
+        payment_type=payment_type, advance_amount=advance_amount,
+        method_allocations=method_allocations, user=user,
+    )
+    item = order.items.get(product_id=variant.id)
+    item.weight_kg = weight_kg
+    item.rate_per_kg = rate_per_kg
+    item.freight_cost = freight_cost
+    item.expected_length_m = expected_length_m
+    item.save(update_fields=["weight_kg", "rate_per_kg", "freight_cost", "expected_length_m"])
+    return order
+
+
+def create_core_purchase(
+    *, supplier_id: int, quantity: Decimal, unit_price: Decimal,
+    core_name_id: int = None, core_length_id: int = None, core_thickness_id: int = None,
+    gst: Decimal = Decimal("0"), wht: Decimal = Decimal("0"),
+    description: str = "", payment_type: str = "after_delivery",
+    advance_amount: Decimal = Decimal("0"), method_allocations: list = None,
+    user,
+) -> PurchaseOrder:
+    """Simplest of the four — quantity and unit_price entered directly."""
+    from rest_framework.exceptions import ValidationError
+
+    if quantity <= 0:
+        raise ValidationError({"quantity": "Quantity must be greater than zero."})
+    if unit_price <= 0:
+        raise ValidationError({"unit_price": "Unit price must be greater than zero."})
+
+    cores_anchor = get_product_by_code(CORES_PRODUCT_CODE)
+    variant = get_or_create_product_variant(
+        base_product_id=cores_anchor.id, user=user,
+        core_name_id=core_name_id, core_length_id=core_length_id, core_thickness_id=core_thickness_id,
+    )
+
+    return create_purchase_order(
+        supplier_id=supplier_id,
+        items=[{
+            "product_id": variant.id, "quantity": quantity, "unit_price": unit_price,
+            "gst": gst, "wht": wht, "description": description,
+        }],
+        payment_type=payment_type, advance_amount=advance_amount,
+        method_allocations=method_allocations, user=user,
+    )
+
+
+def create_packing_purchase(
+    *, supplier_id: int, packing_size_id: int, rate_per_kg: Decimal, weight_kg: Decimal,
+    gst: Decimal = Decimal("0"), wht: Decimal = Decimal("0"),
+    description: str = "", payment_type: str = "after_delivery",
+    advance_amount: Decimal = Decimal("0"), method_allocations: list = None,
+    user,
+) -> PurchaseOrder:
+    """
+    Stored as weight, not converted to another unit: quantity = weight_kg,
+    unit_price (per kg) = rate_per_kg.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if weight_kg <= 0:
+        raise ValidationError({"weight_kg": "Weight must be greater than zero."})
+    if rate_per_kg <= 0:
+        raise ValidationError({"rate_per_kg": "Rate per kg must be greater than zero."})
+
+    packing_anchor = get_product_by_code(PACKING_PRODUCT_CODE)
+    variant = get_or_create_product_variant(
+        base_product_id=packing_anchor.id, packing_size_id=packing_size_id, user=user,
+    )
+
+    order = create_purchase_order(
+        supplier_id=supplier_id,
+        items=[{
+            "product_id": variant.id, "quantity": weight_kg, "unit_price": rate_per_kg,
+            "gst": gst, "wht": wht, "description": description,
+        }],
+        payment_type=payment_type, advance_amount=advance_amount,
+        method_allocations=method_allocations, user=user,
+    )
+    item = order.items.get(product_id=variant.id)
+    item.weight_kg = weight_kg
+    item.rate_per_kg = rate_per_kg
+    item.save(update_fields=["weight_kg", "rate_per_kg"])
+    return order
+
+
+def create_carton_purchase(
+    *, supplier_id: int, carton_size_id: int, quantity: Decimal, unit_price: Decimal,
+    gst: Decimal = Decimal("0"), wht: Decimal = Decimal("0"),
+    description: str = "", payment_type: str = "after_delivery",
+    advance_amount: Decimal = Decimal("0"), method_allocations: list = None,
+    user,
+) -> PurchaseOrder:
+    """unit_price is price per piece."""
+    from rest_framework.exceptions import ValidationError
+
+    if quantity <= 0:
+        raise ValidationError({"quantity": "Quantity must be greater than zero."})
+    if unit_price <= 0:
+        raise ValidationError({"unit_price": "Unit price must be greater than zero."})
+
+    cartons_anchor = get_product_by_code(CARTONS_PRODUCT_CODE)
+    variant = get_or_create_product_variant(
+        base_product_id=cartons_anchor.id, carton_size_id=carton_size_id, user=user,
+    )
+
+    return create_purchase_order(
+        supplier_id=supplier_id,
+        items=[{
+            "product_id": variant.id, "quantity": quantity, "unit_price": unit_price,
+            "gst": gst, "wht": wht, "description": description,
+        }],
+        payment_type=payment_type, advance_amount=advance_amount,
+        method_allocations=method_allocations, user=user,
+    )
+
+
+@transaction.atomic
+def correct_jumbo_exact_length(
+    *, purchase_item_id: int, exact_length_m: Decimal, shelf_allocations: list[dict], user,
+) -> PurchaseItem:
+    """
+    Recomputes a confirmed Jumbo purchase item's yard quantity from the
+    supervisor-measured exact_length_m instead of the printed
+    expected_length_m. gross_amount (what was actually paid, based on
+    weight) is held fixed — only unit_price (cost per yard) and the stored
+    quantity move to match. The correction is against the item's CURRENT
+    quantity, not the original expected length, so a second correction on
+    the same batch is relative to the first.
+
+    shelf_allocations names which shelf(s) absorb the change — required in
+    both directions, same as every other stock movement in this app: a
+    shortfall must come from a shelf the user picks (and that shelf must
+    actually hold enough), a surplus must land on a shelf the user picks.
+    Nothing here guesses a shelf on the user's behalf.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    purchase_item = get_purchase_item_by_id(purchase_item_id)
+    if purchase_item.expected_length_m is None:
+        raise ValidationError({"purchase_item": "This is not a Jumbo purchase item."})
+    if purchase_item.order.status != PurchaseOrder.Status.CONFIRMED:
+        raise ValidationError({"status": "Exact-length correction can only be applied to a confirmed purchase."})
+    if exact_length_m <= 0:
+        raise ValidationError({"exact_length_m": "Exact length must be greater than zero."})
+
+    new_quantity = meters_to_yards(exact_length_m)
+    old_quantity = purchase_item.quantity
+    delta = new_quantity - old_quantity
+    if delta == 0:
+        raise ValidationError({"exact_length_m": "This measurement produces the same quantity already on record."})
+
+    shelves_by_id = _validate_shelf_ids_exist([a["shelf_id"] for a in shelf_allocations])
+    merged: dict[int, Decimal] = {}
+    for a in shelf_allocations:
+        merged[a["shelf_id"]] = merged.get(a["shelf_id"], Decimal("0")) + a["quantity"]
+    total_specified = sum(merged.values()) if merged else Decimal("0")
+    if total_specified != abs(delta):
+        raise ValidationError({
+            "shelf_allocations": (
+                f"Shelf allocations must sum to exactly the "
+                f"{'shortfall' if delta < 0 else 'surplus'} ({abs(delta)}), got {total_specified}."
+            )
+        })
+
+    locked_item = PurchaseItem.objects.select_for_update().get(pk=purchase_item.pk)
+
+    if delta < 0:
+        shortfall = abs(delta)
+        if shortfall > locked_item.remaining_quantity:
+            raise ValidationError({
+                "exact_length_m": (
+                    f"This correction would remove {shortfall} yards, but only "
+                    f"{locked_item.remaining_quantity} of this batch remain in stock "
+                    f"(some may already have been sold, returned, or marked lost)."
+                )
+            })
+        validate_shelf_consumption(product=locked_item.product, allocations=[
+            {"shelf": shelves_by_id[shelf_id], "quantity": qty}
+            for shelf_id, qty in merged.items() if qty > 0
+        ])
+
+    # gross_amount is what was actually paid (rate_per_kg × weight_kg +
+    # freight_cost, up to rounding) — fixed. unit_price is re-derived from
+    # it so the recalculated gross_amount below lands back on the same
+    # figure; quantity/unit_price are what PurchaseItem.save() uses to
+    # recompute gross_amount/gst_amount/wht_amount/total_price.
+    new_unit_price = (locked_item.gross_amount / new_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+    locked_item.quantity = new_quantity
+    locked_item.unit_price = new_unit_price
+    locked_item.remaining_quantity = locked_item.remaining_quantity + delta
+    locked_item.exact_length_m = exact_length_m
+    locked_item.save(update_fields=[
+        "quantity", "unit_price", "remaining_quantity", "exact_length_m",
+        "gross_amount", "gst_amount", "wht_amount", "total_price",
+    ])
+
+    sync_inventory(product=locked_item.product, quantity_delta=delta, user=user)
+    apply_shelf_allocations(
+        product=locked_item.product,
+        allocations=[
+            {"shelf": shelves_by_id[shelf_id], "quantity": qty}
+            for shelf_id, qty in merged.items() if qty > 0
+        ],
+        sign=1 if delta > 0 else -1,
+        reason=ShelfStockMovement.Reason.JUMBO_LENGTH_CORRECTION,
+        reference=locked_item.order.order_number, user=user,
+    )
+
+    _recalculate_order_totals(locked_item.order)
+    _sync_order_payable(locked_item.order)
+
+    return locked_item
 
 
 @transaction.atomic

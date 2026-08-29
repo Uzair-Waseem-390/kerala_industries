@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from payment_methods.serializers import MethodAllocationInputSerializer
@@ -197,7 +199,7 @@ class CandidateShelfSerializer(serializers.ModelSerializer):
     that currently hold stock of a given product, with the quantity
     available on each (from the selector's annotation).
     """
-    available_quantity = serializers.IntegerField(read_only=True)
+    available_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
 
     class Meta:
         model  = Shelf
@@ -206,25 +208,25 @@ class CandidateShelfSerializer(serializers.ModelSerializer):
 
 class AutoAllocateShelvesRequestSerializer(serializers.Serializer):
     product_id        = serializers.IntegerField()
-    quantity          = serializers.IntegerField(min_value=1)
+    quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     exclude_shelf_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
 
 
 class AutoAllocatedShelfSerializer(serializers.Serializer):
     shelf_id   = serializers.IntegerField()
     shelf_name = serializers.CharField()
-    quantity   = serializers.IntegerField()
+    quantity   = serializers.DecimalField(max_digits=14, decimal_places=4)
 
 
 class AutoAllocateShelvesResponseSerializer(serializers.Serializer):
     allocations = AutoAllocatedShelfSerializer(many=True)
-    shortfall   = serializers.IntegerField()
+    shortfall   = serializers.DecimalField(max_digits=14, decimal_places=4)
 
 
 class ShelfAllocationInputSerializer(serializers.Serializer):
     """Reusable input row for every 'set shelf allocations' request body."""
     shelf_id = serializers.IntegerField()
-    quantity = serializers.IntegerField(min_value=1)
+    quantity = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
 
 
 class SetShelfAllocationsSerializer(serializers.Serializer):
@@ -243,7 +245,7 @@ class MoveStockSerializer(serializers.Serializer):
     from_shelf_id = serializers.IntegerField()
     to_shelf_id   = serializers.IntegerField()
     product_id    = serializers.IntegerField()
-    quantity      = serializers.IntegerField(min_value=1)
+    quantity      = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
 
 
 # ---------------------------------------------------------------------------
@@ -332,8 +334,8 @@ class PurchaseItemShelfAllocationReadSerializer(serializers.ModelSerializer):
 class PurchaseItemReadSerializer(serializers.ModelSerializer):
     product_name        = serializers.CharField(source="product.name", read_only=True)
     product_code        = serializers.CharField(source="product.code", read_only=True)
-    returnable_quantity = serializers.IntegerField(read_only=True)
-    allocated_quantity  = serializers.IntegerField(read_only=True)
+    returnable_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
+    allocated_quantity  = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
     shelf_allocations   = PurchaseItemShelfAllocationReadSerializer(many=True, read_only=True)
 
     class Meta:
@@ -348,10 +350,59 @@ class PurchaseItemReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class PurchaseBatchSerializer(serializers.ModelSerializer):
+    """
+    One row in the read-only Purchase Batches view — all 4 RM families
+    (Jumbo/Cores/Packing/Cartons) in one list, per client requirement.
+    Flattens whichever attribute the product actually carries; the other
+    families' attribute fields are simply null on a given row.
+    """
+    order_number  = serializers.CharField(source="order.order_number", read_only=True)
+    order_status  = serializers.CharField(source="order.status", read_only=True)
+    order_date    = serializers.DateTimeField(source="order.created_at", read_only=True)
+    supplier_name = serializers.CharField(source="order.supplier.name", read_only=True)
+    supplier_code = serializers.CharField(source="order.supplier.code", read_only=True)
+    product_name  = serializers.CharField(source="product.name", read_only=True)
+    product_code  = serializers.CharField(source="product.code", read_only=True)
+
+    jumbo_name      = serializers.SerializerMethodField()
+    core_name       = serializers.SerializerMethodField()
+    core_length     = serializers.SerializerMethodField()
+    core_thickness  = serializers.SerializerMethodField()
+    packing_size    = serializers.SerializerMethodField()
+    carton_size     = serializers.SerializerMethodField()
+
+    def _attr(self, obj, field):
+        attr = getattr(obj.product, field)
+        return attr.value if attr is not None else None
+
+    def get_jumbo_name(self, obj):     return self._attr(obj, "jumbo_name")
+    def get_core_name(self, obj):      return self._attr(obj, "core_name")
+    def get_core_length(self, obj):    return self._attr(obj, "core_length")
+    def get_core_thickness(self, obj): return self._attr(obj, "core_thickness")
+    def get_packing_size(self, obj):   return self._attr(obj, "packing_size")
+    def get_carton_size(self, obj):    return self._attr(obj, "carton_size")
+
+    class Meta:
+        model  = PurchaseItem
+        fields = [
+            "id", "order_number", "order_status", "order_date",
+            "supplier_name", "supplier_code",
+            "product_name", "product_code",
+            "jumbo_name", "core_name", "core_length", "core_thickness",
+            "packing_size", "carton_size",
+            "quantity", "remaining_quantity", "unit_price",
+            "gross_amount", "gst_amount", "wht_amount", "total_price",
+            "weight_kg", "rate_per_kg", "freight_cost",
+            "expected_length_m", "exact_length_m",
+        ]
+        read_only_fields = fields
+
+
 class PurchaseItemWriteSerializer(serializers.Serializer):
     """Nested inside PurchaseOrder create/update."""
     product_id  = serializers.IntegerField()
-    quantity    = serializers.IntegerField(min_value=1)
+    quantity    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     unit_price  = serializers.DecimalField(max_digits=14, decimal_places=4)
     gst         = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
     wht         = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
@@ -496,6 +547,82 @@ class PurchaseOrderCreateSerializer(serializers.Serializer):
         return value
 
 
+# ---------------------------------------------------------------------------
+# Family-specific purchase intake — Jumbo/Cores/Packing/Cartons
+# ---------------------------------------------------------------------------
+# Shared payment/advance shape — identical to PurchaseOrderCreateSerializer's,
+# since each of these still creates one normal PurchaseOrder underneath.
+
+class _PaymentIntakeMixin(serializers.Serializer):
+    supplier_id    = serializers.IntegerField()
+    gst            = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
+    wht            = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
+    description    = serializers.CharField(required=False, allow_blank=True, default="")
+    payment_type   = serializers.ChoiceField(
+        choices=["advance", "after_delivery"], default="after_delivery", required=False,
+    )
+    advance_amount = serializers.DecimalField(max_digits=18, decimal_places=4, default=0, required=False)
+    method_allocations = MethodAllocationInputSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        payment_type   = attrs.get("payment_type", "after_delivery")
+        advance_amount = attrs.get("advance_amount", 0)
+        if payment_type == "after_delivery" and advance_amount and advance_amount > 0:
+            raise serializers.ValidationError(
+                {"advance_amount": "advance_amount must be 0 when payment_type is after_delivery."}
+            )
+        if payment_type == "advance" and (not advance_amount or advance_amount <= 0):
+            raise serializers.ValidationError(
+                {"advance_amount": "advance_amount is required and must be > 0 when payment_type is advance."}
+            )
+        if payment_type == "advance" and advance_amount > 0 and not attrs.get("method_allocations"):
+            raise serializers.ValidationError(
+                {"method_allocations": "At least one method must be selected for the advance payment."}
+            )
+        return attrs
+
+
+class JumboPurchaseCreateSerializer(_PaymentIntakeMixin):
+    jumbo_name_id     = serializers.IntegerField()
+    rate_per_kg       = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    weight_kg         = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    freight_cost      = serializers.DecimalField(max_digits=14, decimal_places=4, default=0, required=False, min_value=Decimal("0"))
+    expected_length_m = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+
+
+class CorePurchaseCreateSerializer(_PaymentIntakeMixin):
+    quantity           = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    unit_price         = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    core_name_id       = serializers.IntegerField(required=False, allow_null=True, default=None)
+    core_length_id     = serializers.IntegerField(required=False, allow_null=True, default=None)
+    core_thickness_id  = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+
+class PackingPurchaseCreateSerializer(_PaymentIntakeMixin):
+    packing_size_id = serializers.IntegerField()
+    rate_per_kg     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    weight_kg       = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+
+
+class CartonPurchaseCreateSerializer(_PaymentIntakeMixin):
+    carton_size_id = serializers.IntegerField()
+    quantity       = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    unit_price     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+
+
+class JumboExactLengthCorrectionSerializer(serializers.Serializer):
+    exact_length_m    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    shelf_allocations = ShelfAllocationInputSerializer(many=True)
+
+    def validate_shelf_allocations(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one shelf allocation is required.")
+        shelf_ids = [a["shelf_id"] for a in value]
+        if len(shelf_ids) != len(set(shelf_ids)):
+            raise serializers.ValidationError("Duplicate shelf_id entries are not allowed.")
+        return value
+
+
 class PurchaseOrderUpdateSerializer(serializers.Serializer):
     description    = serializers.CharField(required=False, allow_blank=True)
     payment_type   = serializers.ChoiceField(
@@ -601,7 +728,7 @@ class PurchaseOrderPaymentSummarySerializer(serializers.ModelSerializer):
 
 class PurchaseReturnItemWriteSerializer(serializers.Serializer):
     purchase_item_id = serializers.IntegerField()
-    quantity         = serializers.IntegerField(min_value=1)
+    quantity         = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     gst              = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
     wht              = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
 
@@ -650,7 +777,7 @@ class PurchaseReturnItemReadSerializer(serializers.ModelSerializer):
     product            = serializers.IntegerField(source="purchase_item.product_id", read_only=True)
     product_name       = serializers.CharField(source="purchase_item.product.name", read_only=True)
     product_code       = serializers.CharField(source="purchase_item.product.code", read_only=True)
-    allocated_quantity = serializers.IntegerField(read_only=True)
+    allocated_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
     shelf_allocations  = PurchaseReturnItemShelfAllocationReadSerializer(many=True, read_only=True)
 
     class Meta:
@@ -689,7 +816,7 @@ class PurchaseReturnReadSerializer(serializers.ModelSerializer):
 
 class LostInventoryItemWriteSerializer(serializers.Serializer):
     product_id        = serializers.IntegerField()
-    quantity          = serializers.IntegerField(min_value=1)
+    quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     reason            = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
     shelf_allocations = ShelfAllocationInputSerializer(many=True)
 
@@ -707,7 +834,7 @@ class LostInventoryCreateSerializer(serializers.Serializer):
 class LostInventoryItemReadSerializer(serializers.ModelSerializer):
     product_name        = serializers.CharField(source="product.name", read_only=True)
     product_code        = serializers.CharField(source="product.code", read_only=True)
-    returnable_quantity = serializers.IntegerField(read_only=True)
+    returnable_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
     recovered_amount     = serializers.DecimalField(max_digits=18, decimal_places=4, read_only=True)
     net_amount           = serializers.DecimalField(max_digits=18, decimal_places=4, read_only=True)
 
@@ -722,20 +849,20 @@ class LostInventoryItemReadSerializer(serializers.ModelSerializer):
 
 
 class MarkLostInventoryFoundSerializer(serializers.Serializer):
-    quantity          = serializers.IntegerField(min_value=1)
+    quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     shelf_allocations = ShelfAllocationInputSerializer(many=True)
 
 
 class LostInventoryFifoPreviewQuerySerializer(serializers.Serializer):
     """Validates query params for the FIFO cost preview endpoint."""
     product_id = serializers.IntegerField()
-    quantity   = serializers.IntegerField(min_value=1)
+    quantity   = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
 
 
 class LostInventoryFifoPreviewSerializer(serializers.Serializer):
     product_id         = serializers.IntegerField()
-    quantity           = serializers.IntegerField()
-    available_quantity = serializers.IntegerField()
+    quantity           = serializers.DecimalField(max_digits=14, decimal_places=4)
+    available_quantity = serializers.DecimalField(max_digits=14, decimal_places=4)
     unit_cost          = serializers.DecimalField(max_digits=14, decimal_places=4)
     total_cost         = serializers.DecimalField(max_digits=18, decimal_places=4)
     sufficient_stock   = serializers.BooleanField()
