@@ -1,5 +1,6 @@
+from contextlib import contextmanager
 from decimal import Decimal
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -43,6 +44,27 @@ def _soft_delete(instance, user) -> None:
     instance.deleted_at = timezone.now()
     instance.deleted_by = user
     instance.save(update_fields=["is_deleted", "deleted_at", "deleted_by"])
+
+
+@contextmanager
+def _unique_constraint_guard(message: str):
+    """
+    Wraps a create/update save in a savepoint; if two near-simultaneous
+    requests both pass the serializer's pre-check .exists() query (the
+    check-then-act race window) and the DB's own unique constraint fires
+    for whichever one loses, this converts the resulting IntegrityError
+    into the SAME clean ValidationError the pre-check would have raised,
+    instead of an unhandled 500 — per architecture.md's
+    "check-then-act uniqueness violation" rule. Used by every simple
+    id+value/id+name lookup's create_*/update_* (Category, Shelf, and the
+    six Jumbo/Core/Packing/Carton attribute lookups).
+    """
+    from rest_framework.exceptions import ValidationError
+    try:
+        with transaction.atomic():
+            yield
+    except IntegrityError:
+        raise ValidationError(message)
 
 
 # Model + reference field that each counter doc_type seeds its legacy max from.
@@ -332,7 +354,8 @@ def move_shelf_stock(*, from_shelf_id: int, to_shelf_id: int, product_id: int, q
 # ---------------------------------------------------------------------------
 
 def create_category(*, name: str, description: str = "", user) -> Category:
-    return Category.objects.create(name=name, description=description, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A category with this name already exists."):
+        return Category.objects.create(name=name, description=description, created_by=user, updated_by=user)
 
 
 def update_category(*, pk: int, name: str = None, description: str = None, user) -> Category:
@@ -342,7 +365,8 @@ def update_category(*, pk: int, name: str = None, description: str = None, user)
     if description is not None:
         category.description = description
     category.updated_by = user
-    category.save(update_fields=["name", "description", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A category with this name already exists."):
+        category.save(update_fields=["name", "description", "updated_by", "updated_at"])
     return category
 
 
@@ -359,14 +383,16 @@ def delete_category(*, pk: int, user) -> None:
 # hand-written despite being near-identical shapes).
 
 def create_jumbo_name(*, value: str, user) -> JumboName:
-    return JumboName.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Jumbo Name with this value already exists."):
+        return JumboName.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_jumbo_name(*, pk: int, value: str = None, user) -> JumboName:
     obj = get_jumbo_name_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Jumbo Name with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_jumbo_name(*, pk: int, user) -> None:
@@ -374,14 +400,16 @@ def delete_jumbo_name(*, pk: int, user) -> None:
 
 
 def create_jumbo_binding(*, value: str, user) -> JumboBinding:
-    return JumboBinding.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Jumbo Binding with this value already exists."):
+        return JumboBinding.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_jumbo_binding(*, pk: int, value: str = None, user) -> JumboBinding:
     obj = get_jumbo_binding_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Jumbo Binding with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_jumbo_binding(*, pk: int, user) -> None:
@@ -389,14 +417,16 @@ def delete_jumbo_binding(*, pk: int, user) -> None:
 
 
 def create_core_length(*, value: str, user) -> CoreLength:
-    return CoreLength.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Core Length with this value already exists."):
+        return CoreLength.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_core_length(*, pk: int, value: str = None, user) -> CoreLength:
     obj = get_core_length_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Core Length with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_core_length(*, pk: int, user) -> None:
@@ -404,14 +434,16 @@ def delete_core_length(*, pk: int, user) -> None:
 
 
 def create_core_thickness(*, value: str, user) -> CoreThickness:
-    return CoreThickness.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Core Thickness with this value already exists."):
+        return CoreThickness.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_core_thickness(*, pk: int, value: str = None, user) -> CoreThickness:
     obj = get_core_thickness_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Core Thickness with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_core_thickness(*, pk: int, user) -> None:
@@ -419,14 +451,16 @@ def delete_core_thickness(*, pk: int, user) -> None:
 
 
 def create_packing_size(*, value: str, user) -> PackingSize:
-    return PackingSize.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Packing Size with this value already exists."):
+        return PackingSize.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_packing_size(*, pk: int, value: str = None, user) -> PackingSize:
     obj = get_packing_size_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Packing Size with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_packing_size(*, pk: int, user) -> None:
@@ -434,14 +468,16 @@ def delete_packing_size(*, pk: int, user) -> None:
 
 
 def create_carton_size(*, value: str, user) -> CartonSize:
-    return CartonSize.objects.create(value=value, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A Carton Size with this value already exists."):
+        return CartonSize.objects.create(value=value, created_by=user, updated_by=user)
 
 def update_carton_size(*, pk: int, value: str = None, user) -> CartonSize:
     obj = get_carton_size_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A Carton Size with this value already exists."):
+        obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
 def delete_carton_size(*, pk: int, user) -> None:
@@ -453,7 +489,8 @@ def delete_carton_size(*, pk: int, user) -> None:
 # ---------------------------------------------------------------------------
 
 def create_shelf(*, name: str, description: str = "", user) -> Shelf:
-    return Shelf.objects.create(name=name, description=description, created_by=user, updated_by=user)
+    with _unique_constraint_guard("A shelf with this name already exists."):
+        return Shelf.objects.create(name=name, description=description, created_by=user, updated_by=user)
 
 
 def update_shelf(*, pk: int, name: str = None, description: str = None, user) -> Shelf:
@@ -463,7 +500,8 @@ def update_shelf(*, pk: int, name: str = None, description: str = None, user) ->
     if description is not None:
         shelf.description = description
     shelf.updated_by = user
-    shelf.save(update_fields=["name", "description", "updated_by", "updated_at"])
+    with _unique_constraint_guard("A shelf with this name already exists."):
+        shelf.save(update_fields=["name", "description", "updated_by", "updated_at"])
     return shelf
 
 

@@ -1,5 +1,18 @@
 import { api } from '../utils/api';
 
+// Identical-shape {id, value, ...} lookup resources (Jumbo Names/Bindings,
+// Core Lengths/Thicknesses, Packing/Carton Sizes) — full CRUD, admin-only,
+// same envelope/permission tier as Categories. Factory avoids 6x copy-paste.
+const createLookupApi = (path) => ({
+    getAll: (params = {}) => {
+        const query = new URLSearchParams(params).toString();
+        return api.get(`/${path}/${query ? `?${query}` : ''}`);
+    },
+    create: (data) => api.post(`/${path}/`, data),
+    update: (id, data) => api.patch(`/${path}/${id}/`, data),
+    delete: (id) => api.delete(`/${path}/${id}/`),
+});
+
 // Base API functions for purchases app
 export const purchasesApi = {
     // Categories
@@ -65,16 +78,25 @@ export const purchasesApi = {
         getOutstandingOrders: (id) => api.get(`/suppliers/${id}/outstanding-orders/`),
     },
 
-    // Products
+    // Products — frozen to 4 fixed rows (Jumbo/Cores/Packing/Cartons),
+    // seeded by a management command. Backend removed create/edit/delete;
+    // only list/detail (GET) remain.
     products: {
         getAll: (params = {}) => {
             const query = new URLSearchParams(params).toString();
             return api.get(`/products/${query ? `?${query}` : ''}`);
         },
-        create: (data) => api.post('/products/', data),
-        update: (id, data) => api.patch(`/products/${id}/`, data),
-        delete: (id) => api.delete(`/products/${id}/`),
+        getById: (id) => api.get(`/products/${id}/`),
     },
+
+    // Product attribute lookups — standalone tag values, not attached to
+    // Product yet (prep for a future production/recipe feature).
+    jumboNames: createLookupApi('jumbo-names'),
+    jumboBindings: createLookupApi('jumbo-bindings'),
+    coreLengths: createLookupApi('core-lengths'),
+    coreThicknesses: createLookupApi('core-thicknesses'),
+    packingSizes: createLookupApi('packing-sizes'),
+    cartonSizes: createLookupApi('carton-sizes'),
 
     // Purchase Orders
     orders: {

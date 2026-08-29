@@ -17,6 +17,7 @@ import ShelfDetailPage from './pages/purchases/ShelfDetailPage';
 import SuppliersPage from './pages/purchases/SuppliersPage';
 import SupplierDetailPage from './pages/purchases/SupplierDetailPage';
 import ProductsPage from './pages/purchases/ProductsPage';
+import ProductAttributesPage from './pages/purchases/ProductAttributesPage';
 import PurchaseOrdersPage from './pages/purchases/PurchaseOrdersPage';
 import PurchaseOrderDetailPage from './pages/purchases/PurchaseOrderDetailPage';
 import PaymentsPage from './pages/purchases/PaymentsPage';
@@ -247,6 +248,14 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <ProductsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/purchases/product-attributes" element={
+          <ProtectedRoute>
+            <Layout>
+              <ProductAttributesPage />
             </Layout>
           </ProtectedRoute>
         } />

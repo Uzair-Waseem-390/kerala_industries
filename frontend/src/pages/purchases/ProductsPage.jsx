@@ -1,31 +1,28 @@
 import { useState, useEffect } from 'react';
-import { Plus, SlidersHorizontal, X, Pencil, Trash2, PackageSearch } from 'lucide-react';
-import { useCRUD } from '../../hooks/usePurchases';
+import { SlidersHorizontal, X, PackageSearch } from 'lucide-react';
+import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { purchasesApi } from '../../services/purchasesApi';
 import Table from '../../components/ui/Table';
 import Button from '../../components/ui/Button';
-import Modal from '../../components/ui/Modal';
-import Input from '../../components/ui/Input';
-import Select from '../../components/ui/Select';
 import SearchBar from '../../components/ui/SearchBar';
 import FilterBar from '../../components/ui/FilterBar';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Badge from '../../components/ui/Badge';
-import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
-import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 
+// Product is now a frozen catalog of 4 fixed rows (Jumbo, Cores, Packing,
+// Cartons), seeded by a management command — create/edit/delete were
+// deliberately removed from both the backend and this page. This is a
+// read-only list + filter view; nothing here mutates a Product.
 const ProductsPage = () => {
-    const { user } = useAuth();
-    const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
     const { toast } = useToast();
 
-    const { data, meta, page, setPage, loading, error, filters, setFilters, create, update, delete: deleteProduct, refetch } = useCRUD(
-        purchasesApi.products,
+    const { data, meta, page, setPage, loading, error, filters, setFilters, refetch } = usePaginatedList(
+        (params) => purchasesApi.products.getAll(params),
         { search: '', category: '' }
     );
 
@@ -34,17 +31,6 @@ const ProductsPage = () => {
     const [categoryFilter, setCategoryFilter] = useState('');
     const [showFilters, setShowFilters] = useState(false);
     const [activeFilters, setActiveFilters] = useState({});
-    const [showModal, setShowModal] = useState(false);
-    const [editingProduct, setEditingProduct] = useState(null);
-    const [formData, setFormData] = useState({
-        name: '',
-        code: '',
-        category: '',
-    });
-    const [formLoading, setFormLoading] = useState(false);
-    const [formError, setFormError] = useState('');
-    const [deleteConfirm, setDeleteConfirm] = useState(null);
-    const [deleting, setDeleting] = useState(false);
 
     useEffect(() => {
         loadLookups();
@@ -108,92 +94,7 @@ const ProductsPage = () => {
                 </Badge>
             ),
         },
-        {
-            key: 'actions',
-            label: 'Actions',
-            width: '120px',
-            render: (_, row) => isAdmin && !row.is_deleted && (
-                <div className="flex items-center gap-1">
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(row);
-                        }}
-                        title="Edit product"
-                        className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-neutral-500 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                    >
-                        <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirm(row);
-                        }}
-                        title="Delete product"
-                        className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-neutral-500 hover:text-error-600 hover:bg-error-50 transition-colors"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
-                </div>
-            ),
-        },
     ];
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setFormLoading(true);
-        setFormError('');
-        try {
-            const submitData = {
-                ...formData,
-                category: parseInt(formData.category),
-            };
-            if (editingProduct) {
-                await update(editingProduct.id, submitData);
-                toast.success('Product updated successfully');
-            } else {
-                await create(submitData);
-                toast.success('Product created successfully');
-            }
-            setShowModal(false);
-            resetForm();
-        } catch (error) {
-            console.error('Failed to save product:', error);
-            setFormError(extractErrorMessage(error, 'Failed to save product'));
-        } finally {
-            setFormLoading(false);
-        }
-    };
-
-    const handleDelete = async (id) => {
-        setDeleting(true);
-        try {
-            await deleteProduct(id);
-            toast.success('Product deleted successfully');
-            setDeleteConfirm(null);
-        } catch (error) {
-            console.error('Failed to delete product:', error);
-            toast.error(extractErrorMessage(error, 'Failed to delete product'));
-        } finally {
-            setDeleting(false);
-        }
-    };
-
-    const handleEdit = (product) => {
-        setEditingProduct(product);
-        setFormData({
-            name: product.name,
-            code: product.code,
-            category: product.category?.id || '',
-        });
-        setShowModal(true);
-    };
-
-    const resetForm = () => {
-        setFormData({ name: '', code: '', category: '' });
-        setEditingProduct(null);
-        setFormError('');
-    };
 
     if (loading) {
         return (
@@ -208,19 +109,8 @@ const ProductsPage = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-neutral-900">Products</h1>
-                    <p className="text-neutral-500 mt-1">Manage products and inventory</p>
+                    <p className="text-neutral-500 mt-1">Fixed product catalog</p>
                 </div>
-                {isAdmin && (
-                    <Button
-                        onClick={() => {
-                            resetForm();
-                            setShowModal(true);
-                        }}
-                        icon={Plus}
-                    >
-                        Add Product
-                    </Button>
-                )}
             </div>
 
             {error && (
@@ -273,7 +163,7 @@ const ProductsPage = () => {
             {filteredData.length === 0 ? (
                 <EmptyState
                     title="No products found"
-                    description="Try adjusting your search or filters, or add a new product."
+                    description="Try adjusting your search or filters."
                     icon={<PackageSearch className="w-8 h-8 text-neutral-400" />}
                 />
             ) : (
@@ -290,68 +180,6 @@ const ProductsPage = () => {
                     onPageChange={setPage}
                 />
             )}
-
-            <Modal
-                isOpen={showModal}
-                onClose={() => {
-                    setShowModal(false);
-                    resetForm();
-                }}
-                title={editingProduct ? 'Edit Product' : 'Create Product'}
-            >
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {formError && (
-                        <InlineAlert variant="error" message={formError} />
-                    )}
-                    <Input
-                        label="Name"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        placeholder="Enter product name"
-                        required
-                    />
-                    <Input
-                        label="Code"
-                        value={formData.code}
-                        onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                        placeholder="Enter unique code"
-                        required
-                    />
-                    <Select
-                        label="Category"
-                        value={formData.category}
-                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                        options={categories.map(c => ({ value: c.id, label: c.name }))}
-                        placeholder="Select category"
-                        required
-                    />
-                    <div className="flex justify-end gap-3 pt-4">
-                        <Button
-                            type="button"
-                            variant="secondary"
-                            onClick={() => {
-                                setShowModal(false);
-                                resetForm();
-                            }}
-                        >
-                            Cancel
-                        </Button>
-                        <Button type="submit" loading={formLoading}>
-                            {editingProduct ? 'Update' : 'Create'}
-                        </Button>
-                    </div>
-                </form>
-            </Modal>
-
-            <ConfirmDialog
-                isOpen={!!deleteConfirm}
-                onClose={() => setDeleteConfirm(null)}
-                onConfirm={() => handleDelete(deleteConfirm?.id)}
-                title="Delete Product"
-                message={`Are you sure you want to delete "${deleteConfirm?.name}"? This action cannot be undone.`}
-                confirmText="Delete"
-                loading={deleting}
-            />
         </div>
     );
 };

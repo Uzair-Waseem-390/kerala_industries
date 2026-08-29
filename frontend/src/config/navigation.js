@@ -7,7 +7,7 @@ import {
     Repeat, Tag, Send, Calendar, Receipt, Banknote, PackageX, RotateCcw,
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
-    Wallet2,
+    Wallet2, SlidersHorizontal,
 } from 'lucide-react';
 
 export const mainNavigation = [
@@ -43,6 +43,7 @@ export const navGroups = [
             { name: 'Shelves', path: '/purchases/shelves', icon: Library },
             { name: 'Suppliers', path: '/purchases/suppliers', icon: Building2 },
             { name: 'Products', path: '/purchases/products', icon: Package },
+            { name: 'Product Attributes', path: '/purchases/product-attributes', icon: SlidersHorizontal },
             { name: 'Orders', path: '/purchases/orders', icon: ClipboardList },
             { name: 'Payments', path: '/purchases/payments', icon: Wallet },
             { name: 'Returns', path: '/purchases/returns', icon: Undo2 },
