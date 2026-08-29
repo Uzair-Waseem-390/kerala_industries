@@ -110,10 +110,6 @@ class ReadWriteSerializerMixin:
 
 
 # ---------------------------------------------------------------------------
-# Category
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
 # ---------------------------------------------------------------------------
 # Six identically-shaped list-create + retrieve-update-destroy view pairs,
