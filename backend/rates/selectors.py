@@ -25,6 +25,7 @@ def _clean(value):
 # Product) or a category (removed — Product is capped at 4 fixed rows).
 _RATE_RELATED = (
     "product", "product__created_by", "product__updated_by",
+    "product__family", "product__family__created_by", "product__family__updated_by",
     "updated_by", "created_by",
 )
 
@@ -70,10 +71,11 @@ def get_unpriced_products(*, search: str = None) -> QuerySet:
     from purchases.models import Product
 
     # Mirrors purchases.selectors._PRODUCT_RELATED — ProductReadSerializer
-    # nests only the product's own audit users; without these every row
-    # costs N+1 queries.
+    # nests family (with its own audit users) plus the product's own audit
+    # users; without these every row costs N+1 queries.
     qs = Product.objects.select_related(
         "created_by", "updated_by",
+        "family", "family__created_by", "family__updated_by",
     ).filter(is_deleted=False, unpriced_entry__isnull=False)
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "name", "code"))

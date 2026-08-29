@@ -14,7 +14,7 @@ import { useAuth } from '../../context/AuthContext';
 // of a full page navigation.
 const TABS = [
     { value: 'jumbo-names', label: 'Jumbo Names', singular: 'Jumbo Name', resourceKey: 'jumboNames' },
-    { value: 'jumbo-bindings', label: 'Jumbo Bindings', singular: 'Jumbo Binding', resourceKey: 'jumboBindings' },
+    { value: 'core-names', label: 'Core Names', singular: 'Core Name', resourceKey: 'coreNames' },
     { value: 'core-lengths', label: 'Core Lengths', singular: 'Core Length', resourceKey: 'coreLengths' },
     { value: 'core-thicknesses', label: 'Core Thicknesses', singular: 'Core Thickness', resourceKey: 'coreThicknesses' },
     { value: 'packing-sizes', label: 'Packing Sizes', singular: 'Packing Size', resourceKey: 'packingSizes' },

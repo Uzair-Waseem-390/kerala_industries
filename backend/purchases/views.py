@@ -15,18 +15,18 @@ from .pdf_service import (
 from .permissions import IsAdminOrSuperuser
 from .selectors import (
     compute_auto_shelf_allocation,
-    get_all_carton_sizes, get_all_core_lengths,
-    get_all_core_thicknesses, get_all_jumbo_bindings, get_all_jumbo_names,
+    get_all_carton_sizes, get_all_core_lengths, get_all_core_names,
+    get_all_core_thicknesses, get_all_jumbo_names,
     get_all_lost_inventory_records,
     get_all_packing_sizes,
     get_all_products, get_all_purchase_orders, get_all_returns,
     get_all_shelves, get_all_suppliers, get_candidate_shelves_for_product,
-    get_carton_size_by_id, get_core_length_by_id,
+    get_carton_size_by_id, get_core_length_by_id, get_core_name_by_id,
     get_core_thickness_by_id,
     get_confirmed_purchase_orders, get_draft_purchase_orders,
     get_all_families, get_family_by_id,
     get_fifo_cost_preview,
-    get_jumbo_binding_by_id, get_jumbo_name_by_id,
+    get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_lost_inventory_record_by_id,
     get_order_payment_summary, get_packing_size_by_id,
     get_payments_for_order, get_purchase_item_with_allocations_by_id,
@@ -41,9 +41,9 @@ from .serializers import (
     CandidateShelfSerializer,
     CartonSizeReadSerializer, CartonSizeWriteSerializer,
     CoreLengthReadSerializer, CoreLengthWriteSerializer,
+    CoreNameReadSerializer, CoreNameWriteSerializer,
     CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
     FamilyReadSerializer,
-    JumboBindingReadSerializer, JumboBindingWriteSerializer,
     JumboNameReadSerializer, JumboNameWriteSerializer,
     LostInventoryCreateSerializer,
     LostInventoryFifoPreviewQuerySerializer,
@@ -67,21 +67,21 @@ from .serializers import (
 )
 from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
-    create_carton_size, create_core_length,
-    create_core_thickness, create_jumbo_binding, create_jumbo_name,
+    create_carton_size, create_core_length, create_core_name,
+    create_core_thickness, create_jumbo_name,
     create_lost_inventory_record,
     create_packing_size,
     create_purchase_order, create_purchase_return, create_shelf,
     create_supplier, create_supplier_payment, delete_carton_size,
-    delete_core_length, delete_core_thickness,
-    delete_jumbo_binding, delete_jumbo_name,
+    delete_core_length, delete_core_name, delete_core_thickness,
+    delete_jumbo_name,
     delete_packing_size,
     delete_purchase_order, delete_shelf, delete_supplier,
     delete_supplier_payment, mark_lost_inventory_found, move_shelf_stock,
     set_purchase_item_shelf_allocations,
     set_purchase_return_item_shelf_allocations, update_carton_size,
-    update_core_length, update_core_thickness,
-    update_jumbo_binding, update_jumbo_name,
+    update_core_length, update_core_name, update_core_thickness,
+    update_jumbo_name,
     update_packing_size, update_purchase_order_items,
     update_purchase_return_items, update_shelf, update_supplier,
 )
@@ -173,39 +173,39 @@ class JumboNameRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.Retr
         return Response({"detail": "Jumbo Name deleted."}, status=status.HTTP_200_OK)
 
 
-class JumboBindingListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+class CoreNameListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
     permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = JumboBindingReadSerializer
-    write_serializer_class = JumboBindingWriteSerializer
+    read_serializer_class  = CoreNameReadSerializer
+    write_serializer_class = CoreNameWriteSerializer
 
     def get_queryset(self):
-        return get_all_jumbo_bindings()
+        return get_all_core_names()
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        obj = create_jumbo_binding(**serializer.validated_data, user=request.user)
-        return Response(JumboBindingReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+        obj = create_core_name(**serializer.validated_data, user=request.user)
+        return Response(CoreNameReadSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
-class JumboBindingRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+class CoreNameRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
     permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = JumboBindingReadSerializer
-    write_serializer_class = JumboBindingWriteSerializer
+    read_serializer_class  = CoreNameReadSerializer
+    write_serializer_class = CoreNameWriteSerializer
     http_method_names      = ["get", "patch", "delete"]
 
     def get_object(self):
-        return get_jumbo_binding_by_id(self.kwargs["pk"])
+        return get_core_name_by_id(self.kwargs["pk"])
 
     def update(self, request, *args, **kwargs):
         serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        obj = update_jumbo_binding(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
-        return Response(JumboBindingReadSerializer(obj).data)
+        obj = update_core_name(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(CoreNameReadSerializer(obj).data)
 
     def destroy(self, request, *args, **kwargs):
-        delete_jumbo_binding(pk=self.kwargs["pk"], user=request.user)
-        return Response({"detail": "Jumbo Binding deleted."}, status=status.HTTP_200_OK)
+        delete_core_name(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Core Name deleted."}, status=status.HTTP_200_OK)
 
 
 class CoreLengthListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):

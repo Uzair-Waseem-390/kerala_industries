@@ -5,8 +5,8 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, DocumentCounter,
-    JumboBinding, JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
+    CartonSize, CoreLength, CoreName, CoreThickness, DocumentCounter,
+    JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, LostInventoryRecovery, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
@@ -24,8 +24,8 @@ from inventory.services import (
 )
 from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
-    get_core_length_by_id, get_core_thickness_by_id, get_family_by_id,
-    get_jumbo_binding_by_id, get_jumbo_name_by_id,
+    get_core_length_by_id, get_core_name_by_id, get_core_thickness_by_id,
+    get_family_by_id, get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_id,
     get_purchase_item_by_id,
     get_purchase_order_by_id, get_purchase_return_by_id, get_shelf_by_id,
@@ -374,21 +374,21 @@ def delete_jumbo_name(*, pk: int, user) -> None:
     _soft_delete(get_jumbo_name_by_id(pk), user)
 
 
-def create_jumbo_binding(*, value: str, user) -> JumboBinding:
-    with _unique_constraint_guard("A Jumbo Binding with this value already exists."):
-        return JumboBinding.objects.create(value=value, created_by=user, updated_by=user)
+def create_core_name(*, value: str, user) -> CoreName:
+    with _unique_constraint_guard("A Core Name with this value already exists."):
+        return CoreName.objects.create(value=value, created_by=user, updated_by=user)
 
-def update_jumbo_binding(*, pk: int, value: str = None, user) -> JumboBinding:
-    obj = get_jumbo_binding_by_id(pk)
+def update_core_name(*, pk: int, value: str = None, user) -> CoreName:
+    obj = get_core_name_by_id(pk)
     if value is not None:
         obj.value = value
     obj.updated_by = user
-    with _unique_constraint_guard("A Jumbo Binding with this value already exists."):
+    with _unique_constraint_guard("A Core Name with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
     return obj
 
-def delete_jumbo_binding(*, pk: int, user) -> None:
-    _soft_delete(get_jumbo_binding_by_id(pk), user)
+def delete_core_name(*, pk: int, user) -> None:
+    _soft_delete(get_core_name_by_id(pk), user)
 
 
 def create_core_length(*, value: str, user) -> CoreLength:

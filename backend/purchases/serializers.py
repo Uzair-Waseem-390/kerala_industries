@@ -3,7 +3,7 @@ from rest_framework import serializers
 from payment_methods.serializers import MethodAllocationInputSerializer
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreName, CoreThickness, Family, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
@@ -60,23 +60,23 @@ class JumboNameWriteSerializer(serializers.ModelSerializer):
         return value.strip()
 
 
-class JumboBindingReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+class CoreNameReadSerializer(AuditReadMixin, serializers.ModelSerializer):
     class Meta:
-        model  = JumboBinding
+        model  = CoreName
         fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
 
 
-class JumboBindingWriteSerializer(serializers.ModelSerializer):
+class CoreNameWriteSerializer(serializers.ModelSerializer):
     class Meta:
-        model  = JumboBinding
+        model  = CoreName
         fields = ["value"]
 
     def validate_value(self, value):
-        qs = JumboBinding.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        qs = CoreName.objects.filter(value__iexact=value.strip(), is_deleted=False)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
-            raise serializers.ValidationError("A Jumbo Binding with this value already exists.")
+            raise serializers.ValidationError("A Core Name with this value already exists.")
         return value.strip()
 
 

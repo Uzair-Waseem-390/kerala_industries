@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreName, CoreThickness, Family, JumboName,
     LostInventoryFIFOConsumption, LostInventoryItem,
     LostInventoryRecord, PackingSize, Product, PurchaseItem, PurchaseOrder,
     PurchaseReturn, PurchaseReturnItem, SavedPurchaseOrderPDF,
@@ -50,8 +50,8 @@ class JumboNameAdmin(_LookupAdmin):
     pass
 
 
-@admin.register(JumboBinding)
-class JumboBindingAdmin(_LookupAdmin):
+@admin.register(CoreName)
+class CoreNameAdmin(_LookupAdmin):
     pass
 
 

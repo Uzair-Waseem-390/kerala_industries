@@ -11,7 +11,7 @@ from django.utils.dateparse import parse_date
 from backend.search import search_q
 
 from .models import (
-    CartonSize, CoreLength, CoreThickness, Family, JumboBinding, JumboName,
+    CartonSize, CoreLength, CoreName, CoreThickness, Family, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product, PurchaseItem,
     PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation, Shelf,
@@ -62,11 +62,11 @@ def get_jumbo_name_by_id(pk: int) -> JumboName:
     return get_object_or_404(JumboName, pk=pk, is_deleted=False)
 
 
-def get_all_jumbo_bindings():
-    return JumboBinding.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_core_names():
+    return CoreName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
 
-def get_jumbo_binding_by_id(pk: int) -> JumboBinding:
-    return get_object_or_404(JumboBinding, pk=pk, is_deleted=False)
+def get_core_name_by_id(pk: int) -> CoreName:
+    return get_object_or_404(CoreName, pk=pk, is_deleted=False)
 
 
 def get_all_core_lengths():

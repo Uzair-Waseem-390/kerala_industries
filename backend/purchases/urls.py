@@ -13,8 +13,8 @@ from .views import (
     # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
     JumboNameListCreateView,
     JumboNameRetrieveUpdateDestroyView,
-    JumboBindingListCreateView,
-    JumboBindingRetrieveUpdateDestroyView,
+    CoreNameListCreateView,
+    CoreNameRetrieveUpdateDestroyView,
     CoreLengthListCreateView,
     CoreLengthRetrieveUpdateDestroyView,
     CoreThicknessListCreateView,
@@ -83,8 +83,8 @@ urlpatterns = [
     # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
     path("jumbo-names/",             JumboNameListCreateView.as_view(),             name="jumbo-name-list-create"),
     path("jumbo-names/<int:pk>/",    JumboNameRetrieveUpdateDestroyView.as_view(),  name="jumbo-name-detail"),
-    path("jumbo-bindings/",          JumboBindingListCreateView.as_view(),          name="jumbo-binding-list-create"),
-    path("jumbo-bindings/<int:pk>/", JumboBindingRetrieveUpdateDestroyView.as_view(), name="jumbo-binding-detail"),
+    path("core-names/",               CoreNameListCreateView.as_view(),             name="core-name-list-create"),
+    path("core-names/<int:pk>/",      CoreNameRetrieveUpdateDestroyView.as_view(),  name="core-name-detail"),
     path("core-lengths/",            CoreLengthListCreateView.as_view(),            name="core-length-list-create"),
     path("core-lengths/<int:pk>/",   CoreLengthRetrieveUpdateDestroyView.as_view(), name="core-length-detail"),
     path("core-thicknesses/",        CoreThicknessListCreateView.as_view(),         name="core-thickness-list-create"),

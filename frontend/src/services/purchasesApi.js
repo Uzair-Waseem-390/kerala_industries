@@ -90,7 +90,7 @@ export const purchasesApi = {
     // Product attribute lookups — standalone tag values, not attached to
     // Product yet (prep for a future production/recipe feature).
     jumboNames: createLookupApi('jumbo-names'),
-    jumboBindings: createLookupApi('jumbo-bindings'),
+    coreNames: createLookupApi('core-names'),
     coreLengths: createLookupApi('core-lengths'),
     coreThicknesses: createLookupApi('core-thicknesses'),
     packingSizes: createLookupApi('packing-sizes'),

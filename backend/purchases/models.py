@@ -75,12 +75,12 @@ class JumboName(AuditMixin):
         return self.value
 
 
-class JumboBinding(AuditMixin):
+class CoreName(AuditMixin):
     value = models.CharField(max_length=255, unique=True)
 
     class Meta:
-        verbose_name        = "Jumbo Binding"
-        verbose_name_plural = "Jumbo Bindings"
+        verbose_name        = "Core Name"
+        verbose_name_plural = "Core Names"
         ordering            = ["value"]
 
     def __str__(self):
