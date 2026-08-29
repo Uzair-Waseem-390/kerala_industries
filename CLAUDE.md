@@ -21,5 +21,6 @@ failing the assignment, not taking a shortcut.
 - **ANY frontend change** → must read `instructions/frontend.md` before making any changes.
 - **ANY frontend redesign or new page** → must read `instructions/frontend_redesign.md` AND `instructions/architecture.md` before making any changes.
 - **Client requirements** → `docs/client_requirements.md`. read it when user ask to read it and when you're going to build or change something else and if your ask something different then these requirements point-out user that what's requirements are.
+- **ANY change to `purchases`, `billing`, `inventory`, or `rates`** → `instructions/multi-inventory-expansion.md` first. We're mid-design on a multi-inventory (Raw Material/WIP/Finished Goods) expansion touching these apps — read this before making any change there so you don't land a piecemeal change the finalized design will need reworked, and don't re-litigate decisions already settled.
 
 Skip these for unrelated tasks (styling tweaks, questions, isolated unrelated bugfixes) — but when in doubt about whether a task counts, read the file. The cost of reading is a few seconds; the cost of repeating a fixed mistake is a full review cycle.
