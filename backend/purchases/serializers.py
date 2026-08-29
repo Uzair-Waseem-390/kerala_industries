@@ -3,7 +3,8 @@ from rest_framework import serializers
 from payment_methods.serializers import MethodAllocationInputSerializer
 
 from .models import (
-    Category, LostInventoryItem, LostInventoryRecord, Product,
+    CartonSize, Category, CoreLength, CoreThickness, JumboBinding, JumboName,
+    LostInventoryItem, LostInventoryRecord, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
     SavedPurchaseOrderPDF, Shelf, Supplier, SupplierPayment,
@@ -42,6 +43,134 @@ class CategoryWriteSerializer(serializers.ModelSerializer):
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("A category with this name already exists.")
+        return value.strip()
+
+
+# ---------------------------------------------------------------------------
+# Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+# ---------------------------------------------------------------------------
+# Six identically-shaped id+value lookups — same pattern as Category's read/
+# write pair above, hand-written per model to match this app's existing
+# convention (Category/Shelf are equally explicit despite being near-
+# identical shapes).
+
+class JumboNameReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = JumboName
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class JumboNameWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = JumboName
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = JumboName.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Jumbo Name with this value already exists.")
+        return value.strip()
+
+
+class JumboBindingReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = JumboBinding
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class JumboBindingWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = JumboBinding
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = JumboBinding.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Jumbo Binding with this value already exists.")
+        return value.strip()
+
+
+class CoreLengthReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = CoreLength
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class CoreLengthWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CoreLength
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = CoreLength.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Core Length with this value already exists.")
+        return value.strip()
+
+
+class CoreThicknessReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = CoreThickness
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class CoreThicknessWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CoreThickness
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = CoreThickness.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Core Thickness with this value already exists.")
+        return value.strip()
+
+
+class PackingSizeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = PackingSize
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class PackingSizeWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = PackingSize
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = PackingSize.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Packing Size with this value already exists.")
+        return value.strip()
+
+
+class CartonSizeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    class Meta:
+        model  = CartonSize
+        fields = ["id", "value", "created_by", "updated_by", "created_at", "updated_at"]
+
+
+class CartonSizeWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CartonSize
+        fields = ["value"]
+
+    def validate_value(self, value):
+        qs = CartonSize.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A Carton Size with this value already exists.")
         return value.strip()
 
 
@@ -195,28 +324,10 @@ class ProductLiteSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "code"]
 
 
-class ProductWriteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model  = Product
-        fields = ["name", "code", "category"]
-
-    def validate_code(self, value):
-        qs = Product.objects.filter(code__iexact=value.strip(), is_deleted=False)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("A product with this code already exists.")
-        return value.strip().upper()
-
-    def validate_name(self, value):
-        if not value.strip():
-            raise serializers.ValidationError("Product name cannot be blank.")
-        return value.strip()
-
-    def validate_category(self, value):
-        if value.is_deleted:
-            raise serializers.ValidationError("Selected category has been deleted.")
-        return value
+# ProductWriteSerializer removed — Product is capped at exactly 4 fixed rows
+# seeded by the seed_fixed_products management command; create/update/delete
+# are no longer exposed via the API (see ProductListView/ProductRetrieveView
+# in views.py, read-only now).
 
 
 # ---------------------------------------------------------------------------

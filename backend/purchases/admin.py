@@ -1,8 +1,9 @@
 from django.contrib import admin
 
 from .models import (
-    Category, LostInventoryFIFOConsumption, LostInventoryItem,
-    LostInventoryRecord, Product, PurchaseItem, PurchaseOrder,
+    CartonSize, Category, CoreLength, CoreThickness, JumboBinding, JumboName,
+    LostInventoryFIFOConsumption, LostInventoryItem,
+    LostInventoryRecord, PackingSize, Product, PurchaseItem, PurchaseOrder,
     PurchaseReturn, PurchaseReturnItem, SavedPurchaseOrderPDF,
     Shelf, Supplier, SupplierPayment,
 )
@@ -42,6 +43,44 @@ class CategoryAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     list_filter   = ["is_deleted"]
     search_fields = ["name"]
     readonly_fields = AuditAdminMixin.readonly_fields
+
+
+class _LookupAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
+    """Shared changelist config for the six id+value attribute lookups below."""
+    list_display    = ["value", "is_deleted", "created_by", "created_at"]
+    list_filter     = ["is_deleted"]
+    search_fields   = ["value"]
+    readonly_fields = AuditAdminMixin.readonly_fields
+
+
+@admin.register(JumboName)
+class JumboNameAdmin(_LookupAdmin):
+    pass
+
+
+@admin.register(JumboBinding)
+class JumboBindingAdmin(_LookupAdmin):
+    pass
+
+
+@admin.register(CoreLength)
+class CoreLengthAdmin(_LookupAdmin):
+    pass
+
+
+@admin.register(CoreThickness)
+class CoreThicknessAdmin(_LookupAdmin):
+    pass
+
+
+@admin.register(PackingSize)
+class PackingSizeAdmin(_LookupAdmin):
+    pass
+
+
+@admin.register(CartonSize)
+class CartonSizeAdmin(_LookupAdmin):
+    pass
 
 
 @admin.register(Shelf)

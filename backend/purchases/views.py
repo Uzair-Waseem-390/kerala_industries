@@ -15,14 +15,19 @@ from .pdf_service import (
 from .permissions import IsAdminOrSuperuser
 from .selectors import (
     compute_auto_shelf_allocation,
-    get_all_categories, get_all_lost_inventory_records,
+    get_all_carton_sizes, get_all_categories, get_all_core_lengths,
+    get_all_core_thicknesses, get_all_jumbo_bindings, get_all_jumbo_names,
+    get_all_lost_inventory_records,
+    get_all_packing_sizes,
     get_all_products, get_all_purchase_orders, get_all_returns,
     get_all_shelves, get_all_suppliers, get_candidate_shelves_for_product,
-    get_category_by_id,
+    get_carton_size_by_id, get_category_by_id, get_core_length_by_id,
+    get_core_thickness_by_id,
     get_confirmed_purchase_orders, get_draft_purchase_orders,
     get_fifo_cost_preview,
+    get_jumbo_binding_by_id, get_jumbo_name_by_id,
     get_lost_inventory_item_by_id, get_lost_inventory_record_by_id,
-    get_order_payment_summary,
+    get_order_payment_summary, get_packing_size_by_id,
     get_payments_for_order, get_purchase_item_with_allocations_by_id,
     get_purchase_order_by_id, get_purchase_return_by_id,
     get_purchase_return_item_with_allocations_by_id,
@@ -33,13 +38,19 @@ from .selectors import (
 from .serializers import (
     AutoAllocateShelvesRequestSerializer, AutoAllocateShelvesResponseSerializer,
     CandidateShelfSerializer,
+    CartonSizeReadSerializer, CartonSizeWriteSerializer,
     CategoryReadSerializer, CategoryWriteSerializer,
+    CoreLengthReadSerializer, CoreLengthWriteSerializer,
+    CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
+    JumboBindingReadSerializer, JumboBindingWriteSerializer,
+    JumboNameReadSerializer, JumboNameWriteSerializer,
     LostInventoryCreateSerializer,
     LostInventoryFifoPreviewQuerySerializer,
     LostInventoryFifoPreviewSerializer, LostInventoryItemReadSerializer,
     LostInventoryReadSerializer, MarkLostInventoryFoundSerializer,
     MoveStockSerializer,
-    ProductReadSerializer, ProductWriteSerializer,
+    PackingSizeReadSerializer, PackingSizeWriteSerializer,
+    ProductReadSerializer,
     PurchaseItemReadSerializer, PurchaseOrderCreateSerializer,
     PurchaseOrderPaymentSummarySerializer, PurchaseOrderReadSerializer,
     PurchaseOrderUpdateSerializer, PurchaseReturnCreateSerializer,
@@ -55,14 +66,22 @@ from .serializers import (
 )
 from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
-    create_category, create_lost_inventory_record, create_product,
+    create_carton_size, create_category, create_core_length,
+    create_core_thickness, create_jumbo_binding, create_jumbo_name,
+    create_lost_inventory_record,
+    create_packing_size,
     create_purchase_order, create_purchase_return, create_shelf,
-    create_supplier, create_supplier_payment, delete_category,
-    delete_product, delete_purchase_order, delete_shelf, delete_supplier,
+    create_supplier, create_supplier_payment, delete_carton_size,
+    delete_category, delete_core_length, delete_core_thickness,
+    delete_jumbo_binding, delete_jumbo_name,
+    delete_packing_size,
+    delete_purchase_order, delete_shelf, delete_supplier,
     delete_supplier_payment, mark_lost_inventory_found, move_shelf_stock,
     set_purchase_item_shelf_allocations,
-    set_purchase_return_item_shelf_allocations, update_category,
-    update_product, update_purchase_order_items,
+    set_purchase_return_item_shelf_allocations, update_carton_size,
+    update_category, update_core_length, update_core_thickness,
+    update_jumbo_binding, update_jumbo_name,
+    update_packing_size, update_purchase_order_items,
     update_purchase_return_items, update_shelf, update_supplier,
 )
 
@@ -128,6 +147,223 @@ class CategoryRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.Retri
     def destroy(self, request, *args, **kwargs):
         delete_category(pk=self.kwargs["pk"], user=request.user)
         return Response({"detail": "Category deleted."}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+# ---------------------------------------------------------------------------
+# Six identically-shaped list-create + retrieve-update-destroy view pairs —
+# same pattern as Category above, hand-written per lookup to match this
+# app's existing convention.
+
+class JumboNameListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = JumboNameReadSerializer
+    write_serializer_class = JumboNameWriteSerializer
+
+    def get_queryset(self):
+        return get_all_jumbo_names()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_jumbo_name(**serializer.validated_data, user=request.user)
+        return Response(JumboNameReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class JumboNameRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = JumboNameReadSerializer
+    write_serializer_class = JumboNameWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_jumbo_name_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_jumbo_name(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(JumboNameReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_jumbo_name(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Jumbo Name deleted."}, status=status.HTTP_200_OK)
+
+
+class JumboBindingListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = JumboBindingReadSerializer
+    write_serializer_class = JumboBindingWriteSerializer
+
+    def get_queryset(self):
+        return get_all_jumbo_bindings()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_jumbo_binding(**serializer.validated_data, user=request.user)
+        return Response(JumboBindingReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class JumboBindingRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = JumboBindingReadSerializer
+    write_serializer_class = JumboBindingWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_jumbo_binding_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_jumbo_binding(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(JumboBindingReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_jumbo_binding(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Jumbo Binding deleted."}, status=status.HTTP_200_OK)
+
+
+class CoreLengthListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CoreLengthReadSerializer
+    write_serializer_class = CoreLengthWriteSerializer
+
+    def get_queryset(self):
+        return get_all_core_lengths()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_core_length(**serializer.validated_data, user=request.user)
+        return Response(CoreLengthReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CoreLengthRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CoreLengthReadSerializer
+    write_serializer_class = CoreLengthWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_core_length_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_core_length(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(CoreLengthReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_core_length(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Core Length deleted."}, status=status.HTTP_200_OK)
+
+
+class CoreThicknessListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CoreThicknessReadSerializer
+    write_serializer_class = CoreThicknessWriteSerializer
+
+    def get_queryset(self):
+        return get_all_core_thicknesses()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_core_thickness(**serializer.validated_data, user=request.user)
+        return Response(CoreThicknessReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CoreThicknessRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CoreThicknessReadSerializer
+    write_serializer_class = CoreThicknessWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_core_thickness_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_core_thickness(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(CoreThicknessReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_core_thickness(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Core Thickness deleted."}, status=status.HTTP_200_OK)
+
+
+class PackingSizeListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = PackingSizeReadSerializer
+    write_serializer_class = PackingSizeWriteSerializer
+
+    def get_queryset(self):
+        return get_all_packing_sizes()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_packing_size(**serializer.validated_data, user=request.user)
+        return Response(PackingSizeReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class PackingSizeRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = PackingSizeReadSerializer
+    write_serializer_class = PackingSizeWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_packing_size_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_packing_size(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(PackingSizeReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_packing_size(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Packing Size deleted."}, status=status.HTTP_200_OK)
+
+
+class CartonSizeListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CartonSizeReadSerializer
+    write_serializer_class = CartonSizeWriteSerializer
+
+    def get_queryset(self):
+        return get_all_carton_sizes()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        obj = create_carton_size(**serializer.validated_data, user=request.user)
+        return Response(CartonSizeReadSerializer(obj).data, status=status.HTTP_201_CREATED)
+
+
+class CartonSizeRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
+    permission_classes     = [IsAdminOrSuperuser]
+    read_serializer_class  = CartonSizeReadSerializer
+    write_serializer_class = CartonSizeWriteSerializer
+    http_method_names      = ["get", "patch", "delete"]
+
+    def get_object(self):
+        return get_carton_size_by_id(self.kwargs["pk"])
+
+    def update(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        obj = update_carton_size(pk=self.kwargs["pk"], user=request.user, **serializer.validated_data)
+        return Response(CartonSizeReadSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        delete_carton_size(pk=self.kwargs["pk"], user=request.user)
+        return Response({"detail": "Carton Size deleted."}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -281,51 +517,27 @@ class SupplierRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.Retri
 # Product
 # ---------------------------------------------------------------------------
 
-class ProductListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIView):
-    permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = ProductReadSerializer
-    write_serializer_class = ProductWriteSerializer
+# Product is capped at exactly 4 fixed rows, seeded by the
+# seed_fixed_products management command — create/update/delete are no
+# longer exposed via the API (create_product/update_product/delete_product
+# in services.py stay intact, still used by the seed command and by
+# rates'/inventory's side-effect wiring). Read-only from here on.
+
+class ProductListView(generics.ListAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = ProductReadSerializer
 
     def get_queryset(self):
         return get_all_products(search=self.request.query_params.get("search"))
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        d   = serializer.validated_data
-        obj = create_product(
-            name=d["name"], code=d["code"],
-            category_id=d["category"].pk,
-            user=request.user,
-        )
-        return Response(ProductReadSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-
-class ProductRetrieveUpdateDestroyView(ReadWriteSerializerMixin, generics.RetrieveUpdateDestroyAPIView):
-    permission_classes     = [IsAdminOrSuperuser]
-    read_serializer_class  = ProductReadSerializer
-    write_serializer_class = ProductWriteSerializer
-    http_method_names      = ["get", "patch", "delete"]
+class ProductRetrieveView(generics.RetrieveAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = ProductReadSerializer
 
     def get_object(self):
         from .selectors import get_product_by_id
         return get_product_by_id(self.kwargs["pk"])
-
-    def update(self, request, *args, **kwargs):
-        serializer = self.get_serializer(self.get_object(), data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        d   = serializer.validated_data
-        obj = update_product(
-            pk=self.kwargs["pk"],
-            name=d.get("name"), code=d.get("code"),
-            category_id=d["category"].pk if "category" in d else None,
-            user=request.user,
-        )
-        return Response(ProductReadSerializer(obj).data)
-
-    def destroy(self, request, *args, **kwargs):
-        delete_product(pk=self.kwargs["pk"], user=request.user)
-        return Response({"detail": "Product deleted."}, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------

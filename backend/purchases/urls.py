@@ -10,6 +10,20 @@ from .views import (
     AutoAllocateShelvesView,
     MoveStockView,
 
+    # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+    JumboNameListCreateView,
+    JumboNameRetrieveUpdateDestroyView,
+    JumboBindingListCreateView,
+    JumboBindingRetrieveUpdateDestroyView,
+    CoreLengthListCreateView,
+    CoreLengthRetrieveUpdateDestroyView,
+    CoreThicknessListCreateView,
+    CoreThicknessRetrieveUpdateDestroyView,
+    PackingSizeListCreateView,
+    PackingSizeRetrieveUpdateDestroyView,
+    CartonSizeListCreateView,
+    CartonSizeRetrieveUpdateDestroyView,
+
     # Supplier
     SupplierListCreateView,
     SupplierRetrieveUpdateDestroyView,
@@ -19,8 +33,8 @@ from .views import (
     AllSupplierPaymentsView,
 
     # Product
-    ProductListCreateView,
-    ProductRetrieveUpdateDestroyView,
+    ProductListView,
+    ProductRetrieveView,
 
     # Purchase item / return item shelf allocations
     SetPurchaseItemShelfAllocationsView,
@@ -66,6 +80,20 @@ urlpatterns = [
     path("categories/",          CategoryListCreateView.as_view(),             name="category-list-create"),
     path("categories/<int:pk>/", CategoryRetrieveUpdateDestroyView.as_view(), name="category-detail"),
 
+    # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+    path("jumbo-names/",             JumboNameListCreateView.as_view(),             name="jumbo-name-list-create"),
+    path("jumbo-names/<int:pk>/",    JumboNameRetrieveUpdateDestroyView.as_view(),  name="jumbo-name-detail"),
+    path("jumbo-bindings/",          JumboBindingListCreateView.as_view(),          name="jumbo-binding-list-create"),
+    path("jumbo-bindings/<int:pk>/", JumboBindingRetrieveUpdateDestroyView.as_view(), name="jumbo-binding-detail"),
+    path("core-lengths/",            CoreLengthListCreateView.as_view(),            name="core-length-list-create"),
+    path("core-lengths/<int:pk>/",   CoreLengthRetrieveUpdateDestroyView.as_view(), name="core-length-detail"),
+    path("core-thicknesses/",        CoreThicknessListCreateView.as_view(),         name="core-thickness-list-create"),
+    path("core-thicknesses/<int:pk>/", CoreThicknessRetrieveUpdateDestroyView.as_view(), name="core-thickness-detail"),
+    path("packing-sizes/",           PackingSizeListCreateView.as_view(),           name="packing-size-list-create"),
+    path("packing-sizes/<int:pk>/",  PackingSizeRetrieveUpdateDestroyView.as_view(), name="packing-size-detail"),
+    path("carton-sizes/",            CartonSizeListCreateView.as_view(),            name="carton-size-list-create"),
+    path("carton-sizes/<int:pk>/",   CartonSizeRetrieveUpdateDestroyView.as_view(), name="carton-size-detail"),
+
     path("shelves/",             ShelfListCreateView.as_view(),                name="shelf-list-create"),
 
     # static paths (candidates/, move/) BEFORE dynamic <int:pk> paths
@@ -104,8 +132,8 @@ urlpatterns = [
     # -----------------------------------------------------------------------
     # Product
     # -----------------------------------------------------------------------
-    path("products/",            ProductListCreateView.as_view(),             name="product-list-create"),
-    path("products/<int:pk>/",   ProductRetrieveUpdateDestroyView.as_view(), name="product-detail"),
+    path("products/",            ProductListView.as_view(),                   name="product-list-create"),
+    path("products/<int:pk>/",   ProductRetrieveView.as_view(),               name="product-detail"),
 
     # -----------------------------------------------------------------------
     # Purchase Orders

@@ -1,0 +1,45 @@
+from django.core.management.base import BaseCommand
+from django.db import transaction
+
+from purchases.models import Product
+from purchases.services import create_product
+
+# The ONLY 4 products this system will ever have. Product create/edit/delete
+# are no longer exposed via the API (see purchases/views.py — ProductListView/
+# ProductRetrieveView are read-only now) — this command is the sole place new
+# Product rows get created, reusing the existing create_product() service so
+# its side effects (queueing the product into rates' unpriced list, keeping
+# inventory stats in sync) fire exactly as they always have.
+FIXED_PRODUCTS = [
+    {"code": "PRO-1000", "name": "Jumbo"},
+    {"code": "PRO-1001", "name": "Cores"},
+    {"code": "PRO-1002", "name": "Packing"},
+    {"code": "PRO-1003", "name": "Cartons"},
+]
+
+
+class Command(BaseCommand):
+    """
+    Seeds the 4 fixed products: Jumbo, Cores, Packing, Cartons.
+    Safe to re-run — skips any code that already exists (including
+    soft-deleted rows, to avoid a duplicate-code collision on retry)
+    instead of erroring.
+    """
+
+    help = "Seeds the 4 fixed products (Jumbo, Cores, Packing, Cartons). Safe to re-run."
+
+    @transaction.atomic
+    def handle(self, *args, **options):
+        # No request.user in a management command context — None is valid
+        # (AuditMixin's created_by/updated_by are SET_NULL), same convention
+        # as data_entry.create_system_supplier.
+        user = None
+
+        for spec in FIXED_PRODUCTS:
+            if Product.all_objects.filter(code=spec["code"]).exists():
+                self.stdout.write(f"'{spec['name']}' ({spec['code']}) already exists — skipped.")
+                continue
+            product = create_product(name=spec["name"], code=spec["code"], user=user)
+            self.stdout.write(self.style.SUCCESS(
+                f"Created '{product.name}' ({product.code}), id={product.pk}."
+            ))

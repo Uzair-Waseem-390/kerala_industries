@@ -65,6 +65,90 @@ class Category(AuditMixin):
         return self.name
 
 
+# ---------------------------------------------------------------------------
+# Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+# ---------------------------------------------------------------------------
+# Standalone lookup tables — NOT a FK on Product. Product is capped at
+# exactly 4 fixed rows (seeded by seed_fixed_products, never created via
+# API); these are simple, user-manageable value lists that future
+# production/recipe records will reference to tag/filter their own rows
+# (e.g. "this batch's core output was 1248mm length, 210 mic thickness").
+# `value` is unique=True — a real unique B-tree index, exact-match lookups
+# are O(log n)/effectively O(1), no trigram/GIN index needed since these
+# are a controlled dropdown list, not free-text search targets.
+
+class JumboName(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Jumbo Name"
+        verbose_name_plural = "Jumbo Names"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
+class JumboBinding(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Jumbo Binding"
+        verbose_name_plural = "Jumbo Bindings"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
+class CoreLength(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Core Length"
+        verbose_name_plural = "Core Lengths"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
+class CoreThickness(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Core Thickness"
+        verbose_name_plural = "Core Thicknesses"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
+class PackingSize(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Packing Size"
+        verbose_name_plural = "Packing Sizes"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
+class CartonSize(AuditMixin):
+    value = models.CharField(max_length=255, unique=True)
+
+    class Meta:
+        verbose_name        = "Carton Size"
+        verbose_name_plural = "Carton Sizes"
+        ordering            = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
 class Shelf(AuditMixin):
     name        = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, default="")
@@ -102,7 +186,10 @@ class Supplier(AuditMixin):
 class Product(AuditMixin):
     name     = models.CharField(max_length=255)
     code     = models.CharField(max_length=100, unique=True)
-    category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
+    category = models.ForeignKey(
+        Category, on_delete=models.PROTECT, related_name="products",
+        null=True, blank=True,
+    )
 
     class Meta:
         verbose_name        = "Product"

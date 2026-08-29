@@ -11,8 +11,8 @@ from django.utils.dateparse import parse_date
 from backend.search import search_q
 
 from .models import (
-    Category,
-    LostInventoryItem, LostInventoryRecord, Product, PurchaseItem,
+    Category, CartonSize, CoreLength, CoreThickness, JumboBinding, JumboName,
+    LostInventoryItem, LostInventoryRecord, PackingSize, Product, PurchaseItem,
     PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation, Shelf,
     Supplier,
@@ -62,6 +62,52 @@ def get_all_categories():
 
 def get_category_by_id(pk: int) -> Category:
     return get_object_or_404(Category, pk=pk, is_deleted=False)
+
+
+# ---------------------------------------------------------------------------
+# Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
+# ---------------------------------------------------------------------------
+
+def get_all_jumbo_names():
+    return JumboName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_jumbo_name_by_id(pk: int) -> JumboName:
+    return get_object_or_404(JumboName, pk=pk, is_deleted=False)
+
+
+def get_all_jumbo_bindings():
+    return JumboBinding.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_jumbo_binding_by_id(pk: int) -> JumboBinding:
+    return get_object_or_404(JumboBinding, pk=pk, is_deleted=False)
+
+
+def get_all_core_lengths():
+    return CoreLength.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_core_length_by_id(pk: int) -> CoreLength:
+    return get_object_or_404(CoreLength, pk=pk, is_deleted=False)
+
+
+def get_all_core_thicknesses():
+    return CoreThickness.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_core_thickness_by_id(pk: int) -> CoreThickness:
+    return get_object_or_404(CoreThickness, pk=pk, is_deleted=False)
+
+
+def get_all_packing_sizes():
+    return PackingSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_packing_size_by_id(pk: int) -> PackingSize:
+    return get_object_or_404(PackingSize, pk=pk, is_deleted=False)
+
+
+def get_all_carton_sizes():
+    return CartonSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+
+def get_carton_size_by_id(pk: int) -> CartonSize:
+    return get_object_or_404(CartonSize, pk=pk, is_deleted=False)
 
 
 # ---------------------------------------------------------------------------

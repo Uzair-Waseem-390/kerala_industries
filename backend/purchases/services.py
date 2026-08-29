@@ -4,8 +4,9 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import (
-    Category, DocumentCounter, LostInventoryFIFOConsumption, LostInventoryItem,
-    LostInventoryRecord, LostInventoryRecovery, Product,
+    CartonSize, Category, CoreLength, CoreThickness, DocumentCounter,
+    JumboBinding, JumboName, LostInventoryFIFOConsumption, LostInventoryItem,
+    LostInventoryRecord, LostInventoryRecovery, PackingSize, Product,
     PurchaseItem, PurchaseItemShelfAllocation, PurchaseOrder, PurchaseReturn,
     PurchaseReturnItem, PurchaseReturnItemShelfAllocation,
     SavedPurchaseOrderPDF, Shelf, Supplier, SupplierPayment,
@@ -21,8 +22,11 @@ from inventory.services import (
     apply_shelf_allocations, apply_shelf_delta, sync_inventory,
 )
 from .selectors import (
-    get_available_purchase_items_for_fifo, get_category_by_id,
-    get_lost_inventory_item_by_id, get_product_by_id, get_purchase_item_by_id,
+    get_available_purchase_items_for_fifo, get_carton_size_by_id,
+    get_category_by_id, get_core_length_by_id, get_core_thickness_by_id,
+    get_jumbo_binding_by_id, get_jumbo_name_by_id,
+    get_lost_inventory_item_by_id, get_packing_size_by_id, get_product_by_id,
+    get_purchase_item_by_id,
     get_purchase_order_by_id, get_purchase_return_by_id, get_shelf_by_id,
     get_supplier_by_id, get_supplier_payment_by_id,
 )
@@ -347,6 +351,104 @@ def delete_category(*, pk: int, user) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons) — services
+# ---------------------------------------------------------------------------
+# Six identically-shaped lookups (create/update/delete), same pattern as
+# Category above. Written out explicitly per lookup (not a generic factory)
+# to match this app's existing convention (Category/Shelf are equally
+# hand-written despite being near-identical shapes).
+
+def create_jumbo_name(*, value: str, user) -> JumboName:
+    return JumboName.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_jumbo_name(*, pk: int, value: str = None, user) -> JumboName:
+    obj = get_jumbo_name_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_jumbo_name(*, pk: int, user) -> None:
+    _soft_delete(get_jumbo_name_by_id(pk), user)
+
+
+def create_jumbo_binding(*, value: str, user) -> JumboBinding:
+    return JumboBinding.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_jumbo_binding(*, pk: int, value: str = None, user) -> JumboBinding:
+    obj = get_jumbo_binding_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_jumbo_binding(*, pk: int, user) -> None:
+    _soft_delete(get_jumbo_binding_by_id(pk), user)
+
+
+def create_core_length(*, value: str, user) -> CoreLength:
+    return CoreLength.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_core_length(*, pk: int, value: str = None, user) -> CoreLength:
+    obj = get_core_length_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_core_length(*, pk: int, user) -> None:
+    _soft_delete(get_core_length_by_id(pk), user)
+
+
+def create_core_thickness(*, value: str, user) -> CoreThickness:
+    return CoreThickness.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_core_thickness(*, pk: int, value: str = None, user) -> CoreThickness:
+    obj = get_core_thickness_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_core_thickness(*, pk: int, user) -> None:
+    _soft_delete(get_core_thickness_by_id(pk), user)
+
+
+def create_packing_size(*, value: str, user) -> PackingSize:
+    return PackingSize.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_packing_size(*, pk: int, value: str = None, user) -> PackingSize:
+    obj = get_packing_size_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_packing_size(*, pk: int, user) -> None:
+    _soft_delete(get_packing_size_by_id(pk), user)
+
+
+def create_carton_size(*, value: str, user) -> CartonSize:
+    return CartonSize.objects.create(value=value, created_by=user, updated_by=user)
+
+def update_carton_size(*, pk: int, value: str = None, user) -> CartonSize:
+    obj = get_carton_size_by_id(pk)
+    if value is not None:
+        obj.value = value
+    obj.updated_by = user
+    obj.save(update_fields=["value", "updated_by", "updated_at"])
+    return obj
+
+def delete_carton_size(*, pk: int, user) -> None:
+    _soft_delete(get_carton_size_by_id(pk), user)
+
+
+# ---------------------------------------------------------------------------
 # Shelf services
 # ---------------------------------------------------------------------------
 
@@ -422,8 +524,9 @@ def delete_supplier(*, pk: int, user) -> None:
 # ---------------------------------------------------------------------------
 
 @transaction.atomic
-def create_product(*, name: str, code: str, category_id: int, user) -> Product:
-    get_category_by_id(category_id)
+def create_product(*, name: str, code: str, category_id: int = None, user) -> Product:
+    if category_id is not None:
+        get_category_by_id(category_id)
     product = Product.objects.create(
         name=name, code=code, category_id=category_id,
         created_by=user, updated_by=user,
