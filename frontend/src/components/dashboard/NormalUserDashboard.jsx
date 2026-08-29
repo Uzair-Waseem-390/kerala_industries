@@ -9,6 +9,7 @@ import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import Card from '../ui/Card';
 import SearchBar from '../ui/SearchBar';
+import Select from '../ui/Select';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import Badge from '../ui/Badge';
 import Table from '../ui/Table';
@@ -20,23 +21,26 @@ const NormalUserDashboard = () => {
     const [rates, setRates] = useState([]);
     const [ratesLoading, setRatesLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [familyFilter, setFamilyFilter] = useState('');
+    const [families, setFamilies] = useState([]);
     const [invStats, setInvStats] = useState(null);
     const [activeTab, setActiveTab] = useState('inventory');
 
-    // Search/category are routed through query params — the backend
-    // supports search/category on this endpoint — so the table itself
+    // Search/family are routed through query params — the backend
+    // supports search/family on this endpoint — so the table itself
     // stays correctly paginated instead of filtering a client-side array.
     // Shelf is no longer a product-level filter (a product can now span
     // multiple shelves) — per-shelf breakdowns live on the Shelves page.
     const fetchInventoryPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
+        if (familyFilter) p.family = familyFilter;
         return inventoryApi.inventory.getAll(p);
     };
 
     const {
         data: inventory, meta, page, setPage, loading: inventoryLoading,
-    } = usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm]);
+    } = usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, familyFilter]);
 
     useEffect(() => {
         loadLookupsAndRates();
@@ -45,12 +49,25 @@ const NormalUserDashboard = () => {
     const loadLookupsAndRates = async () => {
         setRatesLoading(true);
         try {
-            const [ratesData, statsData] = await Promise.all([
+            // Normal users have no Purchases app access, so family
+            // filter options are derived from a full (page_size:500) inventory
+            // fetch rather than calling purchasesApi.families (admin-only)
+            // — kept separate from the paginated table fetch.
+            const [fullInventoryData, ratesData, statsData] = await Promise.all([
+                inventoryApi.inventory.getAll({ page_size: 500 }),
                 ratesApi.getAll(),
                 inventoryApi.inventory.getStats(),
             ]);
+            const fullInventory = fullInventoryData?.results || fullInventoryData || [];
             setRates(ratesData?.results || ratesData || []);
             setInvStats(statsData);
+
+            const familyMap = new Map();
+            fullInventory.forEach(item => {
+                const family = item.product?.family;
+                if (family?.id) familyMap.set(family.id, family);
+            });
+            setFamilies([...familyMap.values()]);
         } catch (error) {
             console.error('Failed to load data:', error);
             toast.error(extractErrorMessage(error, 'Failed to load dashboard data'));
@@ -68,6 +85,7 @@ const NormalUserDashboard = () => {
     const inventoryColumns = [
         { key: 'product', label: 'Code', render: (value) => value?.code || 'N/A' },
         { key: 'product', label: 'Name', render: (value) => value?.name || 'N/A' },
+        { key: 'product', label: 'Family', render: (value) => value?.family?.name || 'N/A' },
         {
             key: 'quantity',
             label: 'Quantity',
@@ -169,6 +187,15 @@ const NormalUserDashboard = () => {
                             onSearch={(value) => { setSearchTerm(value); setPage(1); }}
                             placeholder="Search by name or code..."
                             className="flex-1 min-w-[200px]"
+                        />
+                        <Select
+                            value={familyFilter}
+                            onChange={(e) => { setFamilyFilter(e.target.value); setPage(1); }}
+                            options={[
+                                { value: '', label: 'All Families' },
+                                ...families.map(f => ({ value: f.id, label: f.name })),
+                            ]}
+                            className="w-48"
                         />
                     </div>
                     {inventoryLoading ? (

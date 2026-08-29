@@ -15,6 +15,15 @@ const createLookupApi = (path) => ({
 
 // Base API functions for purchases app
 export const purchasesApi = {
+    // Families — fixed/seeded lookup on Product (Raw Material / WIP /
+    // Finished Goods), read-only: no create/edit/delete API.
+    families: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/families/${query ? `?${query}` : ''}`);
+        },
+    },
+
     // Shelves
     shelves: {
         getAll: (params = {}) => {
