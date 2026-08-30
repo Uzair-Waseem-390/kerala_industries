@@ -182,7 +182,7 @@ const LostInventoryPage = () => {
     const grandTotal = cart.reduce((sum, l) => sum + (parseFloat(l.total_cost) || 0), 0);
     const hasInsufficientStock = cart.some((l) => !l.sufficient_stock);
     const lineAllocatedTotal = (line) => (line.shelf_allocations || [])
-        .reduce((sum, a) => sum + (parseInt(a.quantity, 10) || 0), 0);
+        .reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
     const hasUnallocatedShelves = cart.some((l) => lineAllocatedTotal(l) !== (Number(l.quantity) || 0));
 
     const handleSubmit = async (e) => {
@@ -216,7 +216,7 @@ const LostInventoryPage = () => {
                     reason: l.reason || '',
                     shelf_allocations: (l.shelf_allocations || []).map((a) => ({
                         shelf_id: parseInt(a.shelf_id, 10),
-                        quantity: parseInt(a.quantity, 10),
+                        quantity: parseFloat(a.quantity),
                     })),
                 })),
                 note,

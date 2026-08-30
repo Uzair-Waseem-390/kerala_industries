@@ -35,13 +35,13 @@ const MarkFoundModal = ({ item, onClose, onSuccess }) => {
         return results.map((s) => ({ value: s.id, label: s.name, name: s.name }));
     };
 
-    const allocatedTotal = shelfAllocations.reduce((sum, a) => sum + (parseInt(a.quantity, 10) || 0), 0);
-    const qtyNum = parseInt(quantity, 10) || 0;
+    const allocatedTotal = shelfAllocations.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
+    const qtyNum = parseFloat(quantity) || 0;
     const allocationMismatch = allocatedTotal !== qtyNum;
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const qty = parseInt(quantity, 10);
+        const qty = parseFloat(quantity);
         if (!qty || qty <= 0) {
             setError('Enter a valid quantity greater than zero.');
             return;
@@ -62,7 +62,7 @@ const MarkFoundModal = ({ item, onClose, onSuccess }) => {
                 qty,
                 shelfAllocations.map((a) => ({
                     shelf_id: parseInt(a.shelf_id, 10),
-                    quantity: parseInt(a.quantity, 10),
+                    quantity: parseFloat(a.quantity),
                 })),
             );
             onSuccess();
@@ -117,12 +117,13 @@ const MarkFoundModal = ({ item, onClose, onSuccess }) => {
                         </label>
                         <input
                             type="number"
-                            min="1"
+                            min="0.0001"
+                            step="0.0001"
                             max={maxQty}
                             value={quantity}
                             onChange={(e) => {
                                 const raw = e.target.value;
-                                if (raw !== '' && !/^\d+$/.test(raw)) return;
+                                if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) return;
                                 setQuantity(raw);
                             }}
                             className="w-full px-4 py-3 bg-white border border-neutral-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"

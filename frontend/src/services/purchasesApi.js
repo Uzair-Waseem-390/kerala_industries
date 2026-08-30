@@ -212,7 +212,7 @@ export const purchasesApi = {
                 order_id: parseInt(orderId),  // Changed from invoice_id to order_id
                 items: data.items.map(item => ({
                     purchase_item_id: parseInt(item.purchase_item_id),  // Changed from invoice_item_id
-                    quantity: parseInt(item.quantity) || 0,
+                    quantity: parseFloat(item.quantity) || 0,
                 })),
                 note: data.note || '',
             };
@@ -224,7 +224,7 @@ export const purchasesApi = {
             const payload = {
                 items: data.items.map(item => ({
                     purchase_item_id: parseInt(item.purchase_item_id),
-                    quantity: parseInt(item.quantity) || 0,
+                    quantity: parseFloat(item.quantity) || 0,
                     gst: item.gst || 0,
                     wht: item.wht || 0,
                 })),

@@ -137,7 +137,7 @@ const PurchaseOrderFormModal = ({
             description: formData.description || '',
             items: formData.items.map(item => ({
                 product_id: parseInt(item.product),
-                quantity: parseInt(item.quantity) || 0,
+                quantity: parseFloat(item.quantity) || 0,
                 unit_price: parseFloat(item.unit_price) || 0,
                 gst: parseFloat(item.gst) || 0,
                 wht: parseFloat(item.wht) || 0,

@@ -50,9 +50,10 @@ const LineItemRow = ({
                     <Input
                         label="Quantity"
                         type="number"
-                        min="1"
+                        min="0.0001"
+                        step="0.0001"
                         value={item.quantity || ''}
-                        onChange={(e) => onUpdate(index, 'quantity', parseInt(e.target.value) || 0)}
+                        onChange={(e) => onUpdate(index, 'quantity', parseFloat(e.target.value) || 0)}
                         disabled={!canEdit}
                         required
                     />

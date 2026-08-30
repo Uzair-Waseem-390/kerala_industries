@@ -54,7 +54,7 @@ const MoveStockModal = ({ isOpen, onClose, fromShelfId, onSuccess }) => {
             setError('Please select a destination shelf.');
             return;
         }
-        const qty = parseInt(formData.quantity, 10);
+        const qty = parseFloat(formData.quantity);
         if (!qty || qty <= 0) {
             setError('Please enter a valid quantity greater than zero.');
             return;
@@ -107,7 +107,8 @@ const MoveStockModal = ({ isOpen, onClose, fromShelfId, onSuccess }) => {
                 <Input
                     label="Quantity"
                     type="number"
-                    min="1"
+                    min="0.0001"
+                    step="0.0001"
                     value={formData.quantity}
                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                     placeholder="Enter quantity to move"

@@ -92,7 +92,7 @@ const PurchaseReturnDetailPage = () => {
             const productId = getItemProductId(item);
             if (!productId) return;
             const current = allocationDrafts[item.id] || [];
-            const allocatedTotal = current.reduce((sum, a) => sum + (parseInt(a.quantity, 10) || 0), 0);
+            const allocatedTotal = current.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
             const remaining = item.quantity - allocatedTotal;
             if (remaining <= 0) return;
             try {
@@ -132,7 +132,7 @@ const PurchaseReturnDetailPage = () => {
             try {
                 const allocations = (allocationDrafts[item.id] || [])
                     .filter((a) => a.shelf_id && a.quantity)
-                    .map((a) => ({ shelf_id: parseInt(a.shelf_id, 10), quantity: parseInt(a.quantity, 10) }));
+                    .map((a) => ({ shelf_id: parseInt(a.shelf_id, 10), quantity: parseFloat(a.quantity) }));
                 await purchasesApi.purchaseReturnItems.setShelfAllocations(item.id, allocations);
             } catch (error) {
                 console.error(`Failed to save shelf allocations for item ${item.id}:`, error);

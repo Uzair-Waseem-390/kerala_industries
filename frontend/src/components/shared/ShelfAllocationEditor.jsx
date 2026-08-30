@@ -47,7 +47,7 @@ const ShelfAllocationEditor = ({
     const [autoAllocating, setAutoAllocating] = useState(false);
     const [autoAllocateShortfall, setAutoAllocateShortfall] = useState(0);
     const allocations = value;
-    const allocatedTotal = allocations.reduce((sum, a) => sum + (parseInt(a.quantity, 10) || 0), 0);
+    const allocatedTotal = allocations.reduce((sum, a) => sum + (parseFloat(a.quantity) || 0), 0);
     const remaining = requiredQuantity - allocatedTotal;
     const usedShelfIds = new Set(allocations.map((a) => String(a.shelf_id)).filter(Boolean));
 
@@ -153,7 +153,8 @@ const ShelfAllocationEditor = ({
                     <div className="w-28 shrink-0">
                         <Input
                             type="number"
-                            min="1"
+                            min="0.0001"
+                            step="0.0001"
                             value={a.quantity}
                             onChange={(e) => handleUpdateRow(index, { quantity: e.target.value })}
                             placeholder="Qty"

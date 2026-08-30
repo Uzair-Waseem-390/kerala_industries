@@ -259,7 +259,7 @@ const PurchaseOrderDetailPage = () => {
     const handleSaveAllocations = async (itemId) => {
         const allocations = (allocationDrafts[itemId] || [])
             .filter((a) => a.shelf_id && a.quantity)
-            .map((a) => ({ shelf_id: parseInt(a.shelf_id, 10), quantity: parseInt(a.quantity, 10) }));
+            .map((a) => ({ shelf_id: parseInt(a.shelf_id, 10), quantity: parseFloat(a.quantity) }));
         setSavingAllocationFor(itemId);
         try {
             await purchasesApi.purchaseItems.setShelfAllocations(itemId, allocations);

@@ -69,7 +69,7 @@ const ReturnForm = ({ onSubmit, onCancel, loading, orderItems, initialItems, ini
         onSubmit({
             items: items.map(item => ({
                 purchase_item_id: parseInt(item.purchase_item_id),
-                quantity: parseInt(item.quantity) || 0,
+                quantity: parseFloat(item.quantity) || 0,
             })),
             note: note,
         });
@@ -123,10 +123,11 @@ const ReturnForm = ({ onSubmit, onCancel, loading, orderItems, initialItems, ini
                                                 <Input
                                                     label="Quantity"
                                                     type="number"
-                                                    min="1"
+                                                    min="0.0001"
+                                                    step="0.0001"
                                                     max={returnableQty || undefined}
                                                     value={item.quantity || ''}
-                                                    onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value ? parseInt(e.target.value) : '')}
+                                                    onChange={(e) => handleUpdateItem(index, 'quantity', e.target.value ? parseFloat(e.target.value) : '')}
                                                     required
                                                 />
                                                 {returnableQty > 0 && (

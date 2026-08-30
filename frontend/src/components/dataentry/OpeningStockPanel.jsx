@@ -73,12 +73,12 @@ const OpeningStockPanel = () => {
             if (seen.has(r.product_id)) return setBannerError('A product is listed more than once.');
             seen.add(r.product_id);
             if (!r.shelf_id) return setBannerError('Every row needs a shelf.');
-            if (!r.quantity || parseInt(r.quantity) <= 0) return setBannerError('Quantity must be greater than 0.');
+            if (!r.quantity || parseFloat(r.quantity) <= 0) return setBannerError('Quantity must be greater than 0.');
             if (!r.unit_price || parseFloat(r.unit_price) <= 0) return setBannerError('Unit price must be greater than 0.');
             items.push({
                 product_id: parseInt(r.product_id),
                 shelf_id: parseInt(r.shelf_id),
-                quantity: parseInt(r.quantity),
+                quantity: parseFloat(r.quantity),
                 unit_price: r.unit_price,
                 gst: r.gst || 0,
                 wht: r.wht || 0,
@@ -149,7 +149,7 @@ const OpeningStockPanel = () => {
                                     />
                                 </div>
                                 <div className="md:col-span-3">
-                                    <Input label="Qty" type="number" min="1"
+                                    <Input label="Qty" type="number" min="0.0001" step="0.0001"
                                         value={row.quantity} onChange={(e) => updateRow(i, 'quantity', e.target.value)} placeholder="Qty" />
                                 </div>
                                 <div className="md:col-span-3">
