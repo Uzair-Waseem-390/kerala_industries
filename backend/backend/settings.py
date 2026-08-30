@@ -55,6 +55,7 @@ EXTERNAL_APPS = [
     'activity_log',
     'accounting',
     'payment_methods',
+    'production',
 ]
 
 INSTALLED_APPS += EXTERNAL_APPS

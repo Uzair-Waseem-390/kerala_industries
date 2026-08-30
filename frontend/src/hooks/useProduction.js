@@ -1,0 +1,154 @@
+import { useState, useEffect, useCallback } from 'react';
+import { productionApi } from '../services/productionApi';
+import { usePaginatedList } from './usePaginatedList';
+import { extractErrorMessage } from '../utils/errorMessage';
+
+// Recipes — paginated list with status/search filters, plus a create
+// mutation (name + description; recipe_type is a constant the page sends).
+export const useRecipes = (initialFilters = {}) => {
+    const {
+        data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch,
+    } = usePaginatedList((params) => productionApi.recipes.getAll(params), initialFilters);
+
+    const [creating, setCreating] = useState(false);
+    const [createError, setCreateError] = useState(null);
+
+    const create = async (payload) => {
+        setCreating(true);
+        setCreateError(null);
+        try {
+            const result = await productionApi.recipes.create(payload);
+            await refetch();
+            return result;
+        } catch (err) {
+            setCreateError(extractErrorMessage(err, 'Failed to create recipe'));
+            throw err;
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    return {
+        data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch,
+        creating, createError, create,
+    };
+};
+
+// One recipe's full detail + every mutation that can happen to it while
+// under_processing (issue/adjust materials, add breakdown items, finish).
+// Each mutation exposes its own `mutating`/`error` pair so the detail page
+// can show inline feedback per-section without one busy flag blocking the
+// whole screen.
+export const useRecipeDetail = (id) => {
+    const [recipe, setRecipe] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const [issuing, setIssuing] = useState(false);
+    const [issueError, setIssueError] = useState(null);
+
+    const [updatingMaterial, setUpdatingMaterial] = useState(false);
+    const [updateMaterialError, setUpdateMaterialError] = useState(null);
+
+    const [addingBreakdown, setAddingBreakdown] = useState(false);
+    const [addBreakdownError, setAddBreakdownError] = useState(null);
+
+    const [finishing, setFinishing] = useState(false);
+    const [finishError, setFinishError] = useState(null);
+
+    const fetchRecipe = useCallback(async () => {
+        if (!id) return;
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await productionApi.recipes.getById(id);
+            setRecipe(data);
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to load recipe'));
+        } finally {
+            setLoading(false);
+        }
+    }, [id]);
+
+    useEffect(() => {
+        fetchRecipe();
+    }, [fetchRecipe]);
+
+    const issueMaterial = async (payload) => {
+        setIssuing(true);
+        setIssueError(null);
+        try {
+            await productionApi.recipes.issueMaterial(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setIssueError(extractErrorMessage(err, 'Failed to issue material'));
+            throw err;
+        } finally {
+            setIssuing(false);
+        }
+    };
+
+    const updateIssuedMaterial = async (kind, payload) => {
+        setUpdatingMaterial(true);
+        setUpdateMaterialError(null);
+        try {
+            await productionApi.recipes.updateIssuedMaterial(id, kind, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setUpdateMaterialError(extractErrorMessage(err, 'Failed to update issued material'));
+            throw err;
+        } finally {
+            setUpdatingMaterial(false);
+        }
+    };
+
+    const addBreakdownItem = async (payload) => {
+        setAddingBreakdown(true);
+        setAddBreakdownError(null);
+        try {
+            await productionApi.recipes.addBreakdownItem(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddBreakdownError(extractErrorMessage(err, 'Failed to add breakdown item'));
+            throw err;
+        } finally {
+            setAddingBreakdown(false);
+        }
+    };
+
+    const finish = async () => {
+        setFinishing(true);
+        setFinishError(null);
+        try {
+            await productionApi.recipes.finish(id);
+            await fetchRecipe();
+        } catch (err) {
+            setFinishError(extractErrorMessage(err, 'Failed to finish recipe'));
+            throw err;
+        } finally {
+            setFinishing(false);
+        }
+    };
+
+    return {
+        recipe, loading, error, refetch: fetchRecipe,
+        issueMaterial, issuing, issueError,
+        updateIssuedMaterial, updatingMaterial, updateMaterialError,
+        addBreakdownItem, addingBreakdown, addBreakdownError,
+        finish, finishing, finishError,
+    };
+};
+
+// WIP Products — read-only paginated list.
+export const useWipProducts = (initialFilters = {}) => {
+    const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
+        usePaginatedList((params) => productionApi.wipProducts.getAll(params), initialFilters);
+    return { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch };
+};
+
+// WIP Inventory — read-only paginated list.
+export const useWipInventory = (initialFilters = {}) => {
+    const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
+        usePaginatedList((params) => productionApi.wipInventory.getAll(params), initialFilters);
+    return { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch };
+};

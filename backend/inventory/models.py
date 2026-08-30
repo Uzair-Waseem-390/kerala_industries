@@ -75,6 +75,7 @@ class ShelfStockMovement(models.Model):
         MOVE_OUT             = "move_out",             "Manual Move (Out)"
         MOVE_IN              = "move_in",              "Manual Move (In)"
         JUMBO_LENGTH_CORRECTION = "jumbo_length_correction", "Jumbo Exact-Length Correction"
+        RECIPE_ISSUE_CONSUMPTION = "recipe_issue_consumption", "Recipe Material Issue"
         BACKFILL             = "backfill",              "Backfill"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="movements")

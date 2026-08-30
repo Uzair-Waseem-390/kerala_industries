@@ -32,6 +32,11 @@ import LostInventoryDetailPage from './pages/purchases/LostInventoryDetailPage';
 import GlobalPaymentsPage from './pages/purchases/GlobalPaymentsPage';
 import PurchasePaymentDetailPage from './pages/purchases/PurchasePaymentDetailPage';
 
+// Production pages
+import RecipesPage from './pages/production/RecipesPage';
+import RecipeDetailPage from './pages/production/RecipeDetailPage';
+import WipInventoryPage from './pages/production/WipInventoryPage';
+
 // Inventory pages
 import InventoryPage from './pages/inventory/InventoryPage';
 
@@ -265,6 +270,30 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <PurchaseBatchesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/recipes" element={
+          <ProtectedRoute>
+            <Layout>
+              <RecipesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/recipes/:id" element={
+          <ProtectedRoute>
+            <Layout>
+              <RecipeDetailPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/wip-inventory" element={
+          <ProtectedRoute>
+            <Layout>
+              <WipInventoryPage />
             </Layout>
           </ProtectedRoute>
         } />

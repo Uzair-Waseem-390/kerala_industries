@@ -7,7 +7,7 @@ import {
     Repeat, Tag, Send, Calendar, Receipt, Banknote, PackageX, RotateCcw,
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
-    Wallet2, SlidersHorizontal, PackagePlus, Boxes,
+    Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers,
 } from 'lucide-react';
 
 export const mainNavigation = [
@@ -49,6 +49,16 @@ export const navGroups = [
             { name: 'Payments', path: '/purchases/payments', icon: Wallet },
             { name: 'Returns', path: '/purchases/returns', icon: Undo2 },
             { name: 'Outstanding', path: '/purchases/suppliers/outstanding', icon: BarChart3 },
+        ],
+    },
+    {
+        key: 'production',
+        label: 'Production',
+        icon: FlaskConical,
+        adminOnly: true,
+        items: [
+            { name: 'Recipes', path: '/production/recipes', icon: FlaskConical },
+            { name: 'WIP Inventory', path: '/production/wip-inventory', icon: Layers },
         ],
     },
     {
