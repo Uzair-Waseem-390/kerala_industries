@@ -388,9 +388,9 @@ class PurchaseBatchSerializer(serializers.ModelSerializer):
     class Meta:
         model  = PurchaseItem
         fields = [
-            "id", "order_number", "order_status", "order_date",
+            "id", "order_id", "order_number", "order_status", "order_date",
             "supplier_name", "supplier_code",
-            "product_name", "product_code",
+            "product_id", "product_name", "product_code",
             "jumbo_name", "core_name", "core_length", "core_thickness",
             "packing_size", "carton_size",
             "quantity", "remaining_quantity", "unit_price",

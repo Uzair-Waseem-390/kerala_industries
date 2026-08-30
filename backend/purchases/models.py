@@ -246,6 +246,22 @@ class Product(AuditMixin):
         verbose_name_plural = "Products"
         ordering            = ["name"]
 
+    def save(self, *args, **kwargs):
+        # create_product()/get_or_create_product_variant() always compute
+        # and set variant_key explicitly before creating — this fallback
+        # only fires for a caller that constructs a Product directly
+        # (Product.objects.create(...), bypassing the service layer, as
+        # several pre-existing test fixtures across other apps do). Without
+        # it every such row would share the same blank variant_key and
+        # collide on the unique constraint the moment a second one is
+        # created. Deriving it from `code` (already unique) can never
+        # introduce a new collision — it's the same value create_product()
+        # would compute for an anchor-shaped row.
+        if not self.variant_key:
+            from .utils import compute_anchor_variant_key
+            self.variant_key = compute_anchor_variant_key(code=self.code)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.name} ({self.code})"
 

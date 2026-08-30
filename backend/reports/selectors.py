@@ -748,7 +748,13 @@ def _stock_movement_totals_by_product(
     (typically tiny) matching-product set, never by total table size, and
     "total X" in the response only ever sums the products actually shown.
     """
+    # PurchaseItem/PurchaseReturnItem/LostInventoryItem/LostInventoryRecovery
+    # ("purchases" app) quantity fields are Decimal; InvoiceItem/ReturnItem
+    # ("billing", untouched) are still Integer — Coalesce requires its
+    # default to match the aggregate's own type, so each Coalesce below
+    # uses whichever zero matches its source.
     zero = 0
+    zero_dec = Decimal("0")
     totals = {}
 
     product_ids = None
@@ -783,7 +789,7 @@ def _stock_movement_totals_by_product(
     purchased_qs = _stock_movement_date_filter(
         purchased_qs, field="order__confirmed_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in purchased_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+    for row in purchased_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["product_id"], "total_purchased", row["total"])
 
     from purchases.models import PurchaseReturnItem
@@ -795,7 +801,7 @@ def _stock_movement_totals_by_product(
     purchase_returned_qs = _stock_movement_date_filter(
         purchase_returned_qs, field="return_record__accepted_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in purchase_returned_qs.values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+    for row in purchase_returned_qs.values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["purchase_item__product_id"], "total_purchase_returned", row["total"])
 
     from billing.models import InvoiceItem, ReturnItem
@@ -829,7 +835,7 @@ def _stock_movement_totals_by_product(
     lost_qs = _stock_movement_date_filter(
         lost_qs, field="record__created_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in lost_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+    for row in lost_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["product_id"], "total_lost", row["total"])
 
     # recovered_at is a plain DateField (not DateTimeField) — no __date
@@ -843,7 +849,7 @@ def _stock_movement_totals_by_product(
         found_qs = found_qs.filter(recovered_at__gte=_clean(date_from))
     if _clean(date_to):
         found_qs = found_qs.filter(recovered_at__lte=_clean(date_to))
-    for row in found_qs.values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+    for row in found_qs.values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["lost_item__product_id"], "total_found", row["total"])
 
     return totals

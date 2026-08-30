@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.management.base import BaseCommand
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
@@ -21,7 +23,13 @@ class Command(BaseCommand):
         ProductStockMovement.objects.all().delete()
         StockMovementFlow.objects.all().delete()
 
+        # PurchaseItem/PurchaseReturnItem/LostInventoryItem/LostInventoryRecovery
+        # ("purchases"/"inventory" apps) quantity fields are Decimal;
+        # InvoiceItem/ReturnItem ("billing", untouched) are still Integer —
+        # Coalesce requires its default to match the aggregate's own type,
+        # so each Coalesce below uses whichever zero matches its source.
         zero = 0
+        zero_dec = Decimal("0")
 
         # Opening stock (is_data_entry PurchaseOrders) DOES count here,
         # unlike every other is_data_entry exclusion in this file — it's
@@ -30,14 +38,14 @@ class Command(BaseCommand):
         purchased_by_product = dict(
             PurchaseItem.objects.filter(
                 is_deleted=False, order__is_deleted=False, order__status="confirmed",
-            ).values("product_id").annotate(total=Coalesce(Sum("quantity"), zero)).values_list("product_id", "total")
+            ).values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)).values_list("product_id", "total")
         )
 
         purchase_returned_by_product = {}
         for row in PurchaseReturnItem.objects.filter(
             return_record__is_deleted=False, return_record__status="accepted",
             purchase_item__order__is_data_entry=False,
-        ).values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        ).values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
             purchase_returned_by_product[row["purchase_item__product_id"]] = row["total"]
 
         sold_by_product = dict(
@@ -58,11 +66,11 @@ class Command(BaseCommand):
         # no such flag; every loss/recovery is a real operational event).
         lost_by_product = dict(
             LostInventoryItem.objects.filter(record__is_deleted=False)
-            .values("product_id").annotate(total=Coalesce(Sum("quantity"), zero)).values_list("product_id", "total")
+            .values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)).values_list("product_id", "total")
         )
         found_by_product = dict(
             LostInventoryRecovery.objects.all()
-            .values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero))
+            .values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec))
             .values_list("lost_item__product_id", "total")
         )
 

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.db.models import Sum
@@ -45,7 +47,11 @@ class Command(BaseCommand):
         from billing.models import FIFOLedger
 
         apply_changes = options["apply"]
+        # FIFOLedger ("billing", untouched) is still Integer;
+        # LostInventoryFIFOConsumption ("purchases") is Decimal — Coalesce
+        # requires its default to match the aggregate's own type.
         zero = 0
+        zero_dec = Decimal("0")
 
         batches = list(
             PurchaseItem.objects.filter(
@@ -73,8 +79,8 @@ class Command(BaseCommand):
             .filter(purchase_item_id__in=[b.id for b in batches])
             .values("purchase_item_id")
             .annotate(
-                drawn=Coalesce(Sum("quantity"), zero),
-                restored=Coalesce(Sum("restored_quantity"), zero),
+                drawn=Coalesce(Sum("quantity"), zero_dec),
+                restored=Coalesce(Sum("restored_quantity"), zero_dec),
             )
         )
         net_lost_by_batch = {row["purchase_item_id"]: row["drawn"] - row["restored"] for row in lost_rows}

@@ -911,8 +911,8 @@ class AutoAllocateShelvesViewTests(PurchasesTestBase):
         response = AutoAllocateShelvesView.as_view()(request)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["allocations"][0]["shelf_id"], self.shelf.id)
-        self.assertEqual(response.data["allocations"][0]["quantity"], 5)
-        self.assertEqual(response.data["shortfall"], 0)
+        self.assertEqual(Decimal(response.data["allocations"][0]["quantity"]), Decimal("5"))
+        self.assertEqual(Decimal(response.data["shortfall"]), Decimal("0"))
 
     def test_anonymous_forbidden(self):
         request = self.factory.post(
