@@ -5,9 +5,9 @@ from rest_framework import serializers
 from purchases.serializers import ShelfAllocationInputSerializer
 
 from .models import (
-    Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
-    WipInventory, WipProduct, WipShelfStock,
+    Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
+    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
+    RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,
 )
 
 
@@ -131,12 +131,24 @@ class RecipeIssuedMaterialReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class RecipeBreakdownItemShelfAllocationReadSerializer(serializers.ModelSerializer):
+    shelf_id   = serializers.IntegerField(source="shelf.id", read_only=True)
+    shelf_name = serializers.CharField(source="shelf.name", read_only=True)
+
+    class Meta:
+        model  = RecipeBreakdownItemShelfAllocation
+        fields = ["id", "shelf_id", "shelf_name", "quantity"]
+        read_only_fields = fields
+
+
 class RecipeBreakdownItemReadSerializer(serializers.ModelSerializer):
-    wip_product = WipProductReadSerializer(read_only=True)
+    wip_product       = WipProductReadSerializer(read_only=True)
+    shelf_allocations = RecipeBreakdownItemShelfAllocationReadSerializer(many=True, read_only=True)
 
     class Meta:
         model  = RecipeBreakdownItem
-        fields = ["id", "wip_product", "quantity", "remaining_quantity", "unit_cost_snapshot", "created_at"]
+        fields = ["id", "wip_product", "quantity", "remaining_quantity", "unit_cost_snapshot",
+                  "shelf_allocations", "created_at"]
         read_only_fields = fields
 
 

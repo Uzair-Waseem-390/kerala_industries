@@ -324,3 +324,22 @@ class RecipeBreakdownItem(AuditMixin):
 
     def __str__(self):
         return f"{self.recipe.recipe_number} — {self.wip_product.name}: {self.quantity}"
+
+
+class RecipeBreakdownItemShelfAllocation(models.Model):
+    """
+    Which shelf(s) a breakdown item's produced quantity was put away to —
+    same role as purchases.PurchaseItemShelfAllocation plays for a purchase
+    line, and shown the same way on the recipe detail page.
+    """
+    breakdown_item = models.ForeignKey(RecipeBreakdownItem, on_delete=models.CASCADE, related_name="shelf_allocations")
+    shelf          = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="recipe_breakdown_allocations")
+    quantity       = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        verbose_name        = "Recipe Breakdown Item Shelf Allocation"
+        verbose_name_plural = "Recipe Breakdown Item Shelf Allocations"
+        unique_together     = [("breakdown_item", "shelf")]
+
+    def __str__(self):
+        return f"{self.breakdown_item} → {self.shelf.name}: {self.quantity}"

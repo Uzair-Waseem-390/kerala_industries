@@ -15,9 +15,9 @@ from purchases.services import (
 )
 
 from .models import (
-    Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
-    WipProduct, WipShelfStockMovement,
+    Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
+    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
+    RewoundCoreYard, WipProduct, WipShelfStockMovement,
 )
 from .selectors import get_issued_material
 from .utils import compute_wip_variant_key, inches_to_mm
@@ -436,6 +436,10 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
         sign=1, reason=WipShelfStockMovement.Reason.RECIPE_BREAKDOWN_PUTAWAY,
         reference=recipe.recipe_number, user=user,
     )
+    RecipeBreakdownItemShelfAllocation.objects.bulk_create([
+        RecipeBreakdownItemShelfAllocation(breakdown_item=item, shelf_id=sid, quantity=qty)
+        for sid, qty in merged.items() if qty > 0
+    ])
     return item
 
 

@@ -4,9 +4,9 @@ from django.shortcuts import get_object_or_404
 from backend.search import search_q
 
 from .models import (
-    Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
-    WipInventory, WipProduct, WipShelfStock,
+    Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
+    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
+    RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,
 )
 
 
@@ -105,6 +105,11 @@ def _recipe_qs():
             queryset=RecipeBreakdownItem.objects.select_related(
                 "wip_product", "wip_product__binding", "wip_product__yard", "wip_product__length_mm",
                 "wip_product__created_by", "wip_product__updated_by",
+            ).prefetch_related(
+                Prefetch(
+                    "shelf_allocations",
+                    queryset=RecipeBreakdownItemShelfAllocation.objects.select_related("shelf"),
+                ),
             ),
         ),
     )

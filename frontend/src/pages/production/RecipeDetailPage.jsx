@@ -582,6 +582,7 @@ const RecipeDetailPage = () => {
                                     <th className="px-3 py-2 text-left text-xs font-medium text-neutral-500">WIP Product</th>
                                     <th className="px-3 py-2 text-left text-xs font-medium text-neutral-500">Quantity</th>
                                     <th className="px-3 py-2 text-left text-xs font-medium text-neutral-500">Remaining</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-neutral-500">Shelves</th>
                                     <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Unit Cost</th>
                                 </tr>
                             </thead>
@@ -591,6 +592,11 @@ const RecipeDetailPage = () => {
                                         <td className="px-3 py-2 text-sm">{item.wip_product?.name || 'N/A'}</td>
                                         <td className="px-3 py-2 text-sm">{item.quantity}</td>
                                         <td className="px-3 py-2 text-sm">{item.remaining_quantity}</td>
+                                        <td className="px-3 py-2 text-sm text-neutral-500">
+                                            {item.shelf_allocations?.length > 0
+                                                ? item.shelf_allocations.map((a) => `${a.shelf_name} (${a.quantity})`).join(', ')
+                                                : '—'}
+                                        </td>
                                         <td className="px-3 py-2 text-sm text-right font-medium">
                                             {item.unit_cost_snapshot != null ? parseFloat(item.unit_cost_snapshot).toFixed(2) : '—'}
                                         </td>
