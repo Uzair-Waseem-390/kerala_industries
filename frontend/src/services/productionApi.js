@@ -34,6 +34,9 @@ export const productionApi = {
         // shelf) — destination for the newly-produced WIP quantity.
         addBreakdownItem: (id, data) => api.post(`/production/recipes/${id}/breakdown-items/`, data),
         finish: (id) => api.post(`/production/recipes/${id}/finish/`),
+        // Description is optional at creation, editable any time the recipe
+        // is still under_processing, and required before finish.
+        updateDescription: (id, data) => api.patch(`/production/recipes/${id}/description/`, data),
     },
 
     // RM variants already purchased for a given kind — the picker source
@@ -58,6 +61,16 @@ export const productionApi = {
         getAll: (params = {}) => {
             const query = new URLSearchParams(params).toString();
             return api.get(`/production/wip-inventory/${query ? `?${query}` : ''}`);
+        },
+    },
+
+    // WIP products + quantities currently on one shelf — powers the Shelf
+    // detail page's WIP tab. Same nested-route shape as
+    // inventoryApi.shelfStock.getByShelf, just served by production.
+    wipShelfStock: {
+        getByShelf: (shelfId, params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/shelves/${shelfId}/wip-stock/${query ? `?${query}` : ''}`);
         },
     },
 

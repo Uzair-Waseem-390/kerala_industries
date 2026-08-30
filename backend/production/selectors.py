@@ -5,7 +5,7 @@ from backend.search import search_q
 
 from .models import (
     Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
+    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
     WipInventory, WipProduct, WipShelfStock,
 )
 
@@ -66,6 +66,19 @@ def get_all_wip_inventory(*, search: str = None) -> QuerySet:
     return qs
 
 
+def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None) -> QuerySet:
+    """
+    WIP products + quantities currently on one shelf — powers the Shelf
+    detail page's WIP tab. Mirrors inventory.selectors.get_shelf_stock_rows
+    exactly, pointed at WipShelfStock. Only "product" (id/name) is read —
+    same minimal-select_related reasoning as the RM version.
+    """
+    qs = WipShelfStock.objects.select_related("product").filter(shelf_id=shelf_id, quantity__gt=0)
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "product__name"))
+    return qs.order_by("product__name")
+
+
 # ---------------------------------------------------------------------------
 # Recipe
 # ---------------------------------------------------------------------------
@@ -80,6 +93,10 @@ def _recipe_qs():
                 Prefetch(
                     "consumptions",
                     queryset=RecipeMaterialConsumption.objects.select_related("purchase_item", "purchase_item__product"),
+                ),
+                Prefetch(
+                    "shelf_draws",
+                    queryset=RecipeMaterialShelfDraw.objects.select_related("shelf"),
                 ),
             ),
         ),

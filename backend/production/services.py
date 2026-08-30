@@ -16,7 +16,8 @@ from purchases.services import (
 
 from .models import (
     Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct, WipShelfStockMovement,
+    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
+    WipProduct, WipShelfStockMovement,
 )
 from .selectors import get_issued_material
 from .utils import compute_wip_variant_key, inches_to_mm
@@ -64,20 +65,33 @@ def _parse_decimal(value: str, *, field_label: str) -> Decimal:
 # ---------------------------------------------------------------------------
 
 @transaction.atomic
-def create_recipe(*, name: str, description: str, recipe_type: str = Recipe.RecipeType.REWINDING, user) -> Recipe:
+def create_recipe(*, name: str, description: str = "", recipe_type: str = Recipe.RecipeType.REWINDING, user) -> Recipe:
+    """
+    description is NOT required here — it's required before finish_recipe
+    instead (see finish_recipe), so the user can fill it in any time while
+    the recipe is under_processing.
+    """
     from rest_framework.exceptions import ValidationError
     if not name or not name.strip():
         raise ValidationError({"name": "Name is required."})
-    if not description or not description.strip():
-        raise ValidationError({"description": "Description is required."})
 
     return Recipe.objects.create(
         recipe_number=_next_recipe_number(),
         recipe_type=recipe_type,
         name=name.strip(),
-        description=description.strip(),
+        description=(description or "").strip(),
         created_by=user, updated_by=user,
     )
+
+
+@transaction.atomic
+def update_recipe_description(*, recipe_id: int, description: str, user) -> Recipe:
+    recipe = _get_locked_recipe(recipe_id)
+    _require_under_processing(recipe)
+    recipe.description = (description or "").strip()
+    recipe.updated_by = user
+    recipe.save(update_fields=["description", "updated_by", "updated_at"])
+    return recipe
 
 
 def _get_locked_recipe(recipe_id: int) -> Recipe:
@@ -225,6 +239,23 @@ def _return_fifo(*, issued_material: RecipeIssuedMaterial, quantity: Decimal) ->
 # Issue / update RM material
 # ---------------------------------------------------------------------------
 
+def _record_shelf_draws(*, issued_material: RecipeIssuedMaterial, merged: dict, direction: str) -> None:
+    """
+    Audit-only record of which shelf(s) an issue/increase drew from, or a
+    decrease returned to — powers the "Drawn From" display on the recipe
+    detail page. One bulk_create, same cost class as the consumptions
+    already recorded in the same transaction — no extra round trips added
+    to any list endpoint (only ever read via the recipe detail page's
+    existing per-issued-material prefetch).
+    """
+    if not merged:
+        return
+    RecipeMaterialShelfDraw.objects.bulk_create([
+        RecipeMaterialShelfDraw(issued_material=issued_material, shelf_id=sid, direction=direction, quantity=qty)
+        for sid, qty in merged.items() if qty > 0
+    ])
+
+
 @transaction.atomic
 def issue_material(*, recipe_id: int, kind: str, product_id: int, quantity: Decimal, shelf_allocations: list[dict], user) -> RecipeIssuedMaterial:
     from rest_framework.exceptions import ValidationError
@@ -255,6 +286,7 @@ def issue_material(*, recipe_id: int, kind: str, product_id: int, quantity: Deci
         sign=-1, reason=ShelfStockMovement.Reason.RECIPE_ISSUE_CONSUMPTION,
         reference=recipe.recipe_number, user=user,
     )
+    _record_shelf_draws(issued_material=issued, merged=merged, direction=RecipeMaterialShelfDraw.Direction.DRAW)
     return issued
 
 
@@ -297,6 +329,7 @@ def update_issued_material(*, recipe_id: int, kind: str, new_quantity: Decimal, 
             sign=-1, reason=ShelfStockMovement.Reason.RECIPE_ISSUE_CONSUMPTION,
             reference=recipe.recipe_number, user=user,
         )
+        _record_shelf_draws(issued_material=issued, merged=merged, direction=RecipeMaterialShelfDraw.Direction.DRAW)
     else:
         give_back = abs(delta)
         merged, shelves_by_id = _normalize_shelf_allocations(shelf_allocations, required_total=give_back)
@@ -308,6 +341,7 @@ def update_issued_material(*, recipe_id: int, kind: str, new_quantity: Decimal, 
             sign=1, reason=ShelfStockMovement.Reason.RECIPE_ISSUE_CONSUMPTION,
             reference=recipe.recipe_number, user=user,
         )
+        _record_shelf_draws(issued_material=issued, merged=merged, direction=RecipeMaterialShelfDraw.Direction.RETURN)
 
     issued.quantity = new_quantity
     issued.save(update_fields=["quantity"])
@@ -411,6 +445,9 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
 
     recipe = _get_locked_recipe(recipe_id)
     _require_under_processing(recipe)
+
+    if not recipe.description or not recipe.description.strip():
+        raise ValidationError({"description": "Description is required before finishing this recipe."})
 
     breakdown_items = list(recipe.breakdown_items.all())
     # (issued materials/consumptions below are read fresh off the now-locked

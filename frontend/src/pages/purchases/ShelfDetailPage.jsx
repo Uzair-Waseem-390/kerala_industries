@@ -12,8 +12,14 @@ import Pagination from '../../components/ui/Pagination';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import InlineAlert from '../../components/ui/InlineAlert';
 import EmptyState from '../../components/ui/EmptyState';
+import Tabs from '../../components/ui/Tabs';
 import MoveStockModal from '../../components/purchases/MoveStockModal';
 import { extractErrorMessage } from '../../utils/errorMessage';
+
+const FAMILY_TABS = [
+    { value: 'rm', label: 'Raw Material' },
+    { value: 'wip', label: 'WIP' },
+];
 
 const ShelfDetailPage = () => {
     const { id } = useParams();
@@ -23,6 +29,10 @@ const ShelfDetailPage = () => {
     const [shelfError, setShelfError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [showMoveModal, setShowMoveModal] = useState(false);
+    // Which stock table this shelf shows — RM ShelfStock (default, existing
+    // behavior) or production.WipShelfStock. WIP now also has shelf-level
+    // stock, since it reuses the same purchases.Shelf locations.
+    const [activeFamily, setActiveFamily] = useState('rm');
 
     const fetchShelf = async () => {
         setShelfLoading(true);
@@ -45,10 +55,16 @@ const ShelfDetailPage = () => {
 
     const {
         data: stock, meta, page, setPage, loading, error: stockError, refetch,
-    } = useShelfStock(id, searchTerm);
+    } = useShelfStock(id, searchTerm, activeFamily);
 
     const handleSearch = (value) => {
         setSearchTerm(value);
+        setPage(1);
+    };
+
+    const handleFamilyChange = (value) => {
+        setActiveFamily(value);
+        setSearchTerm('');
         setPage(1);
     };
 
@@ -57,7 +73,7 @@ const ShelfDetailPage = () => {
         refetch();
     };
 
-    const columns = [
+    const rmColumns = [
         {
             key: 'product_name',
             label: 'Product Name',
@@ -79,6 +95,28 @@ const ShelfDetailPage = () => {
             render: (value) => value ? new Date(value).toLocaleString() : 'N/A',
         },
     ];
+
+    // WIP shelf stock has no product code — product.name is already fully
+    // human-readable (mirrors WipInventoryPage's columns).
+    const wipColumns = [
+        {
+            key: 'product_name',
+            label: 'WIP Product',
+            render: (_value, row) => row.product?.name || 'N/A',
+        },
+        {
+            key: 'quantity',
+            label: 'Quantity',
+            render: (value) => <span className="font-semibold text-neutral-900">{value}</span>,
+        },
+        {
+            key: 'last_updated_at',
+            label: 'Last Updated',
+            render: (value) => value ? new Date(value).toLocaleString() : 'N/A',
+        },
+    ];
+
+    const columns = activeFamily === 'wip' ? wipColumns : rmColumns;
 
     if (shelfLoading) {
         return (
@@ -129,13 +167,15 @@ const ShelfDetailPage = () => {
                             </div>
                         </div>
                     </div>
-                    <Button
-                        onClick={() => setShowMoveModal(true)}
-                        icon={ArrowRightLeft}
-                        className="sm:flex-shrink-0"
-                    >
-                        Move Stock
-                    </Button>
+                    {activeFamily === 'rm' && (
+                        <Button
+                            onClick={() => setShowMoveModal(true)}
+                            icon={ArrowRightLeft}
+                            className="sm:flex-shrink-0"
+                        >
+                            Move Stock
+                        </Button>
+                    )}
                 </div>
 
                 <Card className="p-4 sm:p-6" hover={false}>
@@ -143,10 +183,18 @@ const ShelfDetailPage = () => {
                         <h3 className="font-semibold text-neutral-900">Products on this Shelf</h3>
                     </div>
 
+                    <Tabs
+                        tabs={FAMILY_TABS}
+                        activeTab={activeFamily}
+                        onChange={handleFamilyChange}
+                        className="mb-4"
+                    />
+
                     <div className="mb-4">
                         <SearchBar
+                            key={activeFamily}
                             onSearch={handleSearch}
-                            placeholder="Search by product name or code..."
+                            placeholder={activeFamily === 'wip' ? 'Search WIP products...' : 'Search by product name or code...'}
                             className="w-full"
                         />
                     </div>
@@ -164,8 +212,8 @@ const ShelfDetailPage = () => {
                     ) : stock.length === 0 ? (
                         <EmptyState
                             icon={<PackageSearch className="w-8 h-8 text-neutral-400" />}
-                            title="No products on this shelf"
-                            description={searchTerm ? 'Try adjusting your search.' : 'Move stock here to see it listed.'}
+                            title={activeFamily === 'wip' ? 'No WIP stock on this shelf' : 'No products on this shelf'}
+                            description={searchTerm ? 'Try adjusting your search.' : (activeFamily === 'wip' ? 'Put away WIP stock here to see it listed.' : 'Move stock here to see it listed.')}
                         />
                     ) : (
                         <>

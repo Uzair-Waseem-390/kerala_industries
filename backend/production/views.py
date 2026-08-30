@@ -8,14 +8,19 @@ from .selectors import (
     get_all_rewound_core_yards, get_all_wip_inventory, get_all_wip_products,
     get_issuable_products, get_recipe_by_id, get_rewound_core_binding_by_id,
     get_rewound_core_length_mm_by_id, get_rewound_core_yard_by_id, get_wip_product_by_id,
+    get_wip_shelf_stock_rows,
 )
 from .serializers import (
     AddBreakdownItemSerializer, IssuableProductSerializer, IssueMaterialSerializer,
     RecipeCreateSerializer, RecipeReadSerializer, RewoundCoreBindingReadSerializer,
     RewoundCoreLengthMmReadSerializer, RewoundCoreYardReadSerializer, UpdateIssuedMaterialSerializer,
-    WipInventoryReadSerializer, WipProductReadSerializer,
+    UpdateRecipeDescriptionSerializer, WipInventoryReadSerializer, WipProductReadSerializer,
+    WipShelfStockReadSerializer,
 )
-from .services import add_breakdown_item, create_recipe, finish_recipe, issue_material, update_issued_material
+from .services import (
+    add_breakdown_item, create_recipe, finish_recipe, issue_material,
+    update_issued_material, update_recipe_description,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +103,17 @@ class WipInventoryListView(generics.ListAPIView):
         return get_all_wip_inventory(search=self.request.query_params.get("search"))
 
 
+class WipShelfStockListView(generics.ListAPIView):
+    """GET /production/shelves/<pk>/wip-stock/ — WIP products + quantities on one shelf."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = WipShelfStockReadSerializer
+
+    def get_queryset(self):
+        from purchases.selectors import get_shelf_by_id
+        get_shelf_by_id(self.kwargs["pk"])  # 404s if the shelf doesn't exist
+        return get_wip_shelf_stock_rows(self.kwargs["pk"], search=self.request.query_params.get("search"))
+
+
 # ---------------------------------------------------------------------------
 # RM products issuable into a recipe
 # ---------------------------------------------------------------------------
@@ -134,7 +150,7 @@ class RecipeListCreateView(generics.ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
         d = serializer.validated_data
         recipe = create_recipe(
-            name=d["name"], description=d["description"],
+            name=d["name"], description=d.get("description", ""),
             recipe_type=d.get("recipe_type", "rewinding"), user=request.user,
         )
         return Response(RecipeReadSerializer(recipe).data, status=status.HTTP_201_CREATED)
@@ -146,6 +162,17 @@ class RecipeRetrieveView(generics.RetrieveAPIView):
 
     def get_object(self):
         return get_recipe_by_id(self.kwargs["pk"])
+
+
+class UpdateRecipeDescriptionView(APIView):
+    """PATCH /production/recipes/<pk>/description/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateRecipeDescriptionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        update_recipe_description(recipe_id=pk, description=serializer.validated_data["description"], user=request.user)
+        return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
 
 
 class IssueMaterialView(APIView):

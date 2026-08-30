@@ -53,6 +53,9 @@ export const useRecipeDetail = (id) => {
     const [addingBreakdown, setAddingBreakdown] = useState(false);
     const [addBreakdownError, setAddBreakdownError] = useState(null);
 
+    const [updatingDescription, setUpdatingDescription] = useState(false);
+    const [updateDescriptionError, setUpdateDescriptionError] = useState(null);
+
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
 
@@ -116,6 +119,23 @@ export const useRecipeDetail = (id) => {
         }
     };
 
+    // Description is optional at create time, editable any time the recipe
+    // is still under_processing, and required before finish (enforced
+    // server-side too — this is a UX convenience, not the boundary).
+    const updateDescription = async (description) => {
+        setUpdatingDescription(true);
+        setUpdateDescriptionError(null);
+        try {
+            await productionApi.recipes.updateDescription(id, { description });
+            await fetchRecipe();
+        } catch (err) {
+            setUpdateDescriptionError(extractErrorMessage(err, 'Failed to update description'));
+            throw err;
+        } finally {
+            setUpdatingDescription(false);
+        }
+    };
+
     const finish = async () => {
         setFinishing(true);
         setFinishError(null);
@@ -135,6 +155,7 @@ export const useRecipeDetail = (id) => {
         issueMaterial, issuing, issueError,
         updateIssuedMaterial, updatingMaterial, updateMaterialError,
         addBreakdownItem, addingBreakdown, addBreakdownError,
+        updateDescription, updatingDescription, updateDescriptionError,
         finish, finishing, finishError,
     };
 };
@@ -146,7 +167,10 @@ export const useWipProducts = (initialFilters = {}) => {
     return { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch };
 };
 
-// WIP Inventory — read-only paginated list.
+// WIP Inventory — read-only paginated list. Kept for the standalone WIP
+// Inventory page; InventoryPage's WIP family filter goes through
+// useInventoryList (useInventory.js) instead so it shares one list/pagination
+// UI with the RM view.
 export const useWipInventory = (initialFilters = {}) => {
     const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
         usePaginatedList((params) => productionApi.wipInventory.getAll(params), initialFilters);

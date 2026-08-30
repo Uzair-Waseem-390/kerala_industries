@@ -202,7 +202,10 @@ class Recipe(AuditMixin):
     # request, same reasoning as PurchaseOrder.created_at.
     created_at    = models.DateTimeField(auto_now_add=True, db_index=True)
     name          = models.CharField(max_length=255)
-    description   = models.TextField()  # mandatory — deliberately no blank=True
+    # Not required at creation — mandatory only at finish_recipe time (see
+    # production.services), so the user can fill it in any time while the
+    # recipe is under_processing.
+    description   = models.TextField(blank=True, default="")
     status        = models.CharField(max_length=20, choices=Status.choices, default=Status.UNDER_PROCESSING, db_index=True)
     # Blended per-unit cost across the whole recipe's output — computed and
     # frozen once, at finish_recipe (see production.services). Null while
@@ -246,6 +249,35 @@ class RecipeIssuedMaterial(models.Model):
 
     def __str__(self):
         return f"{self.recipe.recipe_number} — {self.kind}: {self.quantity}"
+
+
+class RecipeMaterialShelfDraw(models.Model):
+    """
+    Which shelf(s) an issue/increase pulled from, or a decrease returned to
+    — purely a display/audit record ("Drawn From" on the recipe detail
+    page). Deliberately NOT tied to a specific RecipeMaterialConsumption row
+    (FIFO-batch selection and shelf selection are independent choices —
+    one issue call can span multiple batches AND multiple shelves with no
+    natural 1:1 mapping between them), so this tracks shelf activity at the
+    issued-material level instead.
+    """
+    class Direction(models.TextChoices):
+        DRAW   = "draw",   "Drawn From"
+        RETURN = "return", "Returned To"
+
+    issued_material = models.ForeignKey(RecipeIssuedMaterial, on_delete=models.CASCADE, related_name="shelf_draws")
+    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="recipe_material_draws")
+    direction       = models.CharField(max_length=10, choices=Direction.choices)
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Recipe Material Shelf Draw"
+        verbose_name_plural = "Recipe Material Shelf Draws"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} {self.direction} {self.shelf.name}: {self.quantity}"
 
 
 class RecipeMaterialConsumption(models.Model):

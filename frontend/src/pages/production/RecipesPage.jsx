@@ -227,14 +227,13 @@ const RecipesPage = () => {
                     <div>
                         <label className="block text-sm font-medium text-neutral-700 mb-1.5">
                             Description
-                            <span className="text-error-500 ml-1">*</span>
+                            <span className="text-neutral-400 font-normal ml-1">(optional — can be added later)</span>
                         </label>
                         <textarea
                             value={formData.description}
                             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                             rows={3}
                             placeholder="Describe this production batch"
-                            required
                             className="w-full px-4 py-3 bg-white border border-neutral-200 rounded-xl focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all"
                         />
                     </div>

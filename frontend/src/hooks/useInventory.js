@@ -1,30 +1,44 @@
 import { inventoryApi } from '../services/inventoryApi';
+import { productionApi } from '../services/productionApi';
 import { usePaginatedList } from './usePaginatedList';
 
 // Paginated inventory list — switches between the full list and the
 // low-stock / out-of-stock breakdown endpoints depending on `stockView`
 // ('all' | 'low' | 'out'). Extracted from InventoryPage's inline fetch
 // function, same behavior.
-export const useInventoryList = (stockView, searchTerm) => {
+//
+// `isWipView` — RM's Inventory table structurally only ever holds
+// Raw-Material-family products, so selecting the "WIP" family on the
+// Inventory page has to switch to the separate production.WipInventory
+// endpoint instead (WIP has no low/out-of-stock breakdown or family
+// filter, so those params are dropped in that branch).
+export const useInventoryList = (stockView, searchTerm, isWipView = false) => {
     const fetchInventoryPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
+        if (isWipView) {
+            const { family, ...wipParams } = p;
+            return productionApi.wipInventory.getAll(wipParams);
+        }
         if (stockView === 'low') return inventoryApi.inventory.getLowStock(p);
         if (stockView === 'out') return inventoryApi.inventory.getOutOfStock(p);
         return inventoryApi.inventory.getAll(p);
     };
 
-    return usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, stockView]);
+    return usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, stockView, isWipView]);
 };
 
 // Products + quantities currently on one shelf — same paginated shape as
-// every other list endpoint.
-export const useShelfStock = (shelfId, searchTerm) => {
+// every other list endpoint. `family` ('rm' | 'wip') switches between RM
+// ShelfStock and production.WipShelfStock for the same shelf — the Shelf
+// detail page's family tab.
+export const useShelfStock = (shelfId, searchTerm, family = 'rm') => {
     const fetchStockPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
+        if (family === 'wip') return productionApi.wipShelfStock.getByShelf(shelfId, p);
         return inventoryApi.shelfStock.getByShelf(shelfId, p);
     };
 
-    return usePaginatedList(fetchStockPage, {}, 25, [shelfId, searchTerm]);
+    return usePaginatedList(fetchStockPage, {}, 25, [shelfId, searchTerm, family]);
 };

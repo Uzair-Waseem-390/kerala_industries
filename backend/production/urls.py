@@ -14,9 +14,11 @@ from .views import (
     RewoundCoreYardListView,
     RewoundCoreYardRetrieveView,
     UpdateIssuedMaterialView,
+    UpdateRecipeDescriptionView,
     WipInventoryListView,
     WipProductListView,
     WipProductRetrieveView,
+    WipShelfStockListView,
 )
 
 urlpatterns = [
@@ -33,12 +35,16 @@ urlpatterns = [
     path("wip-products/<int:pk>/",  WipProductRetrieveView.as_view(), name="wip-product-detail"),
     path("wip-inventory/",          WipInventoryListView.as_view(),   name="wip-inventory-list"),
 
+    # WIP shelf stock — Shelf detail page's WIP tab
+    path("shelves/<int:pk>/wip-stock/", WipShelfStockListView.as_view(), name="shelf-wip-stock-list"),
+
     # RM products issuable into a recipe
     path("issuable-products/", IssuableProductListView.as_view(), name="issuable-product-list"),
 
     # Recipes
     path("recipes/",     RecipeListCreateView.as_view(), name="recipe-list-create"),
     path("recipes/<int:pk>/", RecipeRetrieveView.as_view(), name="recipe-detail"),
+    path("recipes/<int:pk>/description/",      UpdateRecipeDescriptionView.as_view(), name="recipe-update-description"),
     path("recipes/<int:pk>/issue-material/",   IssueMaterialView.as_view(),      name="recipe-issue-material"),
     path("recipes/<int:pk>/issued-materials/<str:kind>/", UpdateIssuedMaterialView.as_view(), name="recipe-update-issued-material"),
     path("recipes/<int:pk>/breakdown-items/",  AddBreakdownItemView.as_view(),   name="recipe-add-breakdown-item"),

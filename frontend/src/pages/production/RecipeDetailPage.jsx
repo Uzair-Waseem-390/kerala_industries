@@ -221,15 +221,26 @@ const IssuedMaterialPanel = ({ kind, material, disabled, onIssue, onUpdate }) =>
                         )}
                     </div>
 
-                    {material.consumptions?.length > 0 && (
+                    {(material.consumptions?.length > 0 || material.shelf_draws?.length > 0) && (
                         <div>
                             <p className="text-xs font-medium text-neutral-500 mb-1">Drawn from</p>
                             <div className="border border-neutral-200 rounded-lg divide-y divide-neutral-100 text-sm">
-                                {material.consumptions.map((c, i) => (
-                                    <div key={c.purchase_item_id ?? i} className="flex items-center justify-between px-3 py-1.5">
+                                {material.consumptions?.map((c, i) => (
+                                    <div key={`c-${c.purchase_item_id ?? i}`} className="flex items-center justify-between px-3 py-1.5">
                                         <span>{c.product_name}</span>
                                         <span className="text-neutral-500">
                                             {c.quantity} @ {c.unit_cost != null ? parseFloat(c.unit_cost).toFixed(2) : '—'}
+                                        </span>
+                                    </div>
+                                ))}
+                                {/* Which shelf(s) this quantity was drawn from (and, on a
+                                    decrease, returned to) — already included in the recipe
+                                    detail response alongside consumptions, no extra request. */}
+                                {material.shelf_draws?.map((d) => (
+                                    <div key={`s-${d.id}`} className="flex items-center justify-between px-3 py-1.5">
+                                        <span className="text-neutral-500">Shelf: {d.shelf_name}</span>
+                                        <span className={d.direction === 'return' ? 'text-warning-600 font-medium' : 'text-neutral-500'}>
+                                            {d.direction === 'return' ? 'Returned' : 'Drawn'} {d.quantity}
                                         </span>
                                     </div>
                                 ))}
@@ -366,11 +377,18 @@ const RecipeDetailPage = () => {
         recipe, loading, error, refetch,
         issueMaterial, updateIssuedMaterial,
         addBreakdownItem,
+        updateDescription, updatingDescription,
         finish, finishing,
     } = useRecipeDetail(id);
 
     const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
     const [finishError, setFinishError] = useState('');
+
+    // Description is optional at create time but required before finish
+    // (server-enforced too — see handleFinish's disabled guard below).
+    const [editingDescription, setEditingDescription] = useState(false);
+    const [descriptionDraft, setDescriptionDraft] = useState('');
+    const [descriptionError, setDescriptionError] = useState('');
 
     if (loading) {
         return (
@@ -399,6 +417,25 @@ const RecipeDetailPage = () => {
     const jumboMaterial = recipe.issued_materials?.find((m) => m.kind === 'jumbo') || null;
     const coresMaterial = recipe.issued_materials?.find((m) => m.kind === 'cores') || null;
     const breakdownItems = recipe.breakdown_items || [];
+    const hasDescription = !!recipe.description?.trim();
+
+    const startEditDescription = () => {
+        setDescriptionDraft(recipe.description || '');
+        setDescriptionError('');
+        setEditingDescription(true);
+    };
+
+    const handleSaveDescription = async (e) => {
+        e.preventDefault();
+        setDescriptionError('');
+        try {
+            await updateDescription(descriptionDraft);
+            toast.success('Description updated');
+            setEditingDescription(false);
+        } catch (err) {
+            setDescriptionError(extractErrorMessage(err, 'Failed to update description'));
+        }
+    };
 
     const handleFinish = async () => {
         setFinishError('');
@@ -430,14 +467,19 @@ const RecipeDetailPage = () => {
                     </div>
                 </div>
                 {!isFinished && (
-                    <Button
-                        variant="success"
-                        icon={CheckCircle2}
-                        disabled={breakdownItems.length === 0}
-                        onClick={() => setConfirmFinishOpen(true)}
-                    >
-                        Finish Recipe
-                    </Button>
+                    <div className="flex flex-col items-end gap-1">
+                        <Button
+                            variant="success"
+                            icon={CheckCircle2}
+                            disabled={breakdownItems.length === 0 || !hasDescription}
+                            onClick={() => setConfirmFinishOpen(true)}
+                        >
+                            Finish Recipe
+                        </Button>
+                        {!hasDescription && (
+                            <p className="text-xs text-error-600">Add a description before finishing.</p>
+                        )}
+                    </div>
                 )}
             </div>
 
@@ -447,8 +489,39 @@ const RecipeDetailPage = () => {
                 <h3 className="font-semibold text-neutral-900 mb-3">Details</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <p className="text-sm text-neutral-500">Description</p>
-                        <p className="font-medium">{recipe.description}</p>
+                        <p className="text-sm text-neutral-500 mb-1">Description</p>
+                        {!isFinished && editingDescription ? (
+                            <form onSubmit={handleSaveDescription} className="space-y-2">
+                                {descriptionError && <InlineAlert variant="error" message={descriptionError} />}
+                                <textarea
+                                    value={descriptionDraft}
+                                    onChange={(e) => setDescriptionDraft(e.target.value)}
+                                    rows={3}
+                                    placeholder="Describe this production batch"
+                                    autoFocus
+                                    className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none transition-all text-sm"
+                                />
+                                <div className="flex gap-2">
+                                    <Button type="submit" size="sm" loading={updatingDescription}>Save</Button>
+                                    <Button type="button" variant="secondary" size="sm" onClick={() => setEditingDescription(false)}>
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </form>
+                        ) : (
+                            <div className="flex items-start justify-between gap-2">
+                                <p className="font-medium">
+                                    {hasDescription
+                                        ? recipe.description
+                                        : <span className="text-neutral-400 italic">No description yet</span>}
+                                </p>
+                                {!isFinished && (
+                                    <Button variant="secondary" size="sm" icon={Pencil} onClick={startEditDescription}>
+                                        Edit
+                                    </Button>
+                                )}
+                            </div>
+                        )}
                     </div>
                     <div>
                         <p className="text-sm text-neutral-500">Recipe Type</p>

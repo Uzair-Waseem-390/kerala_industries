@@ -6,6 +6,7 @@ import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { purchasesApi } from '../../services/purchasesApi';
 import { inventoryApi } from '../../services/inventoryApi';
+import { productionApi } from '../../services/productionApi';
 import { useInventoryList } from '../../hooks/useInventory';
 import Table from '../../components/ui/Table';
 import SearchBar from '../../components/ui/SearchBar';
@@ -44,6 +45,21 @@ const InventoryPage = () => {
     const [shelfBreakdown, setShelfBreakdown] = useState([]);
     const [shelfBreakdownLoading, setShelfBreakdownLoading] = useState(false);
 
+    // Mirrors the `family` value handed to the inventory hook's filters —
+    // tracked separately (not read back off the hook) so it's available
+    // synchronously to decide isWipView below, before the hook itself is
+    // called.
+    const [familyFilterId, setFamilyFilterId] = useState(undefined);
+
+    // RM's Inventory table structurally only ever holds Raw-Material-family
+    // products — WIP inventory lives in a separate app/table
+    // (production.WipInventory) by deliberate architecture decision. So
+    // selecting the "WIP" family option here can't just filter the RM list
+    // (it would always be empty) — it has to switch the whole list to the
+    // WIP endpoint instead. Finished Goods has no dedicated inventory yet,
+    // so it falls through to the normal RM query same as before.
+    const isWipView = families.some((f) => String(f.id) === String(familyFilterId) && f.name === 'WIP');
+
     // Search is routed through the same query params as the family
     // filter — the backend supports search/family on all three
     // inventory list endpoints (all / low-stock / out-of-stock). Shelf is
@@ -52,7 +68,7 @@ const InventoryPage = () => {
     const {
         data: inventory, meta, page, setPage, loading,
         filters, setFilters,
-    } = useInventoryList(stockView, searchTerm);
+    } = useInventoryList(stockView, searchTerm, isWipView);
 
     useEffect(() => {
         loadLookups();
@@ -82,11 +98,21 @@ const InventoryPage = () => {
     };
 
     // Toggle a breakdown view: click again (or click Total Products) to
-    // return to the full list.
+    // return to the full list. The low/out-of-stock breakdown is an RM-only
+    // concept (WIP has no low-stock threshold), so it's a no-op while
+    // viewing the WIP family.
     const handleCardClick = (view) => {
+        if (isWipView && view !== 'all') return;
         setStockView(current => (current === view ? 'all' : view));
         setPage(1);
     };
+
+    // Switching into the WIP family filter drops any RM-only breakdown view
+    // that might still be selected, so the low/out-of-stock banner doesn't
+    // linger over a list it no longer applies to.
+    useEffect(() => {
+        if (isWipView) setStockView('all');
+    }, [isWipView]);
 
     // "Total Stock" (sum of quantity across the full filtered set) has no
     // backend stats equivalent (the stats block only has total_products /
@@ -97,9 +123,14 @@ const InventoryPage = () => {
         let cancelled = false;
         const computeTotalStock = async () => {
             try {
-                const params = { ...filters, page_size: 500 };
+                const params = { page_size: 500 };
                 if (searchTerm) params.search = searchTerm;
-                const res = await inventoryApi.inventory.getAll(params);
+                let res;
+                if (isWipView) {
+                    res = await productionApi.wipInventory.getAll(params);
+                } else {
+                    res = await inventoryApi.inventory.getAll({ ...filters, ...params });
+                }
                 const items = res?.results || res || [];
                 const sum = items.reduce((s, item) => s + (parseFloat(item.quantity) || 0), 0);
                 if (!cancelled) setTotalStock(sum);
@@ -109,7 +140,7 @@ const InventoryPage = () => {
         };
         computeTotalStock();
         return () => { cancelled = true; };
-    }, [filters, searchTerm]);
+    }, [filters, searchTerm, isWipView]);
 
     const handleSearch = (value) => {
         setSearchTerm(value);
@@ -118,11 +149,13 @@ const InventoryPage = () => {
 
     const handleApplyFilters = (filterValues) => {
         setFilters(filterValues);
+        setFamilyFilterId(filterValues.family);
     };
 
     const handleResetFilters = () => {
         setFilters({});
         setSearchTerm('');
+        setFamilyFilterId(undefined);
     };
 
     const filterConfig = [
@@ -135,6 +168,10 @@ const InventoryPage = () => {
     ];
 
     const handleRowClick = async (row) => {
+        // WIP rows have no per-shelf breakdown / low-stock detail defined
+        // (RM inventory's detail modal is RM-specific) — no-op there.
+        if (isWipView) return;
+
         // Get the product ID from the row
         const productId = row.product?.id;
         if (!productId) return;
@@ -171,7 +208,7 @@ const InventoryPage = () => {
     const lowStockItems = stats?.low_stock_count ?? 0;
     const outOfStockItems = stats?.out_of_stock_count ?? 0;
 
-    const columns = [
+    const rmColumns = [
         {
             key: 'product',
             label: 'Product Code',
@@ -205,6 +242,36 @@ const InventoryPage = () => {
             render: (value) => value ? new Date(value).toLocaleString() : 'N/A'
         },
     ];
+
+    // WIP rows have no code/low-stock threshold — product.name is already a
+    // fully human-readable string, so this is name/quantity/last-updated
+    // only (mirrors WipInventoryPage's own columns).
+    const wipColumns = [
+        {
+            key: 'product',
+            label: 'WIP Product',
+            render: (value) => value?.name || 'N/A',
+        },
+        {
+            key: 'quantity',
+            label: 'Quantity',
+            render: (value) => {
+                const num = typeof value === 'string' ? parseFloat(value) : value;
+                return (
+                    <span className={`font-semibold ${num <= 0 ? 'text-error-600' : 'text-success-600'}`}>
+                        {isNaN(num) ? '0' : num}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'last_updated_at',
+            label: 'Last Updated',
+            render: (value) => value ? new Date(value).toLocaleString() : 'N/A',
+        },
+    ];
+
+    const columns = isWipView ? wipColumns : rmColumns;
 
     if (loading) {
         return (
@@ -265,24 +332,32 @@ const InventoryPage = () => {
                     <p className="text-2xl font-bold text-neutral-900">{totalStock}</p>
                 </Card>
                 <Card
-                    className={`p-4 cursor-pointer transition-shadow hover:shadow-md ${stockView === 'low' ? 'ring-2 ring-warning-500' : ''}`}
+                    className={`p-4 transition-shadow ${isWipView ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:shadow-md'} ${stockView === 'low' ? 'ring-2 ring-warning-500' : ''}`}
                     onClick={() => handleCardClick('low')}
                 >
                     <p className="text-sm text-neutral-500">Low Stock (≤ 5)</p>
                     <p className="text-2xl font-bold text-warning-600">{lowStockItems}</p>
-                    <p className="text-xs text-neutral-400 mt-1">Click to view breakdown</p>
+                    <p className="text-xs text-neutral-400 mt-1">{isWipView ? 'RM only' : 'Click to view breakdown'}</p>
                 </Card>
                 <Card
-                    className={`p-4 cursor-pointer transition-shadow hover:shadow-md ${stockView === 'out' ? 'ring-2 ring-error-500' : ''}`}
+                    className={`p-4 transition-shadow ${isWipView ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:shadow-md'} ${stockView === 'out' ? 'ring-2 ring-error-500' : ''}`}
                     onClick={() => handleCardClick('out')}
                 >
                     <p className="text-sm text-neutral-500">Out of Stock</p>
                     <p className="text-2xl font-bold text-error-600">{outOfStockItems}</p>
-                    <p className="text-xs text-neutral-400 mt-1">Click to view breakdown</p>
+                    <p className="text-xs text-neutral-400 mt-1">{isWipView ? 'RM only' : 'Click to view breakdown'}</p>
                 </Card>
             </div>
 
-            {stockView !== 'all' && (
+            {isWipView && (
+                <div className="flex items-center justify-between rounded-lg px-4 py-2 bg-primary-50 text-primary-700">
+                    <p className="text-sm font-medium">
+                        Showing WIP inventory — quantities come from work-in-process stock, not raw materials.
+                    </p>
+                </div>
+            )}
+
+            {!isWipView && stockView !== 'all' && (
                 <div className={`flex items-center justify-between rounded-lg px-4 py-2 ${stockView === 'low' ? 'bg-warning-50 text-warning-700' : 'bg-error-50 text-error-700'}`}>
                     <p className="text-sm font-medium">
                         Showing {stockView === 'low' ? 'low stock' : 'out of stock'} products only
@@ -337,7 +412,7 @@ const InventoryPage = () => {
             <Table
                 columns={columns}
                 data={inventory}
-                onRowClick={handleRowClick}
+                onRowClick={isWipView ? undefined : handleRowClick}
             />
 
             {meta.totalPages > 1 && (

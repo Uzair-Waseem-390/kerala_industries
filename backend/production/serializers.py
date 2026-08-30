@@ -6,7 +6,8 @@ from purchases.serializers import ShelfAllocationInputSerializer
 
 from .models import (
     Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipInventory, WipProduct,
+    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
+    WipInventory, WipProduct, WipShelfStock,
 )
 
 
@@ -64,14 +65,47 @@ class WipInventoryReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class WipProductLiteSerializer(serializers.ModelSerializer):
+    """Minimal WIP product shape for shelf-stock rows — mirrors purchases.ProductLiteSerializer."""
+    class Meta:
+        model  = WipProduct
+        fields = ["id", "name"]
+
+
+class WipShelfStockReadSerializer(serializers.ModelSerializer):
+    """Powers the Shelf detail page's WIP tab — mirrors inventory.ShelfStockReadSerializer."""
+    product = WipProductLiteSerializer(read_only=True)
+
+    class Meta:
+        model  = WipShelfStock
+        fields = ["id", "product", "quantity", "last_updated_at"]
+        read_only_fields = fields
+
+
 # ---------------------------------------------------------------------------
 # Recipe
 # ---------------------------------------------------------------------------
 
 class RecipeCreateSerializer(serializers.Serializer):
     name        = serializers.CharField(max_length=255)
-    description = serializers.CharField()
+    # Not required at creation — description becomes mandatory only at
+    # finish time (see production.services.finish_recipe).
+    description = serializers.CharField(required=False, allow_blank=True, default="")
     recipe_type = serializers.ChoiceField(choices=Recipe.RecipeType.choices, default=Recipe.RecipeType.REWINDING, required=False)
+
+
+class UpdateRecipeDescriptionSerializer(serializers.Serializer):
+    description = serializers.CharField(allow_blank=True)
+
+
+class RecipeMaterialShelfDrawReadSerializer(serializers.ModelSerializer):
+    shelf_id   = serializers.IntegerField(source="shelf.id", read_only=True)
+    shelf_name = serializers.CharField(source="shelf.name", read_only=True)
+
+    class Meta:
+        model  = RecipeMaterialShelfDraw
+        fields = ["id", "shelf_id", "shelf_name", "direction", "quantity", "created_at"]
+        read_only_fields = fields
 
 
 class RecipeMaterialConsumptionReadSerializer(serializers.ModelSerializer):
@@ -89,10 +123,11 @@ class RecipeIssuedMaterialReadSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     product_code = serializers.CharField(source="product.code", read_only=True)
     consumptions = RecipeMaterialConsumptionReadSerializer(many=True, read_only=True)
+    shelf_draws  = RecipeMaterialShelfDrawReadSerializer(many=True, read_only=True)
 
     class Meta:
         model  = RecipeIssuedMaterial
-        fields = ["id", "kind", "product_id", "product_name", "product_code", "quantity", "consumptions"]
+        fields = ["id", "kind", "product_id", "product_name", "product_code", "quantity", "consumptions", "shelf_draws"]
         read_only_fields = fields
 
 
