@@ -18,6 +18,15 @@ import Modal from '../../components/ui/Modal';
 import FilterBar from '../../components/ui/FilterBar';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
+import Tabs from '../../components/ui/Tabs';
+
+// Cores-vs-pieces sub-filter for the WIP family view — 'all' sends no
+// `stage` param (matches every WIP product).
+const WIP_STAGE_TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'rewinding', label: 'Cores' },
+    { value: 'cutting', label: 'Pieces' },
+];
 
 const InventoryPage = () => {
     const navigate = useNavigate();
@@ -51,6 +60,10 @@ const InventoryPage = () => {
     // called.
     const [familyFilterId, setFamilyFilterId] = useState(undefined);
 
+    // Cores-vs-pieces sub-filter, WIP family view only — client requested
+    // "filters to look wip cores and pieces" on this page.
+    const [wipStage, setWipStage] = useState('all');
+
     // RM's Inventory table structurally only ever holds Raw-Material-family
     // products — WIP inventory lives in a separate app/table
     // (production.WipInventory) by deliberate architecture decision. So
@@ -68,7 +81,7 @@ const InventoryPage = () => {
     const {
         data: inventory, meta, page, setPage, loading,
         filters, setFilters,
-    } = useInventoryList(stockView, searchTerm, isWipView);
+    } = useInventoryList(stockView, searchTerm, isWipView, isWipView && wipStage !== 'all' ? wipStage : undefined);
 
     useEffect(() => {
         loadLookups();
@@ -112,6 +125,7 @@ const InventoryPage = () => {
     // linger over a list it no longer applies to.
     useEffect(() => {
         if (isWipView) setStockView('all');
+        else setWipStage('all');
     }, [isWipView]);
 
     // "Total Stock" (sum of quantity across the full filtered set) has no
@@ -127,6 +141,7 @@ const InventoryPage = () => {
                 if (searchTerm) params.search = searchTerm;
                 let res;
                 if (isWipView) {
+                    if (wipStage !== 'all') params.stage = wipStage;
                     res = await productionApi.wipInventory.getAll(params);
                 } else {
                     res = await inventoryApi.inventory.getAll({ ...filters, ...params });
@@ -140,7 +155,7 @@ const InventoryPage = () => {
         };
         computeTotalStock();
         return () => { cancelled = true; };
-    }, [filters, searchTerm, isWipView]);
+    }, [filters, searchTerm, isWipView, wipStage]);
 
     const handleSearch = (value) => {
         setSearchTerm(value);
@@ -350,10 +365,17 @@ const InventoryPage = () => {
             </div>
 
             {isWipView && (
-                <div className="flex items-center justify-between rounded-lg px-4 py-2 bg-primary-50 text-primary-700">
-                    <p className="text-sm font-medium">
-                        Showing WIP inventory — quantities come from work-in-process stock, not raw materials.
-                    </p>
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between rounded-lg px-4 py-2 bg-primary-50 text-primary-700">
+                        <p className="text-sm font-medium">
+                            Showing WIP inventory — quantities come from work-in-process stock, not raw materials.
+                        </p>
+                    </div>
+                    <Tabs
+                        tabs={WIP_STAGE_TABS}
+                        activeTab={wipStage}
+                        onChange={(value) => { setWipStage(value); setPage(1); }}
+                    />
                 </div>
             )}
 

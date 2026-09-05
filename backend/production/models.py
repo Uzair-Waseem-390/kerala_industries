@@ -97,11 +97,23 @@ class RewoundCoreLengthMm(AuditMixin):
 # ---------------------------------------------------------------------------
 
 class WipProduct(AuditMixin):
+    class Stage(models.TextChoices):
+        REWINDING = "rewinding", "Rewinding"
+        CUTTING   = "cutting",   "Cutting"
+
     name        = models.CharField(max_length=255)
     family      = models.ForeignKey("purchases.Family", on_delete=models.PROTECT, related_name="wip_products")
     binding     = models.ForeignKey(RewoundCoreBinding, on_delete=models.PROTECT, related_name="wip_products")
     yard        = models.ForeignKey(RewoundCoreYard, on_delete=models.PROTECT, related_name="wip_products")
     length_mm   = models.ForeignKey(RewoundCoreLengthMm, on_delete=models.PROTECT, related_name="wip_products")
+    # Which stage's breakdown produced this row — a whole Rewound Core
+    # ("rewinding") vs. an already-Cut Piece ("cutting"). Both are shaped
+    # identically (binding+yard+length_mm), so nothing else distinguishes
+    # them; Cutting's issuable-core search filters to stage="rewinding" so
+    # an already-cut piece can never be re-issued as if it were a whole
+    # core. Defaults to "rewinding" for backward compatibility with rows
+    # created before this field existed.
+    stage       = models.CharField(max_length=20, choices=Stage.choices, default=Stage.REWINDING, db_index=True)
     # Deterministic fingerprint of (binding, yard, length_mm) — same
     # mechanism as purchases.Product.variant_key: a real DB-enforced
     # uniqueness guarantee so an identical combo across recipes reuses this
@@ -159,7 +171,9 @@ class WipShelfStockMovement(models.Model):
     """Append-only audit ledger for WipShelfStock changes — mirrors inventory.ShelfStockMovement."""
 
     class Reason(models.TextChoices):
-        RECIPE_BREAKDOWN_PUTAWAY = "recipe_breakdown_putaway", "Recipe Breakdown Put-Away"
+        RECIPE_BREAKDOWN_PUTAWAY  = "recipe_breakdown_putaway",  "Recipe Breakdown Put-Away"
+        CUTTING_ISSUE_CONSUMPTION = "cutting_issue_consumption", "Cutting Issue Consumption"
+        CUTTING_BREAKDOWN_PUTAWAY = "cutting_breakdown_putaway", "Cutting Breakdown Put-Away"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_movements")
     product    = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="shelf_movements")
@@ -193,7 +207,8 @@ class Recipe(AuditMixin):
 
     class RecipeType(models.TextChoices):
         REWINDING = "rewinding", "Rewinding"
-        # CUTTING / PACKING recipe types land here once those stages are built.
+        CUTTING   = "cutting",   "Cutting"
+        # PACKING recipe type lands here once that stage is built.
 
     recipe_number = models.CharField(max_length=30, unique=True, editable=False)
     recipe_type   = models.CharField(max_length=20, choices=RecipeType.choices, default=RecipeType.REWINDING, db_index=True)
@@ -211,11 +226,21 @@ class Recipe(AuditMixin):
     # frozen once, at finish_recipe (see production.services). Null while
     # under_processing.
     cost_per_unit = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, editable=False)
+    # Cutting only — total issued length not converted into output pieces
+    # (waste_length_mm) and that length's cost, both frozen at
+    # finish_cutting_recipe. Null for Rewinding recipes and while
+    # under_processing.
+    waste_length_mm = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, editable=False)
+    waste_cost      = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, editable=False)
     finished_by   = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
         related_name="finished_recipes",
     )
-    finished_at   = models.DateTimeField(null=True, blank=True)
+    # Indexed: it's the sort/lock-order key for Cutting's WIP FIFO
+    # (get_available_wip_batches_for_fifo orders by recipe__finished_at,
+    # return_fifo locks batches in that same order) — same reasoning as
+    # PurchaseOrder.confirmed_at being indexed for RM's FIFO ordering.
+    finished_at   = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         verbose_name        = "Recipe"
@@ -339,6 +364,119 @@ class RecipeBreakdownItemShelfAllocation(models.Model):
     class Meta:
         verbose_name        = "Recipe Breakdown Item Shelf Allocation"
         verbose_name_plural = "Recipe Breakdown Item Shelf Allocations"
+        unique_together     = [("breakdown_item", "shelf")]
+
+    def __str__(self):
+        return f"{self.breakdown_item} → {self.shelf.name}: {self.quantity}"
+
+
+# ---------------------------------------------------------------------------
+# Recipe (Cutting) — header is the same shared `Recipe` (recipe_type=
+# "cutting"). Issued material/consumption/breakdown are separate, parallel
+# models (not reused from the Rewinding ones above) because they point at a
+# structurally different source: a WIP `RecipeBreakdownItem` FIFO batch
+# instead of an RM `PurchaseItem` batch — mirrors this project's existing
+# "RM/WIP/FG are structurally separate" principle one level down (Rewinding
+# output vs. Cutting input), rather than bolting nullable alternate FKs onto
+# the Rewinding models.
+# ---------------------------------------------------------------------------
+
+class CuttingIssuedMaterial(models.Model):
+    """
+    Exactly one row per Cutting recipe (unlike Rewinding's Jumbo+Cores pair)
+    — Cutting only ever issues one WIP core product. `quantity` is pieces of
+    the whole core issued; this row IS the "recipe inventory" for Cutting,
+    same role RecipeIssuedMaterial plays for Rewinding.
+    """
+    recipe      = models.OneToOneField(Recipe, on_delete=models.CASCADE, related_name="cutting_issued_material")
+    wip_product = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="cutting_issuances")
+    quantity    = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+
+    class Meta:
+        verbose_name        = "Cutting Issued Material"
+        verbose_name_plural = "Cutting Issued Materials"
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.wip_product.name}: {self.quantity}"
+
+
+class CuttingMaterialShelfDraw(models.Model):
+    """Audit-only shelf activity for a Cutting issuance — mirrors RecipeMaterialShelfDraw."""
+    class Direction(models.TextChoices):
+        DRAW   = "draw",   "Drawn From"
+        RETURN = "return", "Returned To"
+
+    issued_material = models.ForeignKey(CuttingIssuedMaterial, on_delete=models.CASCADE, related_name="shelf_draws")
+    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="cutting_material_draws")
+    direction       = models.CharField(max_length=10, choices=Direction.choices)
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Cutting Material Shelf Draw"
+        verbose_name_plural = "Cutting Material Shelf Draws"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} {self.direction} {self.shelf.name}: {self.quantity}"
+
+
+class CuttingMaterialConsumption(models.Model):
+    """
+    FIFO ledger — which WIP `RecipeBreakdownItem` batch(es) (i.e. which
+    finished Rewinding batch) a Cutting issuance actually drew from, and how
+    much at what cost. Mirrors RecipeMaterialConsumption exactly, one level
+    up the chain (WIP batch instead of RM batch).
+    """
+    issued_material = models.ForeignKey(CuttingIssuedMaterial, on_delete=models.CASCADE, related_name="consumptions")
+    wip_batch       = models.ForeignKey(RecipeBreakdownItem, on_delete=models.PROTECT, related_name="cutting_consumptions")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    unit_cost       = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Cutting Material Consumption"
+        verbose_name_plural = "Cutting Material Consumptions"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} <- {self.wip_batch}: {self.quantity}"
+
+
+class CuttingBreakdownItem(AuditMixin):
+    """
+    One output line of a Cutting recipe: a cut-piece WIP product + the cut
+    length (mm) + quantity of pieces at that length. unit_cost_before_waste
+    and unit_cost_snapshot (final, after waste is spread across all pieces)
+    are both filled once, at finish_cutting_recipe — see
+    instructions/architecture.md's waste-absorption rule.
+    """
+    recipe                  = models.ForeignKey(Recipe, on_delete=models.CASCADE, related_name="cutting_breakdown_items")
+    wip_product             = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="cutting_breakdown_items")
+    length_mm               = models.DecimalField(max_digits=14, decimal_places=4)
+    quantity                = models.DecimalField(max_digits=14, decimal_places=4)
+    remaining_quantity      = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    unit_cost_before_waste  = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    unit_cost_snapshot      = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+
+    class Meta:
+        verbose_name        = "Cutting Breakdown Item"
+        verbose_name_plural = "Cutting Breakdown Items"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.wip_product.name}: {self.quantity}"
+
+
+class CuttingBreakdownItemShelfAllocation(models.Model):
+    """Which shelf(s) a Cutting breakdown item's produced quantity was put away to — mirrors RecipeBreakdownItemShelfAllocation."""
+    breakdown_item = models.ForeignKey(CuttingBreakdownItem, on_delete=models.CASCADE, related_name="shelf_allocations")
+    shelf          = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="cutting_breakdown_allocations")
+    quantity       = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        verbose_name        = "Cutting Breakdown Item Shelf Allocation"
+        verbose_name_plural = "Cutting Breakdown Item Shelf Allocations"
         unique_together     = [("breakdown_item", "shelf")]
 
     def __str__(self):

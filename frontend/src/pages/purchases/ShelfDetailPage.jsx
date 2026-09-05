@@ -21,6 +21,14 @@ const FAMILY_TABS = [
     { value: 'wip', label: 'WIP' },
 ];
 
+// Cores-vs-pieces sub-filter, WIP family tab only — 'all' sends no `stage`
+// param (matches every WIP product on this shelf).
+const WIP_STAGE_TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'rewinding', label: 'Cores' },
+    { value: 'cutting', label: 'Pieces' },
+];
+
 const ShelfDetailPage = () => {
     const { id } = useParams();
 
@@ -33,6 +41,8 @@ const ShelfDetailPage = () => {
     // behavior) or production.WipShelfStock. WIP now also has shelf-level
     // stock, since it reuses the same purchases.Shelf locations.
     const [activeFamily, setActiveFamily] = useState('rm');
+    // Cores-vs-pieces sub-filter, WIP family tab only.
+    const [wipStage, setWipStage] = useState('all');
 
     const fetchShelf = async () => {
         setShelfLoading(true);
@@ -55,7 +65,7 @@ const ShelfDetailPage = () => {
 
     const {
         data: stock, meta, page, setPage, loading, error: stockError, refetch,
-    } = useShelfStock(id, searchTerm, activeFamily);
+    } = useShelfStock(id, searchTerm, activeFamily, activeFamily === 'wip' && wipStage !== 'all' ? wipStage : undefined);
 
     const handleSearch = (value) => {
         setSearchTerm(value);
@@ -65,6 +75,12 @@ const ShelfDetailPage = () => {
     const handleFamilyChange = (value) => {
         setActiveFamily(value);
         setSearchTerm('');
+        setWipStage('all');
+        setPage(1);
+    };
+
+    const handleStageChange = (value) => {
+        setWipStage(value);
         setPage(1);
     };
 
@@ -189,6 +205,15 @@ const ShelfDetailPage = () => {
                         onChange={handleFamilyChange}
                         className="mb-4"
                     />
+
+                    {activeFamily === 'wip' && (
+                        <Tabs
+                            tabs={WIP_STAGE_TABS}
+                            activeTab={wipStage}
+                            onChange={handleStageChange}
+                            className="mb-4"
+                        />
+                    )}
 
                     <div className="mb-4">
                         <SearchBar

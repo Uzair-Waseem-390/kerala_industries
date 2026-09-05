@@ -7,6 +7,16 @@ import Card from '../../components/ui/Card';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
+import Tabs from '../../components/ui/Tabs';
+
+// Cores-vs-pieces sub-filter — 'all' sends no `stage` param at all (matches
+// every WIP product), the other two map directly to the backend's `stage`
+// query param.
+const STAGE_TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'rewinding', label: 'Cores' },
+    { value: 'cutting', label: 'Pieces' },
+];
 
 // Simple read-only WIP overview — mirrors InventoryPage's basic table
 // layout for RM, without the stat cards / shelf-breakdown modal (not the
@@ -16,8 +26,14 @@ const WipInventoryPage = () => {
         data: inventory, meta, setPage, loading, initialLoading, error, filters, setFilters, refetch,
     } = useWipInventory({});
 
+    const activeStage = filters.stage || 'all';
+
     const handleSearch = (value) => {
         setFilters({ ...filters, search: value || undefined });
+    };
+
+    const handleStageChange = (value) => {
+        setFilters({ ...filters, stage: value === 'all' ? undefined : value });
     };
 
     const columns = [
@@ -76,6 +92,8 @@ const WipInventoryPage = () => {
                 placeholder="Search WIP products..."
                 className="w-full sm:max-w-md"
             />
+
+            <Tabs tabs={STAGE_TABS} activeTab={activeStage} onChange={handleStageChange} />
 
             <Card className="p-0 overflow-hidden" hover={false}>
                 {inventory.length === 0 ? (

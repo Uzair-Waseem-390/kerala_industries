@@ -9,6 +9,43 @@ from django.db import transaction
 from .models import WipInventory, WipProduct, WipShelfStock, WipShelfStockMovement
 
 
+def validate_wip_shelf_consumption(*, product: WipProduct, allocations: list[dict]) -> None:
+    """
+    WIP-equivalent of purchases.services.validate_shelf_consumption — every
+    selected shelf must currently hold at least the requested quantity of
+    this WIP product. Needed for Cutting's issue-time shelf picks (drawing
+    WIP cores off a shelf, same as RM consumption does for Rewinding).
+    Locks the rows it checks (called from within the caller's atomic block).
+    """
+    from rest_framework.exceptions import ValidationError
+    if not allocations:
+        return
+
+    shelf_by_id = {a["shelf"].pk: a["shelf"] for a in allocations}
+    needed_by_id: dict[int, int] = {}
+    for a in allocations:
+        needed_by_id[a["shelf"].pk] = needed_by_id.get(a["shelf"].pk, 0) + a["quantity"]
+
+    stock_by_shelf = {
+        s.shelf_id: s.quantity
+        for s in WipShelfStock.objects.select_for_update()
+            .filter(product=product, shelf_id__in=sorted(needed_by_id.keys()))
+            .order_by("shelf_id")
+    }
+    for shelf_id in sorted(needed_by_id.keys()):
+        shelf = shelf_by_id[shelf_id]
+        needed = needed_by_id[shelf_id]
+        available = stock_by_shelf.get(shelf_id, 0)
+        if available < needed:
+            raise ValidationError({
+                "shelf_allocations": (
+                    f"Shelf '{shelf.name}' only has {available} of '{product.name}' "
+                    f"available, but {needed} was requested. Select another shelf "
+                    f"to cover the remaining {needed - available}."
+                )
+            })
+
+
 def sync_wip_inventory(*, product: WipProduct, quantity_delta, user=None) -> None:
     """THE single writer for WipInventory.quantity. Floored at 0."""
     with transaction.atomic():

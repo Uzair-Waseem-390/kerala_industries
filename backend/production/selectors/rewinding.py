@@ -8,6 +8,7 @@ from ..models import (
     RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
     RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,
 )
+from ._shared import WIP_PRODUCT_SELECT_RELATED
 
 
 def _clean(value):
@@ -47,7 +48,7 @@ def get_rewound_core_length_mm_by_id(pk: int) -> RewoundCoreLengthMm:
 # WIP Product / Inventory
 # ---------------------------------------------------------------------------
 
-_WIP_PRODUCT_RELATED = ("family", "binding", "yard", "length_mm", "created_by", "updated_by")
+_WIP_PRODUCT_RELATED = WIP_PRODUCT_SELECT_RELATED
 
 def get_all_wip_products(*, search: str = None) -> QuerySet:
     qs = WipProduct.objects.select_related(*_WIP_PRODUCT_RELATED).filter(is_deleted=False)
@@ -59,14 +60,16 @@ def get_wip_product_by_id(pk: int) -> WipProduct:
     return get_object_or_404(WipProduct.objects.select_related(*_WIP_PRODUCT_RELATED), pk=pk, is_deleted=False)
 
 
-def get_all_wip_inventory(*, search: str = None) -> QuerySet:
+def get_all_wip_inventory(*, search: str = None, stage: str = None) -> QuerySet:
     qs = WipInventory.objects.select_related(*[f"product__{f}" for f in _WIP_PRODUCT_RELATED], "product")
+    if _clean(stage):
+        qs = qs.filter(product__stage=_clean(stage))
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "product__name"))
     return qs
 
 
-def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None) -> QuerySet:
+def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None, stage: str = None) -> QuerySet:
     """
     WIP products + quantities currently on one shelf — powers the Shelf
     detail page's WIP tab. Mirrors inventory.selectors.get_shelf_stock_rows
@@ -74,6 +77,8 @@ def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None) -> QuerySet:
     same minimal-select_related reasoning as the RM version.
     """
     qs = WipShelfStock.objects.select_related("product").filter(shelf_id=shelf_id, quantity__gt=0)
+    if _clean(stage):
+        qs = qs.filter(product__stage=_clean(stage))
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "product__name"))
     return qs.order_by("product__name")
@@ -103,8 +108,7 @@ def _recipe_qs():
         Prefetch(
             "breakdown_items",
             queryset=RecipeBreakdownItem.objects.select_related(
-                "wip_product", "wip_product__binding", "wip_product__yard", "wip_product__length_mm",
-                "wip_product__created_by", "wip_product__updated_by",
+                *[f"wip_product__{f}" for f in WIP_PRODUCT_SELECT_RELATED], "wip_product",
             ).prefetch_related(
                 Prefetch(
                     "shelf_allocations",

@@ -10,7 +10,7 @@ from inventory.services import sync_inventory as sync_rm_inventory
 from purchases.models import CORES_PRODUCT_CODE, Family, JUMBO_PRODUCT_CODE
 from purchases.selectors import get_available_purchase_items_for_fifo, get_product_by_id
 from purchases.services import (
-    _unique_constraint_guard, _validate_shelf_ids_exist, next_reference,
+    _unique_constraint_guard, next_reference,
     validate_allocations_complete, validate_shelf_consumption,
 )
 
@@ -22,18 +22,14 @@ from ..models import (
 from ..selectors import get_issued_material
 from ..utils import compute_wip_variant_key, inches_to_mm
 from ..wip_inventory import apply_wip_shelf_allocations, sync_wip_inventory
+from ._shared import (
+    _fmt, draw_fifo, get_locked_recipe, normalize_shelf_allocations,
+    require_under_processing, return_fifo,
+)
 
 
 def _next_recipe_number() -> str:
     return next_reference(counter_key="REC", prefix_label="REC", model=Recipe, field="recipe_number")
-
-
-def _fmt(value: Decimal) -> str:
-    """'100.0000' -> '100', '1295.4000' -> '1295.4' — no trailing zeros/decimal point."""
-    s = format(value, "f")
-    if "." in s:
-        s = s.rstrip("0").rstrip(".")
-    return s
 
 
 def _parse_decimal(value: str, *, field_label: str) -> Decimal:
@@ -94,24 +90,12 @@ def update_recipe_description(*, recipe_id: int, description: str, user) -> Reci
     return recipe
 
 
-def _get_locked_recipe(recipe_id: int) -> Recipe:
-    """
-    Locks the Recipe row before any status check — every mutating service
-    function must call this FIRST, inside its own @transaction.atomic. A
-    plain unlocked read-then-check (the earlier version of this function)
-    lets two concurrent requests both pass a status check before either
-    commits its state change (e.g. two overlapping "Finish" clicks, or a
-    finish racing an add-breakdown-item) — the row lock serializes them so
-    the second request re-reads the true post-commit status.
-    """
-    from django.shortcuts import get_object_or_404
-    return get_object_or_404(Recipe.objects.select_for_update(), pk=recipe_id, is_deleted=False)
-
-
-def _require_under_processing(recipe: Recipe) -> None:
-    from rest_framework.exceptions import ValidationError
-    if recipe.status != Recipe.Status.UNDER_PROCESSING:
-        raise ValidationError({"status": "This recipe is finished and can no longer be edited."})
+# Local aliases — these three are now generic, shared with cutting.py (see
+# services/_shared.py); kept under their original names here so every
+# existing call site in this file needs no change.
+_get_locked_recipe = get_locked_recipe
+_require_under_processing = require_under_processing
+_normalize_shelf_allocations = normalize_shelf_allocations
 
 
 def _validate_material_kind_matches_product(*, kind: str, product) -> None:
@@ -123,119 +107,45 @@ def _validate_material_kind_matches_product(*, kind: str, product) -> None:
         })
 
 
-def _normalize_shelf_allocations(allocations: list[dict], *, required_total: Decimal, field_label: str = "shelf_allocations"):
-    """
-    Shared shape-validation for every shelf-allocation input in this app:
-    existence check, duplicate-merge, sum-must-equal-required. Returns
-    (merged: {shelf_id: qty}, shelves_by_id).
-    """
-    from rest_framework.exceptions import ValidationError
-    if not allocations:
-        raise ValidationError({field_label: "At least one shelf allocation is required."})
-
-    shelves_by_id = _validate_shelf_ids_exist([a["shelf_id"] for a in allocations])
-    merged: dict[int, Decimal] = {}
-    for a in allocations:
-        merged[a["shelf_id"]] = merged.get(a["shelf_id"], Decimal("0")) + a["quantity"]
-
-    total = sum(merged.values()) if merged else Decimal("0")
-    if total != required_total:
-        raise ValidationError({
-            field_label: f"Shelf allocations must sum to exactly {required_total}, got {total}."
-        })
-    return merged, shelves_by_id
-
-
 def _draw_fifo(*, issued_material: RecipeIssuedMaterial, quantity: Decimal, user) -> None:
     """
     Consumes `quantity` of issued_material.product from RM purchase batches,
-    oldest first — same mechanism as billing._run_fifo. Records one
-    RecipeMaterialConsumption row per batch drawn from and decrements each
-    batch's remaining_quantity. Raises if RM doesn't have enough stock left
-    (should not happen if the caller already checked Inventory.quantity, but
-    the locked re-walk here is the trustworthy check under concurrency).
+    oldest first — same mechanism as billing._run_fifo. Thin wrapper over
+    the FIFO logic shared with Cutting (see services/_shared.py) — this
+    function only supplies what's Rewinding/RM-specific: which batches, how
+    to price one, and the out-of-stock label.
     """
-    from rest_framework.exceptions import ValidationError
-
-    remaining_to_consume = quantity
     batches = get_available_purchase_items_for_fifo(issued_material.product_id, for_update=True)
 
-    for batch in batches:
-        if remaining_to_consume <= 0:
-            break
-        consume = min(batch.remaining_quantity, remaining_to_consume)
-        unit_cost = (
+    def unit_cost_fn(batch):
+        return (
             (batch.total_price / batch.quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
             if batch.quantity > 0 else batch.unit_price
         )
 
-        RecipeMaterialConsumption.objects.create(
-            issued_material=issued_material, purchase_item=batch,
-            quantity=consume, unit_cost=unit_cost,
-        )
-        batch.remaining_quantity -= consume
-        batch.save(update_fields=["remaining_quantity"])
-        remaining_to_consume -= consume
-
-    if remaining_to_consume > 0:
-        raise ValidationError({
-            "quantity": (
-                f"Stock ran out mid-issue for '{issued_material.product.name}' — "
-                f"{remaining_to_consume} short. Please refresh and try again."
-            )
-        })
+    draw_fifo(
+        issued_material=issued_material, quantity=quantity,
+        consumption_model=RecipeMaterialConsumption, batch_field="purchase_item",
+        batches=batches, unit_cost_fn=unit_cost_fn,
+        out_of_stock_label=issued_material.product.name,
+    )
 
 
 def _return_fifo(*, issued_material: RecipeIssuedMaterial, quantity: Decimal) -> None:
     """
     Reverses `quantity` worth of this issued_material's consumption,
-    most-recently-drawn batch first — the inverse of _draw_fifo. Restores
-    remaining_quantity on each affected PurchaseItem and shrinks/deletes the
-    RecipeMaterialConsumption row accordingly.
-
-    Batches are located (by LIFO consumption order) WITHOUT locking first,
-    then locked in ONE query ordered exactly the way _draw_fifo locks them
-    (oldest-confirmed-first) before any row is mutated. Locking them
-    one-by-one in LIFO order — the previous version of this function — would
-    let a concurrent increase (which locks oldest-first via _draw_fifo) and
-    a concurrent decrease on the same issued material lock the same two
-    batches in opposite order: a textbook circular-wait deadlock. Locking
-    everything up front, in the same order every caller uses, also drops
-    the redundant per-row re-lock the old version did (the join below
-    already gives us the row; we don't need to fetch it again).
+    most-recently-drawn batch first — the inverse of _draw_fifo. Thin
+    wrapper over the shared FIFO-return logic (see services/_shared.py);
+    locks batches oldest-confirmed-first (same order _draw_fifo locks them)
+    to avoid a circular-wait deadlock against a concurrent increase.
     """
     from purchases.models import PurchaseItem
-    from rest_framework.exceptions import ValidationError
 
-    remaining_to_return = quantity
-    candidates = []
-    for consumption in issued_material.consumptions.order_by("-created_at", "-id"):
-        if remaining_to_return <= 0:
-            break
-        give_back = min(consumption.quantity, remaining_to_return)
-        candidates.append((consumption, give_back))
-        remaining_to_return -= give_back
-
-    if remaining_to_return > 0:
-        raise ValidationError({"quantity": "Could not reconcile the returned quantity against consumption history."})
-
-    batch_ids = {c.purchase_item_id for c, _ in candidates}
-    locked_batches = {
-        b.pk: b
-        for b in PurchaseItem.objects.select_for_update()
-            .filter(pk__in=batch_ids).order_by("order__confirmed_at", "pk")
-    }
-
-    for consumption, give_back in candidates:
-        locked_batch = locked_batches[consumption.purchase_item_id]
-        locked_batch.remaining_quantity += give_back
-        locked_batch.save(update_fields=["remaining_quantity"])
-
-        if give_back == consumption.quantity:
-            consumption.delete()
-        else:
-            consumption.quantity -= give_back
-            consumption.save(update_fields=["quantity"])
+    return_fifo(
+        issued_material=issued_material, quantity=quantity,
+        batch_model=PurchaseItem, batch_field="purchase_item",
+        batch_lock_order_by=("order__confirmed_at", "pk"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +306,10 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
             value=length_mm_value, defaults={"created_by": user, "updated_by": user},
         )
 
-    variant_key = compute_wip_variant_key(binding_id=binding.id, yard_id=yard_lookup.id, length_mm_id=length_lookup.id)
+    variant_key = compute_wip_variant_key(
+        binding_id=binding.id, yard_id=yard_lookup.id, length_mm_id=length_lookup.id,
+        stage=WipProduct.Stage.REWINDING,
+    )
     wip_product = WipProduct.objects.filter(variant_key=variant_key).first()
     if wip_product is None:
         wip_family = Family.objects.get(name="WIP")
@@ -405,7 +318,7 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
             with transaction.atomic():
                 wip_product = WipProduct.objects.create(
                     name=name, family=wip_family, binding=binding, yard=yard_lookup, length_mm=length_lookup,
-                    variant_key=variant_key, created_by=user, updated_by=user,
+                    stage=WipProduct.Stage.REWINDING, variant_key=variant_key, created_by=user, updated_by=user,
                 )
         except IntegrityError:
             # Lost a create race against a concurrent identical breakdown —

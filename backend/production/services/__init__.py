@@ -8,8 +8,14 @@ from .rewinding import (
     add_breakdown_item, create_recipe, finish_recipe, issue_material,
     update_issued_material, update_recipe_description,
 )
+from .cutting import (
+    add_cutting_breakdown_item, create_cutting_recipe, finish_cutting_recipe,
+    issue_cutting_material, update_cutting_issued_material,
+)
 
 __all__ = [
     "add_breakdown_item", "create_recipe", "finish_recipe", "issue_material",
     "update_issued_material", "update_recipe_description",
+    "add_cutting_breakdown_item", "create_cutting_recipe", "finish_cutting_recipe",
+    "issue_cutting_material", "update_cutting_issued_material",
 ]

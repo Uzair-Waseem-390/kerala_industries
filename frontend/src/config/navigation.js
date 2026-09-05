@@ -7,7 +7,7 @@ import {
     Repeat, Tag, Send, Calendar, Receipt, Banknote, PackageX, RotateCcw,
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
-    Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers,
+    Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers, Scissors,
 } from 'lucide-react';
 
 export const mainNavigation = [
@@ -58,6 +58,7 @@ export const navGroups = [
         adminOnly: true,
         items: [
             { name: 'Rewinding Recipes', path: '/production/recipes', icon: FlaskConical },
+            { name: 'Cutting Recipes', path: '/production/cutting-recipes', icon: Scissors },
             { name: 'WIP Inventory', path: '/production/wip-inventory', icon: Layers },
         ],
     },

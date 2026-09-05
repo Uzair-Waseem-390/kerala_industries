@@ -5,9 +5,11 @@ from rest_framework import serializers
 from purchases.serializers import ShelfAllocationInputSerializer
 
 from .models import (
-    Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
-    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
-    RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,
+    CuttingBreakdownItem, CuttingBreakdownItemShelfAllocation, CuttingIssuedMaterial,
+    CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, RecipeBreakdownItem,
+    RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial, RecipeMaterialConsumption,
+    RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
+    WipInventory, WipProduct, WipShelfStock,
 )
 
 
@@ -52,7 +54,7 @@ class WipProductReadSerializer(AuditReadMixin, serializers.ModelSerializer):
 
     class Meta:
         model  = WipProduct
-        fields = ["id", "name", "family", "binding", "yard", "length_mm",
+        fields = ["id", "name", "family", "stage", "binding", "yard", "length_mm",
                   "created_by", "updated_by", "created_at", "updated_at"]
 
 
@@ -69,7 +71,7 @@ class WipProductLiteSerializer(serializers.ModelSerializer):
     """Minimal WIP product shape for shelf-stock rows — mirrors purchases.ProductLiteSerializer."""
     class Meta:
         model  = WipProduct
-        fields = ["id", "name"]
+        fields = ["id", "name", "stage"]
 
 
 class WipShelfStockReadSerializer(serializers.ModelSerializer):
@@ -197,3 +199,105 @@ class CandidateShelfSerializer(serializers.Serializer):
     id                 = serializers.IntegerField()
     name               = serializers.CharField()
     available_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, required=False, allow_null=True)
+
+
+# ---------------------------------------------------------------------------
+# Recipe (Cutting) — separate read serializers from Rewinding's: the child
+# models genuinely differ (WIP-batch consumption instead of RM-batch,
+# length_mm + two cost fields on the breakdown item, a single issued
+# material instead of a Jumbo+Cores pair) so nesting them under the shared
+# RecipeReadSerializer would either show empty Rewinding-shaped fields on a
+# Cutting recipe or vice versa. Same shared header fields either way.
+# ---------------------------------------------------------------------------
+
+class CreateCuttingRecipeSerializer(serializers.Serializer):
+    name        = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class IssueCuttingMaterialSerializer(serializers.Serializer):
+    wip_product_id    = serializers.IntegerField()
+    quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    shelf_allocations = ShelfAllocationInputSerializer(many=True)
+
+
+class AddCuttingBreakdownItemSerializer(serializers.Serializer):
+    length_mm         = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
+    shelf_allocations = ShelfAllocationInputSerializer(many=True)
+
+
+class IssuableWipCoreSerializer(serializers.Serializer):
+    id                 = serializers.IntegerField()
+    name               = serializers.CharField()
+    available_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, allow_null=True)
+
+
+class CuttingMaterialShelfDrawReadSerializer(serializers.ModelSerializer):
+    shelf_id   = serializers.IntegerField(source="shelf.id", read_only=True)
+    shelf_name = serializers.CharField(source="shelf.name", read_only=True)
+
+    class Meta:
+        model  = CuttingMaterialShelfDraw
+        fields = ["id", "shelf_id", "shelf_name", "direction", "quantity", "created_at"]
+        read_only_fields = fields
+
+
+class CuttingMaterialConsumptionReadSerializer(serializers.ModelSerializer):
+    wip_batch_id          = serializers.IntegerField(source="wip_batch.id", read_only=True)
+    product_name          = serializers.CharField(source="wip_batch.wip_product.name", read_only=True)
+    source_recipe_number  = serializers.CharField(source="wip_batch.recipe.recipe_number", read_only=True)
+
+    class Meta:
+        model  = CuttingMaterialConsumption
+        fields = ["id", "wip_batch_id", "product_name", "source_recipe_number", "quantity", "unit_cost", "created_at"]
+        read_only_fields = fields
+
+
+class CuttingIssuedMaterialReadSerializer(serializers.ModelSerializer):
+    wip_product_id   = serializers.IntegerField(source="wip_product.id", read_only=True)
+    wip_product_name = serializers.CharField(source="wip_product.name", read_only=True)
+    consumptions     = CuttingMaterialConsumptionReadSerializer(many=True, read_only=True)
+    shelf_draws      = CuttingMaterialShelfDrawReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = CuttingIssuedMaterial
+        fields = ["id", "wip_product_id", "wip_product_name", "quantity", "consumptions", "shelf_draws"]
+        read_only_fields = fields
+
+
+class CuttingBreakdownItemShelfAllocationReadSerializer(serializers.ModelSerializer):
+    shelf_id   = serializers.IntegerField(source="shelf.id", read_only=True)
+    shelf_name = serializers.CharField(source="shelf.name", read_only=True)
+
+    class Meta:
+        model  = CuttingBreakdownItemShelfAllocation
+        fields = ["id", "shelf_id", "shelf_name", "quantity"]
+        read_only_fields = fields
+
+
+class CuttingBreakdownItemReadSerializer(serializers.ModelSerializer):
+    wip_product       = WipProductReadSerializer(read_only=True)
+    shelf_allocations = CuttingBreakdownItemShelfAllocationReadSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = CuttingBreakdownItem
+        fields = ["id", "wip_product", "length_mm", "quantity", "remaining_quantity",
+                  "unit_cost_before_waste", "unit_cost_snapshot", "shelf_allocations", "created_at"]
+        read_only_fields = fields
+
+
+class CuttingRecipeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
+    cutting_issued_material  = CuttingIssuedMaterialReadSerializer(read_only=True)
+    cutting_breakdown_items  = CuttingBreakdownItemReadSerializer(many=True, read_only=True)
+    finished_by              = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model  = Recipe
+        fields = [
+            "id", "recipe_number", "recipe_type", "name", "description", "status",
+            "cost_per_unit", "waste_length_mm", "waste_cost", "finished_by", "finished_at",
+            "cutting_issued_material", "cutting_breakdown_items",
+            "created_by", "updated_by", "created_at", "updated_at",
+        ]
+        read_only_fields = fields

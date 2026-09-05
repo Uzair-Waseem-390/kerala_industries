@@ -49,6 +49,51 @@ export const productionApi = {
         },
     },
 
+    // Cutting — second WIP stage. Issues whole Rewound Cores and breaks them
+    // down into cut-length pieces. One issued material (no jumbo/cores
+    // split like Rewinding) and breakdown items carry length_mm + quantity
+    // instead of a single yard_value.
+    cuttingRecipes: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/cutting-recipes/${query ? `?${query}` : ''}`);
+        },
+        getById: (id) => api.get(`/production/cutting-recipes/${id}/`),
+        create: (data) => api.post('/production/cutting-recipes/', data),
+        updateDescription: (id, data) => api.patch(`/production/cutting-recipes/${id}/description/`, data),
+        // shelf_allocations: which shelves to pull the issued WIP core
+        // quantity from — sourced from wipShelfCandidates below, same
+        // consumption-style picker Rewinding's own issue-material uses.
+        issueMaterial: (id, data) => api.post(`/production/cutting-recipes/${id}/issue-material/`, data),
+        // quantity is the NEW total (not a delta), same as Rewinding's
+        // update-issued-material — draws more on increase, returns WIP
+        // stock on decrease.
+        updateIssuedMaterial: (id, data) => api.patch(`/production/cutting-recipes/${id}/issued-material/`, data),
+        // One output line per call: a cut length (length_mm) + how many
+        // pieces of that length (quantity), plus put-away shelf_allocations.
+        addBreakdownItem: (id, data) => api.post(`/production/cutting-recipes/${id}/breakdown-items/`, data),
+        finish: (id) => api.post(`/production/cutting-recipes/${id}/finish/`),
+    },
+
+    // Whole Rewound Cores (not already-cut pieces) available to issue into
+    // a Cutting recipe — the picker source for Cutting's issue-material.
+    issuableWipCores: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/issuable-wip-cores/${query ? `?${query}` : ''}`);
+        },
+    },
+
+    // Shelves currently holding stock of a given WIP product — mirrors
+    // purchasesApi.shelves.getCandidates, for Cutting's consumption-side
+    // shelf picker (issuing a core, or increasing an already-issued qty).
+    wipShelfCandidates: {
+        getAll: (wipProductId, params = {}) => {
+            const query = new URLSearchParams({ wip_product_id: wipProductId, ...params }).toString();
+            return api.get(`/production/wip-shelves/candidates/?${query}`);
+        },
+    },
+
     // WIP Products / Inventory — read-only overview.
     wipProducts: {
         getAll: (params = {}) => {

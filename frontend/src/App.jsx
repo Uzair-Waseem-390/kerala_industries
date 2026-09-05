@@ -35,6 +35,8 @@ import PurchasePaymentDetailPage from './pages/purchases/PurchasePaymentDetailPa
 // Production pages
 import RecipesPage from './pages/production/RecipesPage';
 import RecipeDetailPage from './pages/production/RecipeDetailPage';
+import CuttingRecipesPage from './pages/production/CuttingRecipesPage';
+import CuttingRecipeDetailPage from './pages/production/CuttingRecipeDetailPage';
 import WipInventoryPage from './pages/production/WipInventoryPage';
 
 // Inventory pages
@@ -286,6 +288,22 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <RecipeDetailPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/cutting-recipes" element={
+          <ProtectedRoute>
+            <Layout>
+              <CuttingRecipesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/cutting-recipes/:id" element={
+          <ProtectedRoute>
+            <Layout>
+              <CuttingRecipeDetailPage />
             </Layout>
           </ProtectedRoute>
         } />

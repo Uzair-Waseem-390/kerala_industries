@@ -2,8 +2,15 @@ from django.urls import path
 
 from .views import (
     AddBreakdownItemView,
+    AddCuttingBreakdownItemView,
+    CandidateShelvesForWipProductListView,
+    CuttingRecipeListCreateView,
+    CuttingRecipeRetrieveView,
+    FinishCuttingRecipeView,
     FinishRecipeView,
     IssuableProductListView,
+    IssuableWipCoreListView,
+    IssueCuttingMaterialView,
     IssueMaterialView,
     RecipeListCreateView,
     RecipeRetrieveView,
@@ -13,6 +20,8 @@ from .views import (
     RewoundCoreLengthMmRetrieveView,
     RewoundCoreYardListView,
     RewoundCoreYardRetrieveView,
+    UpdateCuttingIssuedMaterialView,
+    UpdateCuttingRecipeDescriptionView,
     UpdateIssuedMaterialView,
     UpdateRecipeDescriptionView,
     WipInventoryListView,
@@ -41,7 +50,13 @@ urlpatterns = [
     # RM products issuable into a recipe
     path("issuable-products/", IssuableProductListView.as_view(), name="issuable-product-list"),
 
-    # Recipes
+    # WIP cores issuable into a Cutting recipe
+    path("issuable-wip-cores/", IssuableWipCoreListView.as_view(), name="issuable-wip-core-list"),
+
+    # Shelves currently holding a given WIP product (consumption-side picker)
+    path("wip-shelves/candidates/", CandidateShelvesForWipProductListView.as_view(), name="wip-shelf-candidates"),
+
+    # Recipes (Rewinding)
     path("recipes/",     RecipeListCreateView.as_view(), name="recipe-list-create"),
     path("recipes/<int:pk>/", RecipeRetrieveView.as_view(), name="recipe-detail"),
     path("recipes/<int:pk>/description/",      UpdateRecipeDescriptionView.as_view(), name="recipe-update-description"),
@@ -49,4 +64,13 @@ urlpatterns = [
     path("recipes/<int:pk>/issued-materials/<str:kind>/", UpdateIssuedMaterialView.as_view(), name="recipe-update-issued-material"),
     path("recipes/<int:pk>/breakdown-items/",  AddBreakdownItemView.as_view(),   name="recipe-add-breakdown-item"),
     path("recipes/<int:pk>/finish/",           FinishRecipeView.as_view(),      name="recipe-finish"),
+
+    # Recipes (Cutting)
+    path("cutting-recipes/",     CuttingRecipeListCreateView.as_view(), name="cutting-recipe-list-create"),
+    path("cutting-recipes/<int:pk>/", CuttingRecipeRetrieveView.as_view(), name="cutting-recipe-detail"),
+    path("cutting-recipes/<int:pk>/description/",     UpdateCuttingRecipeDescriptionView.as_view(), name="cutting-recipe-update-description"),
+    path("cutting-recipes/<int:pk>/issue-material/",  IssueCuttingMaterialView.as_view(),           name="cutting-recipe-issue-material"),
+    path("cutting-recipes/<int:pk>/issued-material/", UpdateCuttingIssuedMaterialView.as_view(),    name="cutting-recipe-update-issued-material"),
+    path("cutting-recipes/<int:pk>/breakdown-items/", AddCuttingBreakdownItemView.as_view(),        name="cutting-recipe-add-breakdown-item"),
+    path("cutting-recipes/<int:pk>/finish/",           FinishCuttingRecipeView.as_view(),           name="cutting-recipe-finish"),
 ]

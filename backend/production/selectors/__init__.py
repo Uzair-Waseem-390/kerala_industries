@@ -10,6 +10,11 @@ from .rewinding import (
     get_rewound_core_binding_by_id, get_rewound_core_length_mm_by_id,
     get_rewound_core_yard_by_id, get_wip_product_by_id, get_wip_shelf_stock_rows,
 )
+from .cutting import (
+    get_all_cutting_recipes, get_available_wip_batches_for_fifo, get_cutting_issued_material,
+    get_cutting_recipe_by_id, get_issuable_wip_cores,
+)
+from ._shared import get_candidate_shelves_for_wip_product
 
 __all__ = [
     "get_all_recipes", "get_all_rewound_core_bindings", "get_all_rewound_core_length_mms",
@@ -17,4 +22,6 @@ __all__ = [
     "get_issuable_products", "get_issued_material", "get_recipe_by_id",
     "get_rewound_core_binding_by_id", "get_rewound_core_length_mm_by_id",
     "get_rewound_core_yard_by_id", "get_wip_product_by_id", "get_wip_shelf_stock_rows",
+    "get_all_cutting_recipes", "get_available_wip_batches_for_fifo", "get_cutting_issued_material",
+    "get_cutting_recipe_by_id", "get_issuable_wip_cores", "get_candidate_shelves_for_wip_product",
 ]

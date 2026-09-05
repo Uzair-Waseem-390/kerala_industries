@@ -12,12 +12,17 @@ import { usePaginatedList } from './usePaginatedList';
 // Inventory page has to switch to the separate production.WipInventory
 // endpoint instead (WIP has no low/out-of-stock breakdown or family
 // filter, so those params are dropped in that branch).
-export const useInventoryList = (stockView, searchTerm, isWipView = false) => {
+//
+// `wipStage` — WIP-only sub-filter ('rewinding' | 'cutting' | undefined for
+// all) distinguishing whole Rewound Cores from already-cut pieces. Ignored
+// outside the WIP view.
+export const useInventoryList = (stockView, searchTerm, isWipView = false, wipStage) => {
     const fetchInventoryPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
         if (isWipView) {
             const { family, ...wipParams } = p;
+            if (wipStage) wipParams.stage = wipStage;
             return productionApi.wipInventory.getAll(wipParams);
         }
         if (stockView === 'low') return inventoryApi.inventory.getLowStock(p);
@@ -25,20 +30,24 @@ export const useInventoryList = (stockView, searchTerm, isWipView = false) => {
         return inventoryApi.inventory.getAll(p);
     };
 
-    return usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, stockView, isWipView]);
+    return usePaginatedList(fetchInventoryPage, {}, 25, [searchTerm, stockView, isWipView, wipStage]);
 };
 
 // Products + quantities currently on one shelf — same paginated shape as
 // every other list endpoint. `family` ('rm' | 'wip') switches between RM
 // ShelfStock and production.WipShelfStock for the same shelf — the Shelf
-// detail page's family tab.
-export const useShelfStock = (shelfId, searchTerm, family = 'rm') => {
+// detail page's family tab. `stage` ('rewinding' | 'cutting' | undefined)
+// is the WIP-only cores-vs-pieces sub-filter, ignored for 'rm'.
+export const useShelfStock = (shelfId, searchTerm, family = 'rm', stage) => {
     const fetchStockPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
-        if (family === 'wip') return productionApi.wipShelfStock.getByShelf(shelfId, p);
+        if (family === 'wip') {
+            if (stage) p.stage = stage;
+            return productionApi.wipShelfStock.getByShelf(shelfId, p);
+        }
         return inventoryApi.shelfStock.getByShelf(shelfId, p);
     };
 
-    return usePaginatedList(fetchStockPage, {}, 25, [shelfId, searchTerm, family]);
+    return usePaginatedList(fetchStockPage, {}, 25, [shelfId, searchTerm, family, stage]);
 };
