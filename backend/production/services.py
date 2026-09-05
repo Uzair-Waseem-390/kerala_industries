@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
@@ -164,7 +164,10 @@ def _draw_fifo(*, issued_material: RecipeIssuedMaterial, quantity: Decimal, user
         if remaining_to_consume <= 0:
             break
         consume = min(batch.remaining_quantity, remaining_to_consume)
-        unit_cost = (batch.total_price / batch.quantity) if batch.quantity > 0 else batch.unit_price
+        unit_cost = (
+            (batch.total_price / batch.quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            if batch.quantity > 0 else batch.unit_price
+        )
 
         RecipeMaterialConsumption.objects.create(
             issued_material=issued_material, purchase_item=batch,
@@ -466,10 +469,27 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
             total_cost += consumption.quantity * consumption.unit_cost
 
     total_output_quantity = sum((item.quantity for item in breakdown_items), Decimal("0"))
-    cost_per_unit = (total_cost / total_output_quantity).quantize(Decimal("0.0001")) if total_output_quantity > 0 else Decimal("0")
+    cost_per_unit = (
+        (total_cost / total_output_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        if total_output_quantity > 0 else Decimal("0")
+    )
 
-    for item in breakdown_items:
+    # cost_per_unit is a blended rate rounded to 4dp — stamping it as-is on
+    # every item would make Σ(item.quantity × unit_cost_snapshot) drift from
+    # the exact total_cost whenever the division doesn't come out even
+    # (same rounding-order mistake as Jumbo/Packing purchase costing). Every
+    # item but the last gets the blended rate; the last item absorbs
+    # whatever's left of total_cost, so the sum reconciles exactly (down to
+    # the field's own 4dp storage limit on that one item).
+    remaining_cost = total_cost
+    for item in breakdown_items[:-1]:
         item.unit_cost_snapshot = cost_per_unit
+        remaining_cost -= item.quantity * cost_per_unit
+    last_item = breakdown_items[-1]
+    last_item.unit_cost_snapshot = (
+        (remaining_cost / last_item.quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        if last_item.quantity > 0 else Decimal("0")
+    )
     RecipeBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_snapshot"])
 
     recipe.status = Recipe.Status.FINISHED

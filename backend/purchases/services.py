@@ -975,7 +975,14 @@ def create_jumbo_purchase(
     item.rate_per_kg = rate_per_kg
     item.freight_cost = freight_cost
     item.expected_length_m = expected_length_m
-    item.save(update_fields=["weight_kg", "rate_per_kg", "freight_cost", "expected_length_m"])
+    # save() recomputes gross_amount/gst_amount/wht_amount/total_price from
+    # the now-set rate_per_kg/weight_kg/freight_cost (see PurchaseItem.save)
+    # — those recomputed fields must be in update_fields too, or the
+    # corrected values are computed in memory but never written to the row.
+    item.save(update_fields=[
+        "weight_kg", "rate_per_kg", "freight_cost", "expected_length_m",
+        "gross_amount", "gst_amount", "wht_amount", "total_price",
+    ])
     return order
 
 
@@ -1047,7 +1054,10 @@ def create_packing_purchase(
     item = order.items.get(product_id=variant.id)
     item.weight_kg = weight_kg
     item.rate_per_kg = rate_per_kg
-    item.save(update_fields=["weight_kg", "rate_per_kg"])
+    item.save(update_fields=[
+        "weight_kg", "rate_per_kg",
+        "gross_amount", "gst_amount", "wht_amount", "total_price",
+    ])
     return order
 
 
@@ -1161,12 +1171,17 @@ def correct_jumbo_exact_length(
             for shelf_id, qty in merged.items() if qty > 0
         ])
 
-    # gross_amount is what was actually paid (rate_per_kg × weight_kg +
-    # freight_cost, up to rounding) — fixed. unit_price is re-derived from
-    # it so the recalculated gross_amount below lands back on the same
-    # figure; quantity/unit_price are what PurchaseItem.save() uses to
-    # recompute gross_amount/gst_amount/wht_amount/total_price.
-    new_unit_price = (locked_item.gross_amount / new_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    # The amount actually paid (rate_per_kg × weight_kg + freight_cost) does
+    # NOT change when the measured length is corrected — only the yards and
+    # the derived cost-per-yard do. Re-deriving from the exact formula
+    # (rather than the possibly-already-rounded locked_item.gross_amount)
+    # keeps unit_price as accurate as this correction can make it;
+    # PurchaseItem.save() re-anchors gross_amount on this same formula, so
+    # the two always agree.
+    true_gross_amount = (
+        locked_item.rate_per_kg * locked_item.weight_kg + (locked_item.freight_cost or Decimal("0"))
+    ).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    new_unit_price = (true_gross_amount / new_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
     locked_item.quantity = new_quantity
     locked_item.unit_price = new_unit_price

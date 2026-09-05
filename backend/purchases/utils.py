@@ -45,6 +45,45 @@ def calculate_total_price(
     }
 
 
+def calculate_total_price_from_gross(
+    gross_amount: Decimal,
+    gst: Decimal,
+    wht: Decimal,
+) -> dict:
+    """
+    Same gst/wht/total formula as calculate_total_price, but anchored on an
+    already-known, exact gross_amount instead of deriving it from
+    quantity × unit_price.
+
+    Needed for Jumbo/Packing purchase items: there, the real amount paid is
+    rate_per_kg × weight_kg (+ freight_cost) — an exact figure known up
+    front. unit_price for those items is only ever a *derived* cost-per-yard
+    (or cost-per-kg) figure, rounded to 4dp because the division rarely
+    comes out even. Recomputing gross_amount as quantity × that rounded
+    unit_price (calculate_total_price's approach) throws away the exact
+    figure and re-introduces the rounding error, multiplied back out across
+    the full quantity — e.g. rate=800, weight=200, freight=3000 gives an
+    exact total of 163000, but 1093.6100 yards × the rounded 149.0476/yard
+    unit_price recomputes to 162999.9458. Anchoring on gross_amount instead
+    keeps the exact figure the supplier was actually paid.
+    """
+    gross_amount = Decimal(str(gross_amount))
+    gst_pct = Decimal(str(gst))
+    wht_pct = Decimal(str(wht))
+
+    gst_amount = gross_amount * (gst_pct / Decimal("100"))
+    wht_amount = gross_amount * (wht_pct / Decimal("100"))
+    total_price = gross_amount + gst_amount - wht_amount
+
+    precision = Decimal("0.0001")
+    return {
+        "gross_amount": gross_amount.quantize(precision, rounding=ROUND_HALF_UP),
+        "gst_amount": gst_amount.quantize(precision, rounding=ROUND_HALF_UP),
+        "wht_amount": wht_amount.quantize(precision, rounding=ROUND_HALF_UP),
+        "total_price": total_price.quantize(precision, rounding=ROUND_HALF_UP),
+    }
+
+
 # Client-specified conversion factor (not the more precise 1/0.9144 —
 # using the exact multiplier the client gave us): "5 meters: 5 × 1.09361 =
 # 5.46805 yards".

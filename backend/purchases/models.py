@@ -1,8 +1,8 @@
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from django.conf import settings
 from django.db import models
 
-from .utils import calculate_total_price
+from .utils import calculate_total_price, calculate_total_price_from_gross
 
 # The 4 fixed family-anchor products' codes (seeded by seed_fixed_products,
 # never re-created) — single source of truth so nothing else hardcodes
@@ -409,12 +409,28 @@ class PurchaseItem(AuditMixin):
         return sum(a.quantity for a in self.shelf_allocations.all())
 
     def save(self, *args, **kwargs):
-        result = calculate_total_price(
-            quantity=self.quantity,
-            unit_price=self.unit_price,
-            gst=self.gst,
-            wht=self.wht,
-        )
+        if self.rate_per_kg is not None and self.weight_kg is not None:
+            # Jumbo/Packing: the amount actually paid is rate_per_kg × weight_kg
+            # (+ freight_cost) — exact by construction. unit_price for these
+            # items is only ever a *derived* cost-per-yard/per-kg figure
+            # (total ÷ quantity, rounded to 4dp because the division rarely
+            # comes out even) — recomputing gross_amount as quantity ×
+            # that rounded unit_price would re-introduce the rounding error,
+            # multiplied back out across the full quantity. Anchor on the
+            # exact total instead; see calculate_total_price_from_gross.
+            gross_amount = (
+                self.rate_per_kg * self.weight_kg + (self.freight_cost or Decimal("0"))
+            ).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            result = calculate_total_price_from_gross(
+                gross_amount=gross_amount, gst=self.gst, wht=self.wht,
+            )
+        else:
+            result = calculate_total_price(
+                quantity=self.quantity,
+                unit_price=self.unit_price,
+                gst=self.gst,
+                wht=self.wht,
+            )
         self.gross_amount = result["gross_amount"]
         self.gst_amount   = result["gst_amount"]
         self.wht_amount   = result["wht_amount"]
