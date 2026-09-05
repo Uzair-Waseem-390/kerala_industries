@@ -190,13 +190,18 @@ class LostInventoryRecordAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.Mode
 @admin.register(LostInventoryFIFOConsumption)
 class LostInventoryFIFOConsumptionAdmin(admin.ModelAdmin):
     list_display  = [
-        "lost_item", "purchase_item", "quantity",
+        "lost_item", "batch_display", "quantity",
         "unit_cost", "restored_quantity",
     ]
     search_fields = [
-        "lost_item__product__name", "lost_item__product__code",
-        "purchase_item__product__name",
+        "lost_item__rm_product__name", "lost_item__rm_product__code",
+        "lost_item__wip_product__name", "lost_item__wip_product__code",
+        "lost_item__fg_product__name", "lost_item__fg_product__code",
     ]
+
+    def batch_display(self, obj):
+        return str(obj.batch)
+    batch_display.short_description = "Batch"
     readonly_fields = [
         "lost_item", "purchase_item", "quantity",
         "unit_cost", "restored_quantity",

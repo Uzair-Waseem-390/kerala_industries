@@ -17,6 +17,13 @@ const formatCurrency = (value) => {
     return isNaN(num) ? '0.00' : num.toFixed(2);
 };
 
+const TYPE_BADGE = {
+    raw_material: { variant: 'default', label: 'Raw Material' },
+    wip_core: { variant: 'warning', label: 'WIP — Core' },
+    wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
+};
+
 // ─── Mark as Found modal ──────────────────────────────────────────────────────
 
 const MarkFoundModal = ({ item, onClose, onSuccess }) => {
@@ -370,7 +377,10 @@ const LostInventoryDetailPage = () => {
                                         return (
                                             <tr key={item.id} className="hover:bg-neutral-50 transition-colors">
                                                 <td className="px-3 py-3">
-                                                    <p className="font-medium text-sm text-neutral-900">{item.product_name}</p>
+                                                    <Badge variant={TYPE_BADGE[item.type]?.variant || 'default'} size="sm">
+                                                        {TYPE_BADGE[item.type]?.label || item.type}
+                                                    </Badge>
+                                                    <p className="font-medium text-sm text-neutral-900 mt-1">{item.product_name}</p>
                                                     <p className="text-xs text-neutral-400">{item.product_code}</p>
                                                 </td>
                                                 <td className="px-3 py-3 text-sm text-neutral-600">

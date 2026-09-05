@@ -19,10 +19,21 @@ from .models import (
 # apply_shelf_delta/apply_shelf_allocations/_adjust_stock_movement (and the
 # private inventory-stats-bucket helpers delete_product still needs) moved
 # with them; purchases keeps calling them via these imports.
-from inventory.models import Inventory, InventoryStatsFlow, ProductRegistryEntry, ShelfStock, ShelfStockMovement
+from inventory.models import (
+    FgShelfStockMovement, Inventory, InventoryStatsFlow, ProductRegistryEntry,
+    ShelfStock, ShelfStockMovement, WipShelfStockMovement,
+)
 from inventory.services import (
     _adjust_stock_movement, _apply_stats_deltas, _stock_bucket,
-    apply_shelf_allocations, apply_shelf_delta, create_registry_entry, sync_inventory,
+    apply_fg_shelf_allocations, apply_shelf_allocations, apply_shelf_delta,
+    apply_wip_shelf_allocations, create_registry_entry, sync_fg_inventory,
+    sync_inventory, sync_wip_inventory, validate_fg_shelf_consumption,
+    validate_wip_shelf_consumption,
+)
+from production.models import CuttingBreakdownItem, PackingOutputItem, RecipeBreakdownItem
+from production.selectors import (
+    get_available_cutting_batches_for_fifo, get_available_fg_batches_for_fifo,
+    get_available_wip_batches_for_fifo, get_fg_product_by_id, get_wip_product_by_id,
 )
 from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
@@ -1972,59 +1983,147 @@ def accept_purchase_return(*, return_id: int, user) -> PurchaseReturn:
 # Lost Inventory
 # ---------------------------------------------------------------------------
 
-def _consume_fifo_for_loss(*, product: Product, quantity: int) -> tuple[Decimal, list[dict]]:
+def _rm_batch_unit_cost(batch) -> Decimal:
+    return batch.total_price / batch.quantity if batch.quantity > 0 else batch.unit_price
+
+
+def _snapshot_batch_unit_cost(batch) -> Decimal:
+    """WIP/FG batches (RecipeBreakdownItem/CuttingBreakdownItem/PackingOutputItem) already carry a locked-in cost — no re-derivation needed."""
+    return batch.unit_cost_snapshot
+
+
+# Per-type dispatch for Lost Inventory — RM/WIP-core/WIP-piece/FG all share
+# the same "batch with remaining_quantity + a cost" shape (PurchaseItem/
+# RecipeBreakdownItem/CuttingBreakdownItem/PackingOutputItem), so one FIFO
+# walk (_consume_fifo_for_loss/_validate_lost_stock below) serves all four —
+# only the batch source, which FK field to persist the consumption under,
+# and how to read a batch's unit cost differ.
+_LOSS_TYPE_CONFIG = {
+    LostInventoryItem.Type.RAW_MATERIAL: {
+        "batches_fn": get_available_purchase_items_for_fifo,
+        "batch_field": "purchase_item",
+        "unit_cost_fn": _rm_batch_unit_cost,
+    },
+    LostInventoryItem.Type.WIP_CORE: {
+        "batches_fn": get_available_wip_batches_for_fifo,
+        "batch_field": "rewinding_batch",
+        "unit_cost_fn": _snapshot_batch_unit_cost,
+    },
+    LostInventoryItem.Type.WIP_PIECE: {
+        "batches_fn": get_available_cutting_batches_for_fifo,
+        "batch_field": "cutting_batch",
+        "unit_cost_fn": _snapshot_batch_unit_cost,
+    },
+    LostInventoryItem.Type.FINISHED_GOODS: {
+        "batches_fn": get_available_fg_batches_for_fifo,
+        "batch_field": "fg_batch",
+        "unit_cost_fn": _snapshot_batch_unit_cost,
+    },
+}
+
+
+def _get_loss_product(*, type: str, product_id: int):
+    """Resolves the right catalog's product for a Lost Inventory item, validating WIP stage matches the declared type."""
+    from rest_framework.exceptions import ValidationError
+
+    if type == LostInventoryItem.Type.RAW_MATERIAL:
+        return get_product_by_id(product_id)
+    if type == LostInventoryItem.Type.WIP_CORE:
+        product = get_wip_product_by_id(product_id)
+        if product.stage != "rewinding":
+            raise ValidationError({"product_id": f"'{product.name}' is not a whole Rewound Core."})
+        return product
+    if type == LostInventoryItem.Type.WIP_PIECE:
+        product = get_wip_product_by_id(product_id)
+        if product.stage != "cutting":
+            raise ValidationError({"product_id": f"'{product.name}' is not a Cut Piece."})
+        return product
+    if type == LostInventoryItem.Type.FINISHED_GOODS:
+        return get_fg_product_by_id(product_id)
+    raise ValidationError({"type": f"Unknown type '{type}'."})
+
+
+def _validate_loss_shelf_consumption(*, type: str, product, allocations: list[dict]) -> None:
+    if type == LostInventoryItem.Type.RAW_MATERIAL:
+        validate_shelf_consumption(product=product, allocations=allocations)
+    elif type in (LostInventoryItem.Type.WIP_CORE, LostInventoryItem.Type.WIP_PIECE):
+        validate_wip_shelf_consumption(product=product, allocations=allocations)
+    else:
+        validate_fg_shelf_consumption(product=product, allocations=allocations)
+
+
+def _sync_and_shelf_for_loss(*, type: str, product, quantity_delta: Decimal, allocations: list[dict], sign: int, reference: str, user) -> None:
+    """Dispatches the inventory-quantity + shelf-quantity write for a loss (sign=-1) or a found (sign=+1) to whichever catalog `type` belongs to."""
+    consume_reason = ShelfStockMovement.Reason.LOST_CONSUMPTION
+    found_reason   = ShelfStockMovement.Reason.LOST_FOUND_PUTAWAY
+    reason = consume_reason if sign < 0 else found_reason
+
+    if type == LostInventoryItem.Type.RAW_MATERIAL:
+        sync_inventory(product=product, quantity_delta=quantity_delta, user=user)
+        apply_shelf_allocations(product=product, allocations=allocations, sign=sign, reason=reason, reference=reference, user=user)
+    elif type in (LostInventoryItem.Type.WIP_CORE, LostInventoryItem.Type.WIP_PIECE):
+        wip_reason = WipShelfStockMovement.Reason.LOST_CONSUMPTION if sign < 0 else WipShelfStockMovement.Reason.LOST_FOUND_PUTAWAY
+        sync_wip_inventory(product=product, quantity_delta=quantity_delta, user=user)
+        apply_wip_shelf_allocations(product=product, allocations=allocations, sign=sign, reason=wip_reason, reference=reference, user=user)
+    else:
+        fg_reason = FgShelfStockMovement.Reason.LOST_CONSUMPTION if sign < 0 else FgShelfStockMovement.Reason.LOST_FOUND_PUTAWAY
+        sync_fg_inventory(product=product, quantity_delta=quantity_delta, user=user)
+        apply_fg_shelf_allocations(product=product, allocations=allocations, sign=sign, reason=fg_reason, reference=reference, user=user)
+
+
+def _consume_fifo_for_loss(*, type: str, product_id: int, quantity: Decimal, product_name: str) -> tuple[Decimal, list[dict]]:
     """
-    Consumes stock from purchase batches in FIFO order for a lost product.
-    Mirrors billing._run_fifo — oldest batch first, tax-inclusive unit cost
-    (total_price / quantity), decrements remaining_quantity on each batch.
+    Consumes stock from `type`'s own FIFO batch layer for a lost product,
+    oldest batch first. Mirrors billing._run_fifo one level up (any of the
+    four batch shapes, not just PurchaseItem).
 
     Returns (blended_unit_cost, consumptions) — consumptions is one dict per
-    batch actually touched: {"purchase_item", "quantity", "unit_cost"}. The
-    caller persists these as LostInventoryFIFOConsumption rows so a later
+    batch actually touched: {"batch_field", "batch", "quantity", "unit_cost"}.
+    The caller persists these as LostInventoryFIFOConsumption rows (batch_field
+    says which of the model's 4 nullable batch FKs to set) so a later
     "mark as found" can restore the EXACT original batches instead of an
     approximation.
     """
     from rest_framework.exceptions import ValidationError
 
+    config = _LOSS_TYPE_CONFIG[type]
     remaining_to_consume = quantity
     total_cost = Decimal("0")
     consumptions = []
     # for_update: this path decrements remaining_quantity — the batch rows
-    # must be locked so a concurrent invoice confirm can't consume the same
+    # must be locked so a concurrent confirm/issue can't consume the same
     # units (runs inside create_lost_inventory_record's transaction).
-    batches = get_available_purchase_items_for_fifo(product.id, for_update=True)
+    batches = config["batches_fn"](product_id, for_update=True)
 
     for batch in batches:
         if remaining_to_consume <= 0:
             break
 
         consume = min(batch.remaining_quantity, remaining_to_consume)
-        tax_inclusive_unit_cost = (
-            batch.total_price / batch.quantity
-            if batch.quantity > 0 else batch.unit_price
-        )
-        total_cost += consume * tax_inclusive_unit_cost
+        unit_cost = config["unit_cost_fn"](batch)
+        total_cost += consume * unit_cost
 
         batch.remaining_quantity -= consume
         batch.save(update_fields=["remaining_quantity"])
 
         consumptions.append({
-            "purchase_item": batch,
+            "batch_field": config["batch_field"],
+            "batch": batch,
             "quantity": consume,
-            "unit_cost": tax_inclusive_unit_cost,
+            "unit_cost": unit_cost,
         })
 
         remaining_to_consume -= consume
 
     if remaining_to_consume > 0:
         raise ValidationError({
-            "quantity": f"Stock ran out mid-processing for '{product.name}'. Please refresh and try again."
+            "quantity": f"Stock ran out mid-processing for '{product_name}'. Please refresh and try again."
         })
 
     return total_cost / Decimal(str(quantity)), consumptions
 
 
-def _validate_lost_stock(*, product: Product, requested_qty: int) -> None:
+def _validate_lost_stock(*, type: str, product_id: int, requested_qty: Decimal, product_name: str) -> None:
     """Guard: ensures enough FIFO stock exists before consuming it. Mirrors billing._validate_stock."""
     from rest_framework.exceptions import ValidationError
 
@@ -2032,14 +2131,15 @@ def _validate_lost_stock(*, product: Product, requested_qty: int) -> None:
     # (mirrors billing's _validate_stock). Deliberately unlocked — it's a
     # pre-check; the locked walk in _consume_fifo_for_loss has its own
     # ran-out guard for the race.
+    config = _LOSS_TYPE_CONFIG[type]
     available = (
-        get_available_purchase_items_for_fifo(product.id)
+        config["batches_fn"](product_id)
         .aggregate(total=Sum("remaining_quantity"))["total"] or 0
     )
     if available < requested_qty:
         raise ValidationError({
             "quantity": (
-                f"Insufficient stock for '{product.name}'. "
+                f"Insufficient stock for '{product_name}'. "
                 f"Requested: {requested_qty}, Available: {available}."
             )
         })
@@ -2048,9 +2148,13 @@ def _validate_lost_stock(*, product: Product, requested_qty: int) -> None:
 @transaction.atomic
 def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> LostInventoryRecord:
     """
-    Marks one or more products as lost from inventory in a single batch.
-    items = [{"product_id": 1, "quantity": 5, "reason": "damaged",
-               "shelf_allocations": [{"shelf_id": 2, "quantity": 5}]}, ...]
+    Marks one or more products as lost from inventory in a single batch —
+    RM, WIP, or FG (2026-09 extension; originally RM-only).
+    items = [{"type": "raw_material", "product_id": 1, "quantity": 5,
+               "reason": "damaged", "shelf_allocations": [{"shelf_id": 2, "quantity": 5}]}, ...]
+    type is one of LostInventoryItem.Type ("raw_material"/"wip_core"/
+    "wip_piece"/"finished_goods") — resolves which catalog's product_id and
+    which FIFO batch layer applies (see _LOSS_TYPE_CONFIG/_get_loss_product).
 
     There's no draft/pending step here (unlike purchase orders/invoices),
     so shelf_allocations are supplied and validated inline in the same call
@@ -2059,7 +2163,7 @@ def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> 
     hold enough of that product.
 
     For each item:
-        1. Validates stock availability against FIFO purchase batches.
+        1. Validates stock availability against the catalog's own FIFO batches.
         2. Consumes stock FIFO-first, snapshotting the blended unit cost.
         3. Decreases live inventory by the lost quantity, and the specific
            shelf(s) it's pulled from.
@@ -2072,9 +2176,10 @@ def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> 
 
     seen_products = set()
     for item in items:
-        if item["product_id"] in seen_products:
-            raise ValidationError({"items": f"Duplicate product id {item['product_id']}."})
-        seen_products.add(item["product_id"])
+        key = (item.get("type", LostInventoryItem.Type.RAW_MATERIAL), item["product_id"])
+        if key in seen_products:
+            raise ValidationError({"items": f"Duplicate product id {item['product_id']} for type '{key[0]}'."})
+        seen_products.add(key)
         if item["quantity"] <= 0:
             raise ValidationError({"quantity": "Quantity must be greater than zero."})
 
@@ -2087,11 +2192,13 @@ def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> 
 
     total_lost_amount = Decimal("0")
 
-    # Sorted by product_id (mirrors confirm_invoice) so two concurrent lost-
-    # inventory creates touching overlapping shelves always lock in the same
-    # order — the item order here is entirely client-controlled otherwise.
-    for item_data in sorted(items, key=lambda i: i["product_id"]):
-        product = get_product_by_id(item_data["product_id"])
+    # Sorted by (type, product_id) (mirrors confirm_invoice's product_id sort)
+    # so two concurrent lost-inventory creates touching overlapping shelves
+    # always lock in the same order — the item order here is entirely
+    # client-controlled otherwise.
+    for item_data in sorted(items, key=lambda i: (i.get("type", LostInventoryItem.Type.RAW_MATERIAL), i["product_id"])):
+        loss_type = item_data.get("type", LostInventoryItem.Type.RAW_MATERIAL)
+        product = _get_loss_product(type=loss_type, product_id=item_data["product_id"])
         quantity = item_data["quantity"]
 
         shelf_allocations = [
@@ -2103,40 +2210,46 @@ def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> 
             allocated=sum(a["quantity"] for a in shelf_allocations),
             required=quantity,
         )
-        validate_shelf_consumption(product=product, allocations=shelf_allocations)
+        _validate_loss_shelf_consumption(type=loss_type, product=product, allocations=shelf_allocations)
 
-        _validate_lost_stock(product=product, requested_qty=quantity)
-        unit_cost, consumptions = _consume_fifo_for_loss(product=product, quantity=quantity)
+        _validate_lost_stock(type=loss_type, product_id=product.id, requested_qty=quantity, product_name=product.name)
+        unit_cost, consumptions = _consume_fifo_for_loss(type=loss_type, product_id=product.id, quantity=quantity, product_name=product.name)
         total_cost = unit_cost * Decimal(str(quantity))
 
+        item_fk_kwargs = {
+            "rm_product": product if loss_type == LostInventoryItem.Type.RAW_MATERIAL else None,
+            "wip_product": product if loss_type in (LostInventoryItem.Type.WIP_CORE, LostInventoryItem.Type.WIP_PIECE) else None,
+            "fg_product": product if loss_type == LostInventoryItem.Type.FINISHED_GOODS else None,
+        }
         lost_item = LostInventoryItem.objects.create(
             record=record,
-            product=product,
+            type=loss_type,
             quantity=quantity,
             reason=item_data.get("reason", ""),
             unit_cost=unit_cost,
             total_cost=total_cost,
+            **item_fk_kwargs,
         )
 
         LostInventoryFIFOConsumption.objects.bulk_create([
             LostInventoryFIFOConsumption(
                 lost_item=lost_item,
-                purchase_item=c["purchase_item"],
                 quantity=c["quantity"],
                 unit_cost=c["unit_cost"],
+                **{c["batch_field"]: c["batch"]},
             )
             for c in consumptions
         ])
 
-        sync_inventory(product=product, quantity_delta=-quantity, user=user)
-        apply_shelf_allocations(
-            product=product, allocations=shelf_allocations, sign=-1,
-            reason=ShelfStockMovement.Reason.LOST_CONSUMPTION,
-            reference=record.reference_number, user=user,
+        _sync_and_shelf_for_loss(
+            type=loss_type, product=product, quantity_delta=-quantity,
+            allocations=shelf_allocations, sign=-1, reference=record.reference_number, user=user,
         )
 
-        # Stock Movement Report
-        _adjust_stock_movement(product_id=product.id, lost_delta=quantity)
+        if loss_type == LostInventoryItem.Type.RAW_MATERIAL:
+            # Stock Movement Report — RM/billing-scoped only, same as every
+            # other WIP/FG movement elsewhere in this app never feeding it.
+            _adjust_stock_movement(product_id=product.id, lost_delta=quantity)
 
         total_lost_amount += total_cost
 
@@ -2153,10 +2266,11 @@ def create_lost_inventory_record(*, items: list[dict], note: str = "", user) -> 
 @transaction.atomic
 def mark_lost_inventory_found(*, lost_item_id: int, quantity: int, shelf_allocations: list[dict] = None, user) -> LostInventoryItem:
     """
-    Reverses part or all of a previously lost item: restores stock to the
-    EXACT original purchase batch(es) it was consumed from (via the
-    LostInventoryFIFOConsumption ledger), increases live Inventory, puts the
-    found quantity away on the caller-chosen shelf(s) (any shelf — this is
+    Reverses part or all of a previously lost item (RM, WIP, or FG — 2026-09
+    extension): restores stock to the EXACT original batch(es) it was
+    consumed from (via the LostInventoryFIFOConsumption ledger), increases
+    live inventory for whichever catalog it belongs to, puts the found
+    quantity away on the caller-chosen shelf(s) (any shelf — this is
     put-away, not consumption), and increases
     CashFlow.total_lost_inventory_recovered (net figure shown on dashboard =
     total_lost_inventory_worth - total_lost_inventory_recovered).
@@ -2193,17 +2307,38 @@ def mark_lost_inventory_found(*, lost_item_id: int, quantity: int, shelf_allocat
             )
         })
 
-    # select_for_update locks both the consumption rows and (via the join)
-    # their purchase batches — restored_quantity and remaining_quantity are
-    # read-then-written here, so concurrent "mark found" calls or FIFO
-    # consumers must queue. Inside mark_lost_inventory_found's transaction.
+    # select_for_update(of=("self",)) locks only the consumption rows
+    # themselves — NOT via select_related, and deliberately not the joined
+    # batch tables. All 4 batch FKs are nullable now (one of RM/WIP-core/
+    # WIP-piece/FG), so a plain select_related+select_for_update would
+    # compile to a LEFT OUTER JOIN with FOR UPDATE — PostgreSQL rejects
+    # locking the nullable side of an outer join outright
+    # (FeatureNotSupported), which SQLite's select_for_update no-op hides
+    # in local dev. The actual batch rows are locked separately below, in
+    # their own model's table, mirroring services/_shared.py's return_fifo
+    # (lock in deterministic pk order, same as every other FIFO-return path
+    # in this app) — every consumption under one lost_item shares the same
+    # type, hence the same single batch model, so this is one extra query,
+    # not four.
     consumptions = list(
-        lost_item.fifo_consumptions.select_related("purchase_item")
-        .select_for_update().order_by("id")
+        lost_item.fifo_consumptions.select_for_update(of=("self",)).order_by("id")
     )
 
     remaining_to_restore = quantity
     if consumptions:
+        batch_field = _LOSS_TYPE_CONFIG[lost_item.type]["batch_field"]
+        batch_model = {
+            "purchase_item": PurchaseItem,
+            "rewinding_batch": RecipeBreakdownItem,
+            "cutting_batch": CuttingBreakdownItem,
+            "fg_batch": PackingOutputItem,
+        }[batch_field]
+        batch_ids = {getattr(c, f"{batch_field}_id") for c in consumptions}
+        locked_batches = {
+            b.pk: b
+            for b in batch_model.objects.select_for_update().filter(pk__in=batch_ids).order_by("pk")
+        }
+
         for consumption in consumptions:
             if remaining_to_restore <= 0:
                 break
@@ -2214,9 +2349,9 @@ def mark_lost_inventory_found(*, lost_item_id: int, quantity: int, shelf_allocat
 
             restore = min(restorable, remaining_to_restore)
 
-            purchase_item = consumption.purchase_item
-            purchase_item.remaining_quantity += restore
-            purchase_item.save(update_fields=["remaining_quantity"])
+            batch = locked_batches[getattr(consumption, f"{batch_field}_id")]
+            batch.remaining_quantity += restore
+            batch.save(update_fields=["remaining_quantity"])
 
             consumption.restored_quantity += restore
             consumption.save(update_fields=["restored_quantity"])
@@ -2232,15 +2367,14 @@ def mark_lost_inventory_found(*, lost_item_id: int, quantity: int, shelf_allocat
     lost_item.found_quantity += quantity
     lost_item.save(update_fields=["found_quantity"])
 
-    sync_inventory(product=lost_item.product, quantity_delta=quantity, user=user)
-    apply_shelf_allocations(
-        product=lost_item.product, allocations=resolved_allocations, sign=1,
-        reason=ShelfStockMovement.Reason.LOST_FOUND_PUTAWAY,
-        reference=lost_item.record.reference_number, user=user,
+    _sync_and_shelf_for_loss(
+        type=lost_item.type, product=lost_item.product, quantity_delta=quantity,
+        allocations=resolved_allocations, sign=1, reference=lost_item.record.reference_number, user=user,
     )
 
-    # Stock Movement Report
-    _adjust_stock_movement(product_id=lost_item.product_id, found_delta=quantity)
+    if lost_item.type == LostInventoryItem.Type.RAW_MATERIAL:
+        # Stock Movement Report — RM/billing-scoped only.
+        _adjust_stock_movement(product_id=lost_item.rm_product_id, found_delta=quantity)
 
     # activity_log tracks LostInventoryRecord (the headline object) via
     # signal, but this action only ever saves LostInventoryItem

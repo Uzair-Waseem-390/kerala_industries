@@ -15,7 +15,8 @@ from .cutting import (
     get_cutting_recipe_by_id, get_issuable_wip_cores,
 )
 from .packing import (
-    get_all_packing_recipes, get_available_cutting_batches_for_fifo, get_issuable_cutting_pieces,
+    get_all_packing_recipes, get_available_cutting_batches_for_fifo, get_available_fg_batches_for_fifo,
+    get_fg_product_by_id, get_issuable_cutting_pieces,
     get_packing_issued_material, get_packing_issued_piece, get_packing_recipe_by_id,
 )
 # WIP/FG inventory-tracking selectors live in the inventory app (2026-09) —
@@ -34,7 +35,8 @@ __all__ = [
     "get_rewound_core_yard_by_id", "get_wip_product_by_id", "get_wip_shelf_stock_rows",
     "get_all_cutting_recipes", "get_available_wip_batches_for_fifo", "get_cutting_issued_material",
     "get_cutting_recipe_by_id", "get_issuable_wip_cores", "get_candidate_shelves_for_wip_product",
-    "get_all_packing_recipes", "get_available_cutting_batches_for_fifo", "get_issuable_cutting_pieces",
+    "get_all_packing_recipes", "get_available_cutting_batches_for_fifo", "get_available_fg_batches_for_fifo",
+    "get_fg_product_by_id", "get_issuable_cutting_pieces",
     "get_packing_issued_material", "get_packing_issued_piece", "get_packing_recipe_by_id",
     "get_all_fg_inventory", "get_candidate_shelves_for_fg_product", "get_fg_shelf_stock_rows",
 ]

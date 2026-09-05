@@ -246,8 +246,10 @@ export const purchasesApi = {
         },
         getById: (id) => api.get(`/lost-inventory/${id}/`),
         create: (data) => api.post('/lost-inventory/', data),
-        fifoPreview: (productId, quantity) => {
-            const query = new URLSearchParams({ product_id: productId, quantity }).toString();
+        // type: 'raw_material' | 'wip_core' | 'wip_piece' | 'finished_goods' —
+        // defaults to raw_material backend-side, but always pass it explicitly.
+        fifoPreview: (type, productId, quantity) => {
+            const query = new URLSearchParams({ type, product_id: productId, quantity }).toString();
             return api.get(`/lost-inventory/fifo-preview/?${query}`);
         },
         markFound: (itemId, quantity, shelfAllocations = []) =>

@@ -64,14 +64,19 @@ class Command(BaseCommand):
 
         # Lost/found — no is_data_entry concept here (LostInventoryRecord has
         # no such flag; every loss/recovery is a real operational event).
+        # RM-only (type=raw_material) — Stock Movement Report is RM/billing-
+        # scoped only, same as _adjust_stock_movement's own callers; WIP/FG
+        # losses never feed this report (see purchases.services.create_lost_
+        # inventory_record/mark_lost_inventory_found, which only call
+        # _adjust_stock_movement for RM items).
         lost_by_product = dict(
-            LostInventoryItem.objects.filter(record__is_deleted=False)
-            .values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)).values_list("product_id", "total")
+            LostInventoryItem.objects.filter(record__is_deleted=False, type=LostInventoryItem.Type.RAW_MATERIAL)
+            .values("rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)).values_list("rm_product_id", "total")
         )
         found_by_product = dict(
-            LostInventoryRecovery.objects.all()
-            .values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec))
-            .values_list("lost_item__product_id", "total")
+            LostInventoryRecovery.objects.filter(lost_item__type=LostInventoryItem.Type.RAW_MATERIAL)
+            .values("lost_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec))
+            .values_list("lost_item__rm_product_id", "total")
         )
 
         product_ids = set(purchased_by_product) | set(purchase_returned_by_product) \

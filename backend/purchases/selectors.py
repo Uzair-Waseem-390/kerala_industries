@@ -764,16 +764,33 @@ def get_all_lost_inventory_records(
     """
     qs = LostInventoryRecord.objects.filter(is_deleted=False).select_related(
         "created_by", "updated_by",
-    ).prefetch_related("items__product")
+    ).prefetch_related("items__rm_product", "items__wip_product", "items__fg_product")
 
     if _clean(search):
         qs = qs.filter(search_q(_clean(search), "reference_number"))
     if _clean(product_id):
-        qs = qs.filter(items__product_id=_clean(product_id))
+        # RM/WIP/FG products are independent auto-increment sequences that
+        # can share numeric ids — OR'd across all three FK paths is the
+        # closest equivalent of the old single `items__product_id` filter
+        # (a plain product_id alone is ambiguous without a type to go with
+        # it; this stays permissive rather than requiring one).
+        qs = qs.filter(
+            Q(items__rm_product_id=_clean(product_id)) |
+            Q(items__wip_product_id=_clean(product_id)) |
+            Q(items__fg_product_id=_clean(product_id))
+        )
     if _clean(product_name):
-        qs = qs.filter(search_q(_clean(product_name), "items__product__name"))
+        qs = qs.filter(
+            search_q(_clean(product_name), "items__rm_product__name") |
+            search_q(_clean(product_name), "items__wip_product__name") |
+            search_q(_clean(product_name), "items__fg_product__name")
+        )
     if _clean(product_code):
-        qs = qs.filter(search_q(_clean(product_code), "items__product__code"))
+        qs = qs.filter(
+            search_q(_clean(product_code), "items__rm_product__code") |
+            search_q(_clean(product_code), "items__wip_product__code") |
+            search_q(_clean(product_code), "items__fg_product__code")
+        )
     if _clean(reason):
         qs = qs.filter(search_q(_clean(reason), "items__reason"))
     if _clean(date):
@@ -809,26 +826,51 @@ def get_lost_inventory_record_by_id(pk: int) -> LostInventoryRecord:
     return get_object_or_404(
         LostInventoryRecord.objects.select_related(
             "created_by", "updated_by",
-        ).prefetch_related("items__product"),
+        ).prefetch_related("items__rm_product", "items__wip_product", "items__fg_product"),
         pk=pk, is_deleted=False,
     )
 
 
 def get_lost_inventory_item_by_id(pk: int) -> LostInventoryItem:
     return get_object_or_404(
-        LostInventoryItem.objects.select_related("product", "record"),
+        LostInventoryItem.objects.select_related("rm_product", "wip_product", "fg_product", "record"),
         pk=pk,
     )
 
 
-def get_fifo_cost_preview(*, product_id: int, quantity: int) -> dict:
+# type -> (batches_fn, unit_cost_fn) — mirrors purchases.services._LOSS_TYPE_CONFIG,
+# duplicated here (not imported) since selectors must not depend on
+# services (the reverse is the normal layering in this codebase).
+def _rm_preview_unit_cost(batch) -> Decimal:
+    return batch.total_price / batch.quantity if batch.quantity > 0 else batch.unit_price
+
+
+def _snapshot_preview_unit_cost(batch) -> Decimal:
+    return batch.unit_cost_snapshot
+
+
+def _fifo_preview_config(loss_type: str):
+    from production.selectors import (
+        get_available_cutting_batches_for_fifo, get_available_fg_batches_for_fifo,
+        get_available_wip_batches_for_fifo,
+    )
+    return {
+        LostInventoryItem.Type.RAW_MATERIAL: (get_available_purchase_items_for_fifo, _rm_preview_unit_cost),
+        LostInventoryItem.Type.WIP_CORE: (get_available_wip_batches_for_fifo, _snapshot_preview_unit_cost),
+        LostInventoryItem.Type.WIP_PIECE: (get_available_cutting_batches_for_fifo, _snapshot_preview_unit_cost),
+        LostInventoryItem.Type.FINISHED_GOODS: (get_available_fg_batches_for_fifo, _snapshot_preview_unit_cost),
+    }[loss_type]
+
+
+def get_fifo_cost_preview(*, product_id: int, quantity: int, type: str = LostInventoryItem.Type.RAW_MATERIAL) -> dict:
     """
     Read-only preview of the blended FIFO unit cost for a product/quantity,
     without consuming any stock. Used by the lost-inventory page to show the
     expected cost before submission. Mirrors the walk in
     purchases.services._consume_fifo_for_loss, but never writes.
     """
-    batches   = get_available_purchase_items_for_fifo(product_id)
+    batches_fn, unit_cost_fn = _fifo_preview_config(type)
+    batches   = batches_fn(product_id)
     remaining = quantity
     total_cost = Decimal("0")
     available  = 0
@@ -838,10 +880,7 @@ def get_fifo_cost_preview(*, product_id: int, quantity: int) -> dict:
         if remaining <= 0:
             continue
         consume = min(batch.remaining_quantity, remaining)
-        tax_inclusive_unit_cost = (
-            batch.total_price / batch.quantity if batch.quantity > 0 else batch.unit_price
-        )
-        total_cost += consume * tax_inclusive_unit_cost
+        total_cost += consume * unit_cost_fn(batch)
         remaining  -= consume
 
     consumed  = quantity - remaining

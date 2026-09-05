@@ -621,17 +621,35 @@ class LostInventoryRecord(AuditMixin):
 
 class LostInventoryItem(models.Model):
     """
-    One product lost within a LostInventoryRecord.
-    unit_cost is the blended FIFO cost snapshotted at creation time — immutable.
+    One product lost within a LostInventoryRecord — RM, WIP, or FG (2026-09
+    extension; originally RM-only). unit_cost is the blended FIFO cost
+    snapshotted at creation time — immutable.
+
+    Exactly one of rm_product/wip_product/fg_product is set per row
+    (enforced by the CheckConstraint below), matching the same "real FK per
+    stage, not a generic source_model/id pair" pattern already used by
+    inventory.ProductRegistryEntry. The `product`/`product_name`/
+    `product_code` properties resolve to whichever one is set, so every
+    existing serializer/selector that reads `.product.name` etc keeps
+    working unchanged after this generalization — only the places that
+    filter/select_related by the OLD single `product` field needed updating.
 
     found_quantity tracks how much of this line has since been marked "found"
     (product turned up again) via mark_lost_inventory_found — supports partial
     recovery across multiple separate find events, mirroring the
     quantity/returned_quantity pattern already used on PurchaseItem/InvoiceItem.
     """
+    class Type(models.TextChoices):
+        RAW_MATERIAL   = "raw_material",   "Raw Material"
+        WIP_CORE       = "wip_core",       "WIP Core"
+        WIP_PIECE      = "wip_piece",      "WIP Piece"
+        FINISHED_GOODS = "finished_goods", "Finished Goods"
 
-    record   = models.ForeignKey(LostInventoryRecord, on_delete=models.CASCADE, related_name="items")
-    product  = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="lost_inventory_items")
+    record      = models.ForeignKey(LostInventoryRecord, on_delete=models.CASCADE, related_name="items")
+    type        = models.CharField(max_length=20, choices=Type.choices, default=Type.RAW_MATERIAL, db_index=True)
+    rm_product  = models.ForeignKey(Product, on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_items")
+    wip_product = models.ForeignKey("production.WipProduct", on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_items")
+    fg_product  = models.ForeignKey("production.FgProduct", on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_items")
     quantity = models.DecimalField(max_digits=14, decimal_places=4)
     reason   = models.CharField(max_length=255, blank=True, default="",
                    help_text="Optional reason e.g. damaged, expired, stolen, misplaced.")
@@ -646,7 +664,31 @@ class LostInventoryItem(models.Model):
     class Meta:
         verbose_name        = "Lost Inventory Item"
         verbose_name_plural = "Lost Inventory Items"
-        unique_together     = [("record", "product")]
+        constraints = [
+            models.CheckConstraint(
+                name="lostinventoryitem_exactly_one_product_fk",
+                condition=(
+                    (models.Q(rm_product__isnull=False) & models.Q(wip_product__isnull=True) & models.Q(fg_product__isnull=True)) |
+                    (models.Q(rm_product__isnull=True) & models.Q(wip_product__isnull=False) & models.Q(fg_product__isnull=True)) |
+                    (models.Q(rm_product__isnull=True) & models.Q(wip_product__isnull=True) & models.Q(fg_product__isnull=False))
+                ),
+            ),
+            models.UniqueConstraint(fields=["record", "rm_product"], condition=models.Q(rm_product__isnull=False), name="lostinventoryitem_unique_rm_per_record"),
+            models.UniqueConstraint(fields=["record", "wip_product"], condition=models.Q(wip_product__isnull=False), name="lostinventoryitem_unique_wip_per_record"),
+            models.UniqueConstraint(fields=["record", "fg_product"], condition=models.Q(fg_product__isnull=False), name="lostinventoryitem_unique_fg_per_record"),
+        ]
+
+    @property
+    def product(self):
+        return self.rm_product or self.wip_product or self.fg_product
+
+    @property
+    def product_name(self):
+        return self.product.name
+
+    @property
+    def product_code(self):
+        return getattr(self.product, "code", None)
 
     @property
     def returnable_quantity(self):
@@ -661,7 +703,7 @@ class LostInventoryItem(models.Model):
         return self.total_cost - self.recovered_amount
 
     def __str__(self):
-        return f"{self.record.reference_number} — {self.product.name} x {self.quantity}"
+        return f"{self.record.reference_number} — {self.product_name} x {self.quantity}"
 
 
 class LostInventoryRecovery(models.Model):
@@ -698,11 +740,17 @@ class LostInventoryRecovery(models.Model):
 
 class LostInventoryFIFOConsumption(models.Model):
     """
-    Records exactly which purchase batch(es) a LostInventoryItem's quantity
-    was drawn from at the moment it was marked lost — mirrors billing.FIFOLedger.
-    A single loss can span multiple batches (FIFO may need to pull from more
-    than one PurchaseItem to cover the lost quantity), so this is one row per
-    batch actually touched, not one row per LostInventoryItem.
+    Records exactly which batch(es) a LostInventoryItem's quantity was drawn
+    from at the moment it was marked lost — mirrors billing.FIFOLedger. A
+    single loss can span multiple batches, so this is one row per batch
+    actually touched, not one row per LostInventoryItem.
+
+    Exactly one of the four batch FKs is set per row, matching the parent
+    item's `type` — RM draws from PurchaseItem, WIP cores from
+    RecipeBreakdownItem, WIP pieces from CuttingBreakdownItem, FG from
+    PackingOutputItem (all four already share the same "batch with a
+    locked-in cost" shape this app uses everywhere else). The `batch`
+    property resolves to whichever is set.
 
     Enables mark_lost_inventory_found to restore the EXACT original batches
     instead of an approximation. restored_quantity tracks how much of THIS
@@ -710,8 +758,11 @@ class LostInventoryFIFOConsumption(models.Model):
     that only partially restore a given row before moving to the next).
     """
 
-    lost_item     = models.ForeignKey(LostInventoryItem, on_delete=models.CASCADE, related_name="fifo_consumptions")
-    purchase_item = models.ForeignKey(PurchaseItem, on_delete=models.PROTECT, related_name="lost_inventory_consumptions")
+    lost_item       = models.ForeignKey(LostInventoryItem, on_delete=models.CASCADE, related_name="fifo_consumptions")
+    purchase_item    = models.ForeignKey(PurchaseItem, on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_consumptions")
+    rewinding_batch  = models.ForeignKey("production.RecipeBreakdownItem", on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_consumptions")
+    cutting_batch    = models.ForeignKey("production.CuttingBreakdownItem", on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_consumptions")
+    fg_batch         = models.ForeignKey("production.PackingOutputItem", on_delete=models.PROTECT, null=True, blank=True, related_name="lost_inventory_consumptions")
     quantity      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Quantity originally drawn from this batch when marked lost.")
     unit_cost     = models.DecimalField(max_digits=14, decimal_places=4, help_text="Tax-inclusive unit cost of this batch at the time of loss.")
     restored_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
@@ -721,13 +772,28 @@ class LostInventoryFIFOConsumption(models.Model):
         verbose_name        = "Lost Inventory FIFO Consumption"
         verbose_name_plural = "Lost Inventory FIFO Consumptions"
         ordering            = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                name="lostinvfifoconsumption_exactly_one_batch_fk",
+                condition=(
+                    (models.Q(purchase_item__isnull=False) & models.Q(rewinding_batch__isnull=True) & models.Q(cutting_batch__isnull=True) & models.Q(fg_batch__isnull=True)) |
+                    (models.Q(purchase_item__isnull=True) & models.Q(rewinding_batch__isnull=False) & models.Q(cutting_batch__isnull=True) & models.Q(fg_batch__isnull=True)) |
+                    (models.Q(purchase_item__isnull=True) & models.Q(rewinding_batch__isnull=True) & models.Q(cutting_batch__isnull=False) & models.Q(fg_batch__isnull=True)) |
+                    (models.Q(purchase_item__isnull=True) & models.Q(rewinding_batch__isnull=True) & models.Q(cutting_batch__isnull=True) & models.Q(fg_batch__isnull=False))
+                ),
+            ),
+        ]
+
+    @property
+    def batch(self):
+        return self.purchase_item or self.rewinding_batch or self.cutting_batch or self.fg_batch
 
     @property
     def restorable_quantity(self):
         return self.quantity - self.restored_quantity
 
     def __str__(self):
-        return f"{self.lost_item} ← {self.purchase_item} x {self.quantity}"
+        return f"{self.lost_item} ← {self.batch} x {self.quantity}"
 
 
 # ---------------------------------------------------------------------------

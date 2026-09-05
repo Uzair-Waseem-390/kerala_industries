@@ -6,6 +6,7 @@ import { usePaginatedList } from '../../hooks/usePaginatedList';
 import Table from '../../components/ui/Table';
 import SearchBar from '../../components/ui/SearchBar';
 import Button from '../../components/ui/Button';
+import Badge from '../../components/ui/Badge';
 import BackLink from '../../components/ui/BackLink';
 import FilterBar from '../../components/ui/FilterBar';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -15,6 +16,13 @@ import EmptyState from '../../components/ui/EmptyState';
 const formatCurrency = (value) => {
     const num = typeof value === 'string' ? parseFloat(value) : value;
     return isNaN(num) ? '0.00' : num.toFixed(2);
+};
+
+const TYPE_BADGE = {
+    raw_material: { variant: 'default', label: 'Raw Material' },
+    wip_core: { variant: 'warning', label: 'WIP — Core' },
+    wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
 };
 
 const LostInventoryRecordsPage = () => {
@@ -68,6 +76,25 @@ const LostInventoryRecordsPage = () => {
             render: (value) => (
                 <span className="font-mono font-medium text-neutral-900">{value}</span>
             ),
+        },
+        {
+            key: 'lossTypes',
+            label: 'Type',
+            width: '160px',
+            render: (_value, row) => {
+                const items = row.items;
+                const types = [...new Set((items || []).map((it) => it.type))];
+                if (types.length === 0) return <span className="text-neutral-300">—</span>;
+                return (
+                    <div className="flex flex-wrap gap-1">
+                        {types.map((t) => (
+                            <Badge key={t} variant={TYPE_BADGE[t]?.variant || 'default'} size="sm">
+                                {TYPE_BADGE[t]?.label || t}
+                            </Badge>
+                        ))}
+                    </div>
+                );
+            },
         },
         {
             key: 'items',

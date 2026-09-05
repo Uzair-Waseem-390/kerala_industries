@@ -4,11 +4,11 @@ from django.shortcuts import get_object_or_404
 from backend.search import search_q
 
 from ..models import (
-    CuttingBreakdownItem, PackingIssuedMaterial, PackingIssuedPiece, PackingMaterialConsumption,
+    CuttingBreakdownItem, FgProduct, PackingIssuedMaterial, PackingIssuedPiece, PackingMaterialConsumption,
     PackingMaterialShelfDraw, PackingOutputItem, PackingOutputShelfAllocation, PackingPieceConsumption,
     PackingPieceShelfDraw, Recipe, WipProduct,
 )
-from ..utils import WIP_PRODUCT_SELECT_RELATED
+from ..utils import FG_PRODUCT_SELECT_RELATED, WIP_PRODUCT_SELECT_RELATED
 
 
 def _clean(value):
@@ -135,3 +135,27 @@ def get_packing_issued_material(*, recipe_id: int) -> PackingIssuedMaterial:
         PackingIssuedMaterial.objects.select_related("recipe", "product"),
         recipe_id=recipe_id,
     )
+
+
+def get_fg_product_by_id(pk: int) -> FgProduct:
+    return get_object_or_404(FgProduct.objects.select_related(*FG_PRODUCT_SELECT_RELATED), pk=pk, is_deleted=False)
+
+
+def get_available_fg_batches_for_fifo(fg_product_id: int, *, for_update: bool = False) -> QuerySet:
+    """
+    FG-equivalent of get_available_wip_batches_for_fifo/get_available_cutting_batches_for_fifo
+    — PackingOutputItem rows (from FINISHED Packing recipes — always true,
+    PackingOutputItem is only ever created at finish_packing_recipe) with
+    remaining stock, oldest-finished-first. FG's own FIFO cost layer, same
+    role RecipeBreakdownItem/CuttingBreakdownItem play one stage earlier —
+    lets Lost Inventory (and, eventually, a billing sale path) draw FG stock
+    at its real locked-in cost instead of an average.
+    """
+    qs = (
+        PackingOutputItem.objects
+        .filter(fg_product_id=fg_product_id, is_deleted=False, remaining_quantity__gt=0)
+        .order_by("recipe__finished_at", "pk")
+    )
+    if for_update:
+        qs = qs.select_for_update()
+    return qs

@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { purchasesApi } from '../../services/purchasesApi';
 import { inventoryApi } from '../../services/inventoryApi';
+import { productionApi } from '../../services/productionApi';
 import Card from '../../components/ui/Card';
 import SearchBar from '../../components/ui/SearchBar';
 import Input from '../../components/ui/Input';
+import Select from '../../components/ui/Select';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -17,6 +19,40 @@ const formatCurrency = (value) => {
     return isNaN(num) ? '0.00' : num.toFixed(2);
 };
 
+const TYPE_OPTIONS = [
+    { value: 'raw_material', label: 'Raw Material' },
+    { value: 'wip_core', label: 'WIP — Core' },
+    { value: 'wip_piece', label: 'WIP — Piece' },
+    { value: 'finished_goods', label: 'Finished Goods' },
+];
+
+const TYPE_BADGE = {
+    raw_material: { variant: 'default', label: 'Raw Material' },
+    wip_core: { variant: 'warning', label: 'WIP — Core' },
+    wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
+};
+
+// One shared envelope shape across all four catalogs' inventory search
+// endpoints: {..., product: {id, name, code, ...}, quantity}. Only the
+// endpoint (and, for WIP, a client-side stage filter) differs per type.
+const searchInventoryByType = (type, searchTerm) => {
+    const params = { search: searchTerm, page_size: 8 };
+    if (type === 'raw_material') return inventoryApi.inventory.getAll(params);
+    if (type === 'finished_goods') return productionApi.fgInventory.getAll(params);
+    return productionApi.wipInventory.getAll(params);
+};
+
+const WIP_STAGE_FOR_TYPE = { wip_core: 'rewinding', wip_piece: 'cutting' };
+
+const getShelfCandidatesByType = (type, productId) => {
+    if (type === 'raw_material') return purchasesApi.shelves.getCandidates(productId);
+    if (type === 'finished_goods') return productionApi.fgShelfCandidates.getAll(productId);
+    return productionApi.wipShelfCandidates.getAll(productId);
+};
+
+const cartLineKey = (type, productId) => `${type}:${productId}`;
+
 const LostInventoryPage = () => {
     const { user } = useAuth();
     const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
@@ -24,6 +60,7 @@ const LostInventoryPage = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [searching, setSearching] = useState(false);
+    const [addType, setAddType] = useState('raw_material');
 
     const [cart, setCart] = useState([]);
     const [note, setNote] = useState('');
@@ -42,16 +79,18 @@ const LostInventoryPage = () => {
         }
         let cancelled = false;
         setSearching(true);
-        inventoryApi.inventory.getAll({ search: searchTerm, page_size: 8 })
+        searchInventoryByType(addType, searchTerm)
             .then((res) => {
                 if (cancelled) return;
-                const items = res?.results || res || [];
+                let items = res?.results || res || [];
+                const requiredStage = WIP_STAGE_FOR_TYPE[addType];
+                if (requiredStage) items = items.filter((i) => i.product?.stage === requiredStage);
                 setSearchResults(items.filter((i) => (i.quantity || 0) > 0));
             })
             .catch(() => { if (!cancelled) setSearchResults([]); })
             .finally(() => { if (!cancelled) setSearching(false); });
         return () => { cancelled = true; };
-    }, [searchTerm]);
+    }, [searchTerm, addType]);
 
     // Debounced FIFO cost preview — refreshes whenever a cart line's quantity changes.
     useEffect(() => {
@@ -60,7 +99,7 @@ const LostInventoryPage = () => {
             cart.forEach((line, index) => {
                 const quantity = Number(line.quantity);
                 if (!quantity || quantity <= 0) return;
-                purchasesApi.lostInventory.fifoPreview(line.product_id, quantity)
+                purchasesApi.lostInventory.fifoPreview(line.type, line.product_id, quantity)
                     .then((preview) => {
                         setCart((prev) => prev.map((l, i) => (
                             i === index
@@ -84,37 +123,40 @@ const LostInventoryPage = () => {
         }, 400);
         return () => clearTimeout(previewTimer.current);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [cart.map((l) => `${l.product_id}:${l.quantity}`).join(',')]);
+    }, [cart.map((l) => `${l.type}:${l.product_id}:${l.quantity}`).join(',')]);
 
     // Fetch candidate shelves (only shelves currently holding stock of the product)
-    // for every product currently in the cart — cached per product_id so a
+    // for every product currently in the cart — cached per type+product_id so a
     // quantity edit doesn't trigger a refetch. Already a small, bounded set,
-    // so a plain dropdown.
+    // so a plain dropdown. Keyed by type too since RM/WIP/FG product ids are
+    // independent sequences and can collide numerically.
     useEffect(() => {
         cart.forEach((line) => {
-            if (shelfCandidatesByProduct[line.product_id] !== undefined) return;
-            setShelfCandidatesByProduct((prev) => ({ ...prev, [line.product_id]: null })); // mark as loading
-            purchasesApi.shelves.getCandidates(line.product_id)
+            const cacheKey = cartLineKey(line.type, line.product_id);
+            if (shelfCandidatesByProduct[cacheKey] !== undefined) return;
+            setShelfCandidatesByProduct((prev) => ({ ...prev, [cacheKey]: null })); // mark as loading
+            getShelfCandidatesByType(line.type, line.product_id)
                 .then((res) => {
                     const candidates = res?.results || res || [];
-                    setShelfCandidatesByProduct((prev) => ({ ...prev, [line.product_id]: candidates }));
+                    setShelfCandidatesByProduct((prev) => ({ ...prev, [cacheKey]: candidates }));
                 })
                 .catch(() => {
-                    setShelfCandidatesByProduct((prev) => ({ ...prev, [line.product_id]: [] }));
+                    setShelfCandidatesByProduct((prev) => ({ ...prev, [cacheKey]: [] }));
                 });
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [cart.map((l) => l.product_id).join(',')]);
+    }, [cart.map((l) => cartLineKey(l.type, l.product_id)).join(',')]);
 
     const handleAddProduct = (item) => {
         const productId = item.product?.id;
         if (!productId) return;
-        if (cart.some((l) => l.product_id === productId)) {
+        if (cart.some((l) => l.type === addType && l.product_id === productId)) {
             setError('This product is already in the batch.');
             return;
         }
         setError('');
         setCart((prev) => [...prev, {
+            type: addType,
             product_id: productId,
             product_name: item.product?.name,
             product_code: item.product?.code,
@@ -143,15 +185,18 @@ const LostInventoryPage = () => {
         setCart((prev) => prev.filter((_, i) => i !== index));
     };
 
-    // One click auto-allocates every line in the batch at once — fills only
+    // One click auto-allocates every RM line in the batch at once — fills only
     // each line's remaining gap, never touches rows already present. No
     // separate save step here: the whole batch persists together on submit.
+    // WIP/FG lines have no auto-allocate endpoint (RM-only backend feature),
+    // so those are skipped here and must be allocated manually.
     const handleAutoAllocateAllLines = async () => {
-        if (cart.length === 0) return;
+        const allocatableLines = cart.filter((l) => l.type === 'raw_material');
+        if (allocatableLines.length === 0) return;
         setBulkAutoAllocating(true);
         setError('');
         let failedCount = 0;
-        await Promise.all(cart.map(async (line) => {
+        await Promise.all(allocatableLines.map(async (line) => {
             const allocatedTotal = lineAllocatedTotal(line);
             const remaining = (Number(line.quantity) || 0) - allocatedTotal;
             if (remaining <= 0) return;
@@ -163,7 +208,7 @@ const LostInventoryPage = () => {
                 }));
                 if (newRows.length > 0) {
                     setCart((prev) => prev.map((l) => (
-                        l.product_id === line.product_id
+                        l.type === 'raw_material' && l.product_id === line.product_id
                             ? { ...l, shelf_allocations: [...(l.shelf_allocations || []), ...newRows] }
                             : l
                     )));
@@ -211,6 +256,7 @@ const LostInventoryPage = () => {
         try {
             const result = await purchasesApi.lostInventory.create({
                 items: cart.map((l) => ({
+                    type: l.type,
                     product_id: l.product_id,
                     quantity: Number(l.quantity),
                     reason: l.reason || '',
@@ -262,6 +308,16 @@ const LostInventoryPage = () => {
 
             <Card className="p-6 space-y-4">
                 <h3 className="font-semibold text-neutral-900">Search Product</h3>
+                <Select
+                    label="Type"
+                    value={addType}
+                    onChange={(e) => {
+                        setAddType(e.target.value);
+                        setSearchTerm('');
+                        setSearchResults([]);
+                    }}
+                    options={TYPE_OPTIONS}
+                />
                 <SearchBar
                     onSearch={setSearchTerm}
                     placeholder="Search products by name or code, then press Enter..."
@@ -317,9 +373,12 @@ const LostInventoryPage = () => {
                 ) : (
                     <div className="space-y-3">
                         {cart.map((line, index) => (
-                            <div key={line.product_id} className="grid grid-cols-1 md:grid-cols-6 gap-3 p-4 bg-neutral-50 rounded-xl items-end">
+                            <div key={cartLineKey(line.type, line.product_id)} className="grid grid-cols-1 md:grid-cols-6 gap-3 p-4 bg-neutral-50 rounded-xl items-end">
                                 <div className="md:col-span-2">
-                                    <p className="text-sm font-medium text-neutral-900">{line.product_name}</p>
+                                    <Badge variant={TYPE_BADGE[line.type]?.variant || 'default'} size="sm">
+                                        {TYPE_BADGE[line.type]?.label || line.type}
+                                    </Badge>
+                                    <p className="text-sm font-medium text-neutral-900 mt-1">{line.product_name}</p>
                                     <p className="text-xs text-neutral-500">
                                         {line.product_code} — Available: {line.available_quantity}
                                     </p>
@@ -370,10 +429,10 @@ const LostInventoryPage = () => {
                                         mode="consumption"
                                         value={line.shelf_allocations}
                                         onChange={(next) => handleUpdateLine(index, 'shelf_allocations', next)}
-                                        shelves={shelfCandidatesByProduct[line.product_id] || []}
+                                        shelves={shelfCandidatesByProduct[cartLineKey(line.type, line.product_id)] || []}
                                         requiredQuantity={Number(line.quantity) || 0}
                                         productId={line.product_id}
-                                        autoAllocateApi={purchasesApi.shelves.autoAllocate}
+                                        autoAllocateApi={line.type === 'raw_material' ? purchasesApi.shelves.autoAllocate : undefined}
                                         disabled={bulkAutoAllocating}
                                     />
                                 </div>

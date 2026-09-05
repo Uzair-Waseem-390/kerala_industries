@@ -826,6 +826,7 @@ class PurchaseReturnReadSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class LostInventoryItemWriteSerializer(serializers.Serializer):
+    type              = serializers.ChoiceField(choices=LostInventoryItem.Type.choices, default=LostInventoryItem.Type.RAW_MATERIAL, required=False)
     product_id        = serializers.IntegerField()
     quantity          = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     reason            = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
@@ -843,6 +844,7 @@ class LostInventoryCreateSerializer(serializers.Serializer):
 
 
 class LostInventoryItemReadSerializer(serializers.ModelSerializer):
+    product_id           = serializers.SerializerMethodField()
     product_name        = serializers.CharField(source="product.name", read_only=True)
     product_code        = serializers.CharField(source="product.code", read_only=True)
     returnable_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
@@ -852,11 +854,14 @@ class LostInventoryItemReadSerializer(serializers.ModelSerializer):
     class Meta:
         model  = LostInventoryItem
         fields = [
-            "id", "product", "product_name", "product_code",
+            "id", "type", "product_id", "product_name", "product_code",
             "quantity", "reason", "unit_cost", "total_cost",
             "found_quantity", "returnable_quantity", "recovered_amount", "net_amount",
         ]
         read_only_fields = fields
+
+    def get_product_id(self, obj):
+        return obj.rm_product_id or obj.wip_product_id or obj.fg_product_id
 
 
 class MarkLostInventoryFoundSerializer(serializers.Serializer):
@@ -866,6 +871,7 @@ class MarkLostInventoryFoundSerializer(serializers.Serializer):
 
 class LostInventoryFifoPreviewQuerySerializer(serializers.Serializer):
     """Validates query params for the FIFO cost preview endpoint."""
+    type       = serializers.ChoiceField(choices=LostInventoryItem.Type.choices, default=LostInventoryItem.Type.RAW_MATERIAL, required=False)
     product_id = serializers.IntegerField()
     quantity   = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
 

@@ -100,7 +100,7 @@ class LostInventoryReportItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = LostInventoryItem
         fields = [
-            "id", "reference_number", "product_name", "product_code",
+            "id", "type", "reference_number", "product_name", "product_code",
             "quantity", "found_quantity", "reason",
             "unit_cost", "total_cost", "recovered_amount", "net_amount",
             "created_at",

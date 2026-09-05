@@ -215,6 +215,8 @@ class WipShelfStockMovement(models.Model):
         CUTTING_ISSUE_CONSUMPTION = "cutting_issue_consumption", "Cutting Issue Consumption"
         CUTTING_BREAKDOWN_PUTAWAY = "cutting_breakdown_putaway", "Cutting Breakdown Put-Away"
         PACKING_ISSUE_CONSUMPTION = "packing_issue_consumption", "Packing Issue Consumption"
+        LOST_CONSUMPTION         = "lost_consumption",         "Lost Inventory Consumption"
+        LOST_FOUND_PUTAWAY       = "lost_found_putaway",       "Lost Inventory Found Put-Away"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_movements")
     product    = models.ForeignKey("production.WipProduct", on_delete=models.PROTECT, related_name="shelf_movements")
@@ -323,6 +325,8 @@ class FgShelfStockMovement(models.Model):
 
     class Reason(models.TextChoices):
         PACKING_OUTPUT_PUTAWAY = "packing_output_putaway", "Packing Output Put-Away"
+        LOST_CONSUMPTION       = "lost_consumption",       "Lost Inventory Consumption"
+        LOST_FOUND_PUTAWAY     = "lost_found_putaway",     "Lost Inventory Found Put-Away"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="fg_movements")
     product    = models.ForeignKey("production.FgProduct", on_delete=models.PROTECT, related_name="shelf_movements")

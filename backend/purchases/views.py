@@ -1255,10 +1255,11 @@ class LostInventoryFifoPreviewView(APIView):
         query.is_valid(raise_exception=True)
         d = query.validated_data
 
-        from .selectors import get_product_by_id
-        get_product_by_id(d["product_id"])  # 404s if the product doesn't exist
+        from .services import _get_loss_product
+        loss_type = d["type"]
+        _get_loss_product(type=loss_type, product_id=d["product_id"])  # 404s/validates if the product doesn't exist or is the wrong stage
 
-        preview = get_fifo_cost_preview(product_id=d["product_id"], quantity=d["quantity"])
+        preview = get_fifo_cost_preview(product_id=d["product_id"], quantity=d["quantity"], type=loss_type)
         return Response(LostInventoryFifoPreviewSerializer(preview).data)
 
 

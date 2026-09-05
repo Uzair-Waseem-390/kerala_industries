@@ -29,12 +29,28 @@ const filterConfig = [
     { name: 'date_to',   label: 'Date To',    type: 'date' },
 ];
 
+const TYPE_BADGE = {
+    raw_material: { variant: 'default', label: 'Raw Material' },
+    wip_core: { variant: 'warning', label: 'WIP — Core' },
+    wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
+};
+
 const columns = [
     {
         key: 'reference_number',
         label: 'Reference #',
         width: '150px',
         render: (value) => <span className="font-mono text-sm font-medium text-neutral-800">{value}</span>,
+    },
+    {
+        key: 'type',
+        label: 'Type',
+        render: (value) => (
+            <Badge variant={TYPE_BADGE[value]?.variant || 'default'} size="sm">
+                {TYPE_BADGE[value]?.label || value}
+            </Badge>
+        ),
     },
     { key: 'product_name', label: 'Product' },
     {

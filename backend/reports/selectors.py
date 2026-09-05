@@ -189,7 +189,7 @@ def get_lost_inventory_report_queryset(
     LostInventoryItem itself has no date field.
     """
     qs = LostInventoryItem.objects.filter(record__is_deleted=False).select_related(
-        "record", "product",
+        "record", "rm_product", "wip_product", "fg_product",
     ).order_by("-record__created_at")
 
     return _apply_datetime_range_filter(
@@ -828,29 +828,32 @@ def _stock_movement_totals_by_product(
     for row in sale_returned_qs.values("invoice_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
         _add(row["invoice_item__product_id"], "total_sale_returned", row["total"])
 
+    # RM-only (type=raw_material) — Stock Movement Report is RM/billing-
+    # scoped only; WIP/FG losses never feed it (see purchases.services.
+    # create_lost_inventory_record/mark_lost_inventory_found).
     from purchases.models import LostInventoryItem, LostInventoryRecovery
-    lost_qs = LostInventoryItem.objects.filter(record__is_deleted=False)
+    lost_qs = LostInventoryItem.objects.filter(record__is_deleted=False, type=LostInventoryItem.Type.RAW_MATERIAL)
     if product_ids is not None:
-        lost_qs = lost_qs.filter(product_id__in=product_ids)
+        lost_qs = lost_qs.filter(rm_product_id__in=product_ids)
     lost_qs = _stock_movement_date_filter(
         lost_qs, field="record__created_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in lost_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
-        _add(row["product_id"], "total_lost", row["total"])
+    for row in lost_qs.values("rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
+        _add(row["rm_product_id"], "total_lost", row["total"])
 
     # recovered_at is a plain DateField (not DateTimeField) — no __date
     # transform needed/supported, unlike the other four *_date_filter calls.
-    found_qs = LostInventoryRecovery.objects.all()
+    found_qs = LostInventoryRecovery.objects.filter(lost_item__type=LostInventoryItem.Type.RAW_MATERIAL)
     if product_ids is not None:
-        found_qs = found_qs.filter(lost_item__product_id__in=product_ids)
+        found_qs = found_qs.filter(lost_item__rm_product_id__in=product_ids)
     if _clean(date):
         found_qs = found_qs.filter(recovered_at=_clean(date))
     if _clean(date_from):
         found_qs = found_qs.filter(recovered_at__gte=_clean(date_from))
     if _clean(date_to):
         found_qs = found_qs.filter(recovered_at__lte=_clean(date_to))
-    for row in found_qs.values("lost_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
-        _add(row["lost_item__product_id"], "total_found", row["total"])
+    for row in found_qs.values("lost_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
+        _add(row["lost_item__rm_product_id"], "total_found", row["total"])
 
     return totals
 
