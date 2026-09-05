@@ -5,7 +5,8 @@ from django.utils import timezone
 from purchases.models import Product, Shelf
 
 from .models import (
-    LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow, ProductStockMovement,
+    LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgShelfStock, FgShelfStockMovement,
+    Inventory, InventoryStatsFlow, ProductStockMovement,
     ShelfStock, ShelfStockMovement, StockMovementFlow, WipInventory, WipInventoryStatsFlow,
     WipShelfStock, WipShelfStockMovement,
 )
@@ -351,3 +352,108 @@ def apply_wip_shelf_allocations(*, product, allocations: list[dict], sign: int, 
         if to_update:
             WipShelfStock.objects.bulk_update(to_update, ["quantity", "last_updated_at"])
         WipShelfStockMovement.objects.bulk_create(movements)
+
+
+# ---------------------------------------------------------------------------
+# FG inventory writers — same role as the WIP section above, pointed at the
+# FG models instead. `product` is a production.FgProduct instance; not
+# imported here for the same circular-import-avoidance reason as the WIP
+# section (only product.pk/product.name are ever read off it).
+# ---------------------------------------------------------------------------
+
+def validate_fg_shelf_consumption(*, product, allocations: list[dict]) -> None:
+    """FG-equivalent of validate_wip_shelf_consumption above."""
+    from rest_framework.exceptions import ValidationError
+    if not allocations:
+        return
+
+    shelf_by_id = {a["shelf"].pk: a["shelf"] for a in allocations}
+    needed_by_id: dict[int, int] = {}
+    for a in allocations:
+        needed_by_id[a["shelf"].pk] = needed_by_id.get(a["shelf"].pk, 0) + a["quantity"]
+
+    stock_by_shelf = {
+        s.shelf_id: s.quantity
+        for s in FgShelfStock.objects.select_for_update()
+            .filter(product=product, shelf_id__in=sorted(needed_by_id.keys()))
+            .order_by("shelf_id")
+    }
+    for shelf_id in sorted(needed_by_id.keys()):
+        shelf = shelf_by_id[shelf_id]
+        needed = needed_by_id[shelf_id]
+        available = stock_by_shelf.get(shelf_id, 0)
+        if available < needed:
+            raise ValidationError({
+                "shelf_allocations": (
+                    f"Shelf '{shelf.name}' only has {available} of '{product.name}' "
+                    f"available, but {needed} was requested. Select another shelf "
+                    f"to cover the remaining {needed - available}."
+                )
+            })
+
+
+def sync_fg_inventory(*, product, quantity_delta, user=None) -> None:
+    """THE single writer for FgInventory.quantity. Mirrors sync_wip_inventory exactly."""
+    with transaction.atomic():
+        inventory, created = FgInventory.objects.select_for_update().get_or_create(product=product)
+        old_quantity = 0 if created else inventory.quantity
+        old_bucket = None if created else _stock_bucket(old_quantity)
+
+        inventory.quantity = max(0, inventory.quantity + quantity_delta)
+        update_fields = ["quantity", "last_updated_at"]
+        if user is not None:
+            inventory.last_updated_by = user
+            update_fields.append("last_updated_by")
+        inventory.save(update_fields=update_fields)
+
+        applied_delta = inventory.quantity - old_quantity
+        _apply_stats_deltas(
+            stats_model=FgInventoryStatsFlow, stock_delta=applied_delta,
+            **_stats_deltas_for_transition(old_bucket, _stock_bucket(inventory.quantity))
+        )
+
+
+def apply_fg_shelf_allocations(*, product, allocations: list[dict], sign: int, reason: str, reference: str = "", user=None) -> None:
+    """Applies shelf allocations for one FG product. Mirrors apply_wip_shelf_allocations exactly."""
+    if not allocations:
+        return
+
+    delta_by_shelf = {}
+    shelf_by_id = {}
+    for allocation in allocations:
+        shelf = allocation["shelf"]
+        delta_by_shelf[shelf.pk] = delta_by_shelf.get(shelf.pk, 0) + sign * allocation["quantity"]
+        shelf_by_id[shelf.pk] = shelf
+
+    shelf_ids = sorted(delta_by_shelf.keys())
+    now = timezone.now()
+
+    with transaction.atomic():
+        existing = {
+            s.shelf_id: s
+            for s in FgShelfStock.objects.select_for_update()
+                .filter(product=product, shelf_id__in=shelf_ids)
+                .order_by("shelf_id")
+        }
+        to_create = []
+        to_update = []
+        movements = []
+        for shelf_id in shelf_ids:
+            delta = delta_by_shelf[shelf_id]
+            stock = existing.get(shelf_id)
+            if stock is None:
+                to_create.append(FgShelfStock(shelf_id=shelf_id, product=product, quantity=max(0, delta)))
+            else:
+                stock.quantity = max(0, stock.quantity + delta)
+                stock.last_updated_at = now
+                to_update.append(stock)
+            movements.append(FgShelfStockMovement(
+                shelf_id=shelf_id, product=product, delta=delta,
+                reason=reason, reference=reference, created_by=user,
+            ))
+
+        if to_create:
+            FgShelfStock.objects.bulk_create(to_create)
+        if to_update:
+            FgShelfStock.objects.bulk_update(to_update, ["quantity", "last_updated_at"])
+        FgShelfStockMovement.objects.bulk_create(movements)

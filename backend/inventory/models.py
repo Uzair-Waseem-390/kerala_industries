@@ -214,6 +214,7 @@ class WipShelfStockMovement(models.Model):
         RECIPE_BREAKDOWN_PUTAWAY  = "recipe_breakdown_putaway",  "Recipe Breakdown Put-Away"
         CUTTING_ISSUE_CONSUMPTION = "cutting_issue_consumption", "Cutting Issue Consumption"
         CUTTING_BREAKDOWN_PUTAWAY = "cutting_breakdown_putaway", "Cutting Breakdown Put-Away"
+        PACKING_ISSUE_CONSUMPTION = "packing_issue_consumption", "Packing Issue Consumption"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_movements")
     product    = models.ForeignKey("production.WipProduct", on_delete=models.PROTECT, related_name="shelf_movements")
@@ -268,6 +269,96 @@ class InventoryStatsFlow(models.Model):
     def __str__(self):
         return (
             f"InventoryStatsFlow — total {self.total_products}, stock {self.total_stock}, "
+            f"low {self.low_stock_count}, out {self.out_of_stock_count}"
+        )
+
+    @classmethod
+    def get_instance(cls):
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+
+# ---------------------------------------------------------------------------
+# FG Inventory (2026-09) — brand new tables, not a relocation (FgProduct
+# itself is new too). Same split as RM/WIP: the catalog (production.FgProduct)
+# stays with the producing app, the inventory tracking lives here.
+# ---------------------------------------------------------------------------
+
+class FgInventory(models.Model):
+    product         = models.OneToOneField("production.FgProduct", on_delete=models.PROTECT, related_name="inventory")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
+    last_updated_at = models.DateTimeField(auto_now=True)
+    last_updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="fg_inventory_updates",
+    )
+
+    class Meta:
+        verbose_name        = "FG Inventory"
+        verbose_name_plural = "FG Inventories"
+        ordering            = ["product__name"]
+
+    def __str__(self):
+        return f"{self.product.name} — qty: {self.quantity}"
+
+
+class FgShelfStock(models.Model):
+    """Live physical quantity of one FG product on one shelf — FG-side twin of ShelfStock/WipShelfStock."""
+    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="fg_stock_rows")
+    product         = models.ForeignKey("production.FgProduct", on_delete=models.PROTECT, related_name="shelf_stock_rows")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    last_updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "FG Shelf Stock"
+        verbose_name_plural = "FG Shelf Stock"
+        unique_together     = [("shelf", "product")]
+
+    def __str__(self):
+        return f"{self.shelf.name} — {self.product.name}: {self.quantity}"
+
+
+class FgShelfStockMovement(models.Model):
+    """Append-only audit ledger for FgShelfStock changes — FG-side twin of ShelfStockMovement/WipShelfStockMovement."""
+
+    class Reason(models.TextChoices):
+        PACKING_OUTPUT_PUTAWAY = "packing_output_putaway", "Packing Output Put-Away"
+
+    shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="fg_movements")
+    product    = models.ForeignKey("production.FgProduct", on_delete=models.PROTECT, related_name="shelf_movements")
+    delta      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Positive = added to shelf, negative = removed from shelf.")
+    reason     = models.CharField(max_length=30, choices=Reason.choices, db_index=True)
+    reference  = models.CharField(max_length=30, blank=True, default="", help_text="e.g. PAK-2026-0001")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="fg_shelf_stock_movements",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name        = "FG Shelf Stock Movement"
+        verbose_name_plural = "FG Shelf Stock Movements"
+        ordering            = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.shelf.name} — {self.product.name}: {self.delta:+} ({self.reason})"
+
+
+class FgInventoryStatsFlow(models.Model):
+    """FG-side twin of InventoryStatsFlow/WipInventoryStatsFlow — kept in sync by services.sync_fg_inventory()."""
+    total_products     = models.PositiveIntegerField(default=0)
+    total_stock        = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    low_stock_count    = models.PositiveIntegerField(default=0)
+    out_of_stock_count = models.PositiveIntegerField(default=0)
+    last_updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "FG Inventory Stats Flow"
+        verbose_name_plural = "FG Inventory Stats Flow"
+
+    def __str__(self):
+        return (
+            f"FgInventoryStatsFlow — total {self.total_products}, stock {self.total_stock}, "
             f"low {self.low_stock_count}, out {self.out_of_stock_count}"
         )
 

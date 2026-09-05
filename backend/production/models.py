@@ -102,6 +102,11 @@ class WipProduct(AuditMixin):
         CUTTING   = "cutting",   "Cutting"
 
     name        = models.CharField(max_length=255)
+    # Sequential auto-generated code (WIP-2026-0001), assigned at creation —
+    # see production.services._shared.next_wip_product_code. Every row has
+    # one — backfill_wip_product_codes filled in rows created before this
+    # field existed.
+    code        = models.CharField(max_length=30, unique=True, editable=False)
     family      = models.ForeignKey("purchases.Family", on_delete=models.PROTECT, related_name="wip_products")
     binding     = models.ForeignKey(RewoundCoreBinding, on_delete=models.PROTECT, related_name="wip_products")
     yard        = models.ForeignKey(RewoundCoreYard, on_delete=models.PROTECT, related_name="wip_products")
@@ -129,6 +134,36 @@ class WipProduct(AuditMixin):
         return self.name
 
 
+class FgProduct(AuditMixin):
+    """
+    Finished Goods catalog row — one per packed piece identity. Deliberately
+    reuses WIP's own binding/yard/length_mm lookups (not a fresh FG-scoped
+    set) because Packing doesn't transform the product — per project
+    decision, a packed piece is the *same* identity as the WIP piece it came
+    from ("no name change, only moves from WIP to Finished Good"), so a
+    second parallel set of attribute lookups would fight that, not serve it.
+    Still a structurally separate catalog/table from WipProduct itself
+    (RM/WIP/FG separation principle), just pointed at the same lookup rows.
+    """
+    name        = models.CharField(max_length=255)
+    code        = models.CharField(max_length=30, unique=True, editable=False)
+    binding     = models.ForeignKey(RewoundCoreBinding, on_delete=models.PROTECT, related_name="fg_products")
+    yard        = models.ForeignKey(RewoundCoreYard, on_delete=models.PROTECT, related_name="fg_products")
+    length_mm   = models.ForeignKey(RewoundCoreLengthMm, on_delete=models.PROTECT, related_name="fg_products")
+    # Same fingerprint mechanism as WipProduct.variant_key — get-or-create
+    # by (binding, yard, length_mm) so packing the same piece identity again
+    # reuses this row instead of creating a duplicate.
+    variant_key = models.CharField(max_length=500, unique=True, editable=False)
+
+    class Meta:
+        verbose_name        = "FG Product"
+        verbose_name_plural = "FG Products"
+        ordering            = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 # WipInventory / WipShelfStock / WipShelfStockMovement moved to the
 # inventory app (2026-09) — "operate everything WIP-inventory-related from
 # the inventory app" per project decision. See inventory/models.py; Meta.db_table
@@ -150,7 +185,7 @@ class Recipe(AuditMixin):
     class RecipeType(models.TextChoices):
         REWINDING = "rewinding", "Rewinding"
         CUTTING   = "cutting",   "Cutting"
-        # PACKING recipe type lands here once that stage is built.
+        PACKING   = "packing",   "Packing"
 
     recipe_number = models.CharField(max_length=30, unique=True, editable=False)
     recipe_type   = models.CharField(max_length=20, choices=RecipeType.choices, default=RecipeType.REWINDING, db_index=True)
@@ -423,3 +458,167 @@ class CuttingBreakdownItemShelfAllocation(models.Model):
 
     def __str__(self):
         return f"{self.breakdown_item} → {self.shelf.name}: {self.quantity}"
+
+
+# ---------------------------------------------------------------------------
+# Recipe (Packing) — header is the same shared `Recipe` (recipe_type=
+# "packing"). Two independent inputs per recipe: a Cut Piece (WIP) and a
+# Packing Material (RM, kg) — mirrors Rewinding's Jumbo+Cores pair
+# structurally, but the two inputs point at different source tables (WIP vs
+# RM) so they can't share one polymorphic model the way Jumbo/Cores do.
+# No breakdown stage — output quantity == issued piece quantity, 1:1, no
+# split (see instructions/architecture.md and the 2026-09 design
+# discussion: packing doesn't transform the product, so there's nothing to
+# allocate by length/waste the way Cutting does).
+# ---------------------------------------------------------------------------
+
+class PackingIssuedPiece(models.Model):
+    """Exactly one Cut Piece (WIP, stage=cutting) product issued per Packing recipe."""
+    recipe      = models.OneToOneField(Recipe, on_delete=models.CASCADE, related_name="packing_issued_piece")
+    wip_product = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="packing_issuances")
+    quantity    = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+
+    class Meta:
+        verbose_name        = "Packing Issued Piece"
+        verbose_name_plural = "Packing Issued Pieces"
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.wip_product.name}: {self.quantity}"
+
+
+class PackingPieceShelfDraw(models.Model):
+    """Audit-only shelf activity for a Packing piece issuance — mirrors CuttingMaterialShelfDraw."""
+    class Direction(models.TextChoices):
+        DRAW   = "draw",   "Drawn From"
+        RETURN = "return", "Returned To"
+
+    issued_piece = models.ForeignKey(PackingIssuedPiece, on_delete=models.CASCADE, related_name="shelf_draws")
+    shelf        = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="packing_piece_draws")
+    direction    = models.CharField(max_length=10, choices=Direction.choices)
+    quantity     = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Packing Piece Shelf Draw"
+        verbose_name_plural = "Packing Piece Shelf Draws"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_piece} {self.direction} {self.shelf.name}: {self.quantity}"
+
+
+class PackingPieceConsumption(models.Model):
+    """
+    FIFO ledger — which Cutting `CuttingBreakdownItem` batch(es) a Packing
+    piece issuance drew from, and how much at what cost. Mirrors
+    CuttingMaterialConsumption exactly, one level up the chain.
+    """
+    # Named `issued_material` (not `issued_piece`) so this model satisfies
+    # the generic contract services/_shared.py's draw_fifo/return_fifo
+    # helpers assume across every FIFO consumption model in this app
+    # (RecipeMaterialConsumption/CuttingMaterialConsumption both use this
+    # same field name) — those helpers hardcode the kwarg name.
+    issued_material = models.ForeignKey(PackingIssuedPiece, on_delete=models.CASCADE, related_name="consumptions")
+    piece_batch     = models.ForeignKey(CuttingBreakdownItem, on_delete=models.PROTECT, related_name="packing_consumptions")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    unit_cost       = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Packing Piece Consumption"
+        verbose_name_plural = "Packing Piece Consumptions"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} <- {self.piece_batch}: {self.quantity}"
+
+
+class PackingIssuedMaterial(models.Model):
+    """Exactly one RM packing material (kg) issued per Packing recipe — mirrors RecipeIssuedMaterial's role, one material instead of a Jumbo+Cores pair."""
+    recipe   = models.OneToOneField(Recipe, on_delete=models.CASCADE, related_name="packing_issued_material")
+    product  = models.ForeignKey("purchases.Product", on_delete=models.PROTECT, related_name="packing_issuances")
+    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+
+    class Meta:
+        verbose_name        = "Packing Issued Material"
+        verbose_name_plural = "Packing Issued Materials"
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.product.name}: {self.quantity}"
+
+
+class PackingMaterialShelfDraw(models.Model):
+    """Audit-only shelf activity for a Packing RM material issuance — mirrors RecipeMaterialShelfDraw."""
+    class Direction(models.TextChoices):
+        DRAW   = "draw",   "Drawn From"
+        RETURN = "return", "Returned To"
+
+    issued_material = models.ForeignKey(PackingIssuedMaterial, on_delete=models.CASCADE, related_name="shelf_draws")
+    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="packing_material_draws")
+    direction       = models.CharField(max_length=10, choices=Direction.choices)
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Packing Material Shelf Draw"
+        verbose_name_plural = "Packing Material Shelf Draws"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} {self.direction} {self.shelf.name}: {self.quantity}"
+
+
+class PackingMaterialConsumption(models.Model):
+    """FIFO ledger — which RM `PurchaseItem` batch(es) a Packing material issuance drew from. Mirrors RecipeMaterialConsumption."""
+    issued_material = models.ForeignKey(PackingIssuedMaterial, on_delete=models.CASCADE, related_name="consumptions")
+    purchase_item   = models.ForeignKey("purchases.PurchaseItem", on_delete=models.PROTECT, related_name="packing_consumptions")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4)
+    unit_cost       = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at      = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Packing Material Consumption"
+        verbose_name_plural = "Packing Material Consumptions"
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.issued_material} <- {self.purchase_item}: {self.quantity}"
+
+
+class PackingOutputItem(AuditMixin):
+    """
+    The single output row of a finished Packing recipe: the matching
+    FgProduct + quantity (== issued piece quantity, 1:1, no split) +
+    unit_cost_snapshot (piece's own final cost + packing cost spread evenly
+    — see finish_packing_recipe). remaining_quantity mirrors
+    CuttingBreakdownItem's role — FG's own FIFO cost layer, for a future
+    sale path once billing integrates with FG (open question, see
+    docs/manufacturing-costing-notes.md).
+    """
+    recipe             = models.OneToOneField(Recipe, on_delete=models.CASCADE, related_name="packing_output_item")
+    fg_product         = models.ForeignKey(FgProduct, on_delete=models.PROTECT, related_name="packing_output_items")
+    quantity           = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    remaining_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+
+    class Meta:
+        verbose_name        = "Packing Output Item"
+        verbose_name_plural = "Packing Output Items"
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.fg_product.name}: {self.quantity}"
+
+
+class PackingOutputShelfAllocation(models.Model):
+    """Which shelf(s) a Packing output's produced quantity was put away to — mirrors CuttingBreakdownItemShelfAllocation."""
+    output_item = models.ForeignKey(PackingOutputItem, on_delete=models.CASCADE, related_name="shelf_allocations")
+    shelf       = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="packing_output_allocations")
+    quantity    = models.DecimalField(max_digits=14, decimal_places=4)
+
+    class Meta:
+        verbose_name        = "Packing Output Shelf Allocation"
+        verbose_name_plural = "Packing Output Shelf Allocations"
+        unique_together     = [("output_item", "shelf")]
+
+    def __str__(self):
+        return f"{self.output_item} → {self.shelf.name}: {self.quantity}"

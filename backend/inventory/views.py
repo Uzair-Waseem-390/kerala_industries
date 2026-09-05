@@ -105,10 +105,10 @@ class InventoryRetrieveView(generics.RetrieveAPIView):
 
 class CombinedInventoryListView(APIView):
     """
-    GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece&stock_view=low|out
+    GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece|finished_goods&stock_view=low|out
     Every product's inventory in one merged, paginated list — Raw
-    Material and WIP together (Finished Goods has no real inventory model
-    yet, see docs/manufacturing-costing-notes.md). Source is a plain
+    Material, WIP, and Finished Goods together (see
+    docs/manufacturing-costing-notes.md). Source is a plain
     Python list (see selectors.get_combined_inventory_rows), so pagination
     is applied manually here with the same paginator class every other
     list endpoint uses, rather than DRF's generic ListAPIView (which

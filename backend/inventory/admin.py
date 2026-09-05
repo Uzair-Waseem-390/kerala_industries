@@ -1,6 +1,9 @@
 from django.contrib import admin
 
-from .models import Inventory, WipInventory, WipShelfStock, WipShelfStockMovement
+from .models import (
+    FgInventory, FgShelfStock, FgShelfStockMovement,
+    Inventory, WipInventory, WipShelfStock, WipShelfStockMovement,
+)
 
 
 @admin.register(Inventory)
@@ -35,6 +38,31 @@ class WipShelfStockAdmin(admin.ModelAdmin):
 
 @admin.register(WipShelfStockMovement)
 class WipShelfStockMovementAdmin(admin.ModelAdmin):
+    list_display        = ["shelf", "product", "delta", "reason", "reference", "created_at"]
+    list_filter         = ["reason"]
+    search_fields       = ["shelf__name", "product__name", "reference"]
+    list_select_related = ("shelf", "product")
+
+
+# FgInventory / FgShelfStock / FgShelfStockMovement — mirrors the WIP
+# registrations above, pointed at the FG models.
+
+@admin.register(FgInventory)
+class FgInventoryAdmin(admin.ModelAdmin):
+    list_display        = ["product", "quantity", "last_updated_at"]
+    search_fields       = ["product__name", "product__code"]
+    list_select_related = ("product",)
+
+
+@admin.register(FgShelfStock)
+class FgShelfStockAdmin(admin.ModelAdmin):
+    list_display        = ["shelf", "product", "quantity", "last_updated_at"]
+    search_fields       = ["shelf__name", "product__name"]
+    list_select_related = ("shelf", "product")
+
+
+@admin.register(FgShelfStockMovement)
+class FgShelfStockMovementAdmin(admin.ModelAdmin):
     list_display        = ["shelf", "product", "delta", "reason", "reference", "created_at"]
     list_filter         = ["reason"]
     search_fields       = ["shelf__name", "product__name", "reference"]

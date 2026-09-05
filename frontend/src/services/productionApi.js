@@ -39,9 +39,9 @@ export const productionApi = {
         updateDescription: (id, data) => api.patch(`/production/recipes/${id}/description/`, data),
     },
 
-    // RM variants already purchased for a given kind — the picker source
-    // when issuing material into a recipe. Search-as-you-type since there
-    // can be many attribute combinations.
+    // RM variants already purchased for a given kind ("jumbo" | "cores" |
+    // "packing") — the picker source when issuing material into a recipe.
+    // Search-as-you-type since there can be many attribute combinations.
     issuableProducts: {
         getAll: (params = {}) => {
             const query = new URLSearchParams(params).toString();
@@ -124,4 +124,60 @@ export const productionApi = {
     rewoundCoreBindings: createReadOnlyLookupApi('rewound-core-bindings'),
     rewoundCoreYards: createReadOnlyLookupApi('rewound-core-yards'),
     rewoundCoreLengthMms: createReadOnlyLookupApi('rewound-core-length-mms'),
+
+    // Packing — third and final WIP stage. Issues a Cut Piece (WIP,
+    // stage=cutting) and a Packing Material (RM) and finishes directly into
+    // one Finished Goods output line — no breakdown stage, output quantity
+    // is always the issued piece quantity 1:1.
+    packingRecipes: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/packing-recipes/${query ? `?${query}` : ''}`);
+        },
+        getById: (id) => api.get(`/production/packing-recipes/${id}/`),
+        create: (data) => api.post('/production/packing-recipes/', data),
+        updateDescription: (id, data) => api.patch(`/production/packing-recipes/${id}/description/`, data),
+        // shelf_allocations: consumption-style — which shelves (holding this
+        // Cut Piece) to draw `quantity` from. Same picker as Cutting's own
+        // issue-material, sourced from wipShelfCandidates below.
+        issuePiece: (id, data) => api.post(`/production/packing-recipes/${id}/issue-piece/`, data),
+        // quantity is the NEW total (not a delta) — same increase/decrease
+        // semantics as Cutting's update-issued-material.
+        updateIssuedPiece: (id, data) => api.patch(`/production/packing-recipes/${id}/issued-piece/`, data),
+        // shelf_allocations: consumption-style — RM Packing Material shelves,
+        // same picker as Rewinding's own issue-material.
+        issueMaterial: (id, data) => api.post(`/production/packing-recipes/${id}/issue-material/`, data),
+        updateIssuedMaterial: (id, data) => api.patch(`/production/packing-recipes/${id}/issued-material/`, data),
+        // No breakdown step — shelf_allocations here is putaway-style,
+        // sized to the issued piece's quantity, and is where the newly
+        // produced Finished Goods output gets put away.
+        finish: (id, data) => api.post(`/production/packing-recipes/${id}/finish/`, data),
+    },
+
+    // Cut Pieces (WIP, stage=cutting) issuable into a Packing recipe — the
+    // picker source for Packing's issue-piece. Mirrors issuableWipCores.
+    issuableCuttingPieces: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/issuable-cutting-pieces/${query ? `?${query}` : ''}`);
+        },
+    },
+
+    // FG Products / Inventory — read-only overview, mirrors wipProducts/wipInventory.
+    fgInventory: {
+        getAll: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/production/fg-inventory/${query ? `?${query}` : ''}`);
+        },
+    },
+
+    // Shelves currently holding stock of a given FG product — mirrors
+    // wipShelfCandidates, for Packing's finish put-away picker and the All
+    // Inventory page's Finished Goods product-detail modal.
+    fgShelfCandidates: {
+        getAll: (fgProductId, params = {}) => {
+            const query = new URLSearchParams({ fg_product_id: fgProductId, ...params }).toString();
+            return api.get(`/production/fg-shelves/candidates/?${query}`);
+        },
+    },
 };

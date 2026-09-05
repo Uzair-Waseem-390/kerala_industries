@@ -16,7 +16,7 @@ from ..models import (
 from ..selectors import get_available_wip_batches_for_fifo, get_cutting_issued_material
 from ..utils import compute_wip_variant_key
 from ._shared import (
-    _fmt, draw_fifo, get_locked_recipe, normalize_shelf_allocations,
+    _fmt, draw_fifo, get_locked_recipe, next_wip_product_code, normalize_shelf_allocations,
     require_under_processing, return_fifo,
 )
 
@@ -216,7 +216,7 @@ def add_cutting_breakdown_item(*, recipe_id: int, length_mm: Decimal, quantity: 
         try:
             with transaction.atomic():
                 wip_product = WipProduct.objects.create(
-                    name=name, family=core_product.family, binding=core_product.binding,
+                    name=name, code=next_wip_product_code(), family=core_product.family, binding=core_product.binding,
                     yard=core_product.yard, length_mm=length_lookup,
                     stage=WipProduct.Stage.CUTTING, variant_key=variant_key,
                     created_by=user, updated_by=user,

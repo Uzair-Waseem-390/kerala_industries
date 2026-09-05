@@ -127,9 +127,12 @@ def get_issued_material(*, recipe_id: int, kind: str) -> RecipeIssuedMaterial:
 
 def get_issuable_products(*, kind: str, search: str = None) -> QuerySet:
     from django.db.models import F
-    from purchases.models import CORES_PRODUCT_CODE, JUMBO_PRODUCT_CODE, Product
+    from purchases.models import CORES_PRODUCT_CODE, JUMBO_PRODUCT_CODE, PACKING_PRODUCT_CODE, Product
 
-    code = JUMBO_PRODUCT_CODE if kind == "jumbo" else CORES_PRODUCT_CODE
+    codes_by_kind = {
+        "jumbo": JUMBO_PRODUCT_CODE, "cores": CORES_PRODUCT_CODE, "packing": PACKING_PRODUCT_CODE,
+    }
+    code = codes_by_kind[kind]
     qs = (
         Product.objects.select_related("family", "inventory")
         .filter(is_deleted=False, base_product__code=code)

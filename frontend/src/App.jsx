@@ -37,6 +37,8 @@ import RecipesPage from './pages/production/RecipesPage';
 import RecipeDetailPage from './pages/production/RecipeDetailPage';
 import CuttingRecipesPage from './pages/production/CuttingRecipesPage';
 import CuttingRecipeDetailPage from './pages/production/CuttingRecipeDetailPage';
+import PackingRecipesPage from './pages/production/PackingRecipesPage';
+import PackingRecipeDetailPage from './pages/production/PackingRecipeDetailPage';
 import WipInventoryPage from './pages/production/WipInventoryPage';
 
 // Inventory pages
@@ -306,6 +308,22 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <CuttingRecipeDetailPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/packing-recipes" element={
+          <ProtectedRoute>
+            <Layout>
+              <PackingRecipesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/production/packing-recipes/:id" element={
+          <ProtectedRoute>
+            <Layout>
+              <PackingRecipeDetailPage />
             </Layout>
           </ProtectedRoute>
         } />

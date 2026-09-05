@@ -1,9 +1,10 @@
 from django.contrib import admin
 
 from .models import (
-    CuttingBreakdownItem, CuttingIssuedMaterial, CuttingMaterialConsumption,
-    Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
+    CuttingBreakdownItem, CuttingIssuedMaterial, CuttingMaterialConsumption, FgProduct,
+    PackingIssuedMaterial, PackingIssuedPiece, PackingMaterialConsumption, PackingOutputItem,
+    PackingPieceConsumption, Recipe, RecipeBreakdownItem, RecipeIssuedMaterial,
+    RecipeMaterialConsumption, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
 )
 
 
@@ -54,11 +55,19 @@ class RewoundCoreLengthMmAdmin(_LookupAdmin):
 
 @admin.register(WipProduct)
 class WipProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display        = ["name", "family", "stage", "is_deleted", "created_at"]
+    list_display        = ["name", "code", "family", "stage", "is_deleted", "created_at"]
     list_filter         = ["is_deleted", "stage", "family"]
-    search_fields       = ["name"]
+    search_fields       = ["name", "code"]
     list_select_related = ("family",)
-    readonly_fields     = AuditAdminMixin.readonly_fields + ("variant_key",)
+    readonly_fields     = AuditAdminMixin.readonly_fields + ("code", "variant_key")
+
+
+@admin.register(FgProduct)
+class FgProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
+    list_display        = ["name", "code", "is_deleted", "created_at"]
+    list_filter         = ["is_deleted"]
+    search_fields       = ["name", "code"]
+    readonly_fields     = AuditAdminMixin.readonly_fields + ("code", "variant_key")
 
 
 class RecipeIssuedMaterialInline(admin.TabularInline):
@@ -90,6 +99,27 @@ class CuttingBreakdownItemInline(admin.TabularInline):
     can_delete = False
 
 
+class PackingIssuedPieceInline(admin.TabularInline):
+    model      = PackingIssuedPiece
+    extra      = 0
+    readonly_fields = ("wip_product", "quantity")
+    can_delete = False
+
+
+class PackingIssuedMaterialInline(admin.TabularInline):
+    model      = PackingIssuedMaterial
+    extra      = 0
+    readonly_fields = ("product", "quantity")
+    can_delete = False
+
+
+class PackingOutputItemInline(admin.TabularInline):
+    model      = PackingOutputItem
+    extra      = 0
+    readonly_fields = ("fg_product", "quantity", "remaining_quantity", "unit_cost_snapshot")
+    can_delete = False
+
+
 @admin.register(Recipe)
 class RecipeAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     list_display        = ["recipe_number", "name", "recipe_type", "status", "cost_per_unit", "waste_length_mm", "created_at"]
@@ -98,12 +128,13 @@ class RecipeAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     readonly_fields     = AuditAdminMixin.readonly_fields + (
         "recipe_number", "cost_per_unit", "waste_length_mm", "waste_cost", "finished_by", "finished_at",
     )
-    # Both Rewinding and Cutting inlines are registered here since Recipe is
-    # the shared header — only one set is ever populated per row, per
-    # recipe_type, so the other simply shows empty.
+    # Rewinding, Cutting, and Packing inlines are all registered here since
+    # Recipe is the shared header — only one set is ever populated per row,
+    # per recipe_type, so the others simply show empty.
     inlines             = [
         RecipeIssuedMaterialInline, RecipeBreakdownItemInline,
         CuttingIssuedMaterialInline, CuttingBreakdownItemInline,
+        PackingIssuedPieceInline, PackingIssuedMaterialInline, PackingOutputItemInline,
     ]
 
 
@@ -117,3 +148,15 @@ class RecipeMaterialConsumptionAdmin(admin.ModelAdmin):
 class CuttingMaterialConsumptionAdmin(admin.ModelAdmin):
     list_display        = ["issued_material", "wip_batch", "quantity", "unit_cost", "created_at"]
     list_select_related = ("issued_material", "wip_batch")
+
+
+@admin.register(PackingPieceConsumption)
+class PackingPieceConsumptionAdmin(admin.ModelAdmin):
+    list_display        = ["issued_material", "piece_batch", "quantity", "unit_cost", "created_at"]
+    list_select_related = ("issued_material", "piece_batch")
+
+
+@admin.register(PackingMaterialConsumption)
+class PackingMaterialConsumptionAdmin(admin.ModelAdmin):
+    list_display        = ["issued_material", "purchase_item", "quantity", "unit_cost", "created_at"]
+    list_select_related = ("issued_material", "purchase_item")

@@ -312,6 +312,177 @@ export const useCuttingRecipeDetail = (id) => {
     };
 };
 
+// Packing Recipes — same list/create shape as useCuttingRecipes, pointed at
+// the packing-recipes endpoints.
+export const usePackingRecipes = (initialFilters = {}) => {
+    const {
+        data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch,
+    } = usePaginatedList((params) => productionApi.packingRecipes.getAll(params), initialFilters);
+
+    const [creating, setCreating] = useState(false);
+    const [createError, setCreateError] = useState(null);
+
+    const create = async (payload) => {
+        setCreating(true);
+        setCreateError(null);
+        try {
+            const result = await productionApi.packingRecipes.create(payload);
+            await refetch();
+            return result;
+        } catch (err) {
+            setCreateError(extractErrorMessage(err, 'Failed to create recipe'));
+            throw err;
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    return {
+        data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch,
+        creating, createError, create,
+    };
+};
+
+// One Packing recipe's full detail + every mutation — mirrors
+// useCuttingRecipeDetail's shape, adapted for Packing's two independent
+// issued inputs (a piece + a material, no jumbo/cores kind split) and no
+// breakdown stage — finish itself carries the FG put-away shelf_allocations.
+export const usePackingRecipeDetail = (id) => {
+    const [recipe, setRecipe] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const [issuingPiece, setIssuingPiece] = useState(false);
+    const [issuePieceError, setIssuePieceError] = useState(null);
+
+    const [updatingPiece, setUpdatingPiece] = useState(false);
+    const [updatePieceError, setUpdatePieceError] = useState(null);
+
+    const [issuingMaterial, setIssuingMaterial] = useState(false);
+    const [issueMaterialError, setIssueMaterialError] = useState(null);
+
+    const [updatingMaterial, setUpdatingMaterial] = useState(false);
+    const [updateMaterialError, setUpdateMaterialError] = useState(null);
+
+    const [updatingDescription, setUpdatingDescription] = useState(false);
+    const [updateDescriptionError, setUpdateDescriptionError] = useState(null);
+
+    const [finishing, setFinishing] = useState(false);
+    const [finishError, setFinishError] = useState(null);
+
+    const fetchRecipe = useCallback(async () => {
+        if (!id) return;
+        setLoading(true);
+        setError(null);
+        try {
+            const data = await productionApi.packingRecipes.getById(id);
+            setRecipe(data);
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to load recipe'));
+        } finally {
+            setLoading(false);
+        }
+    }, [id]);
+
+    useEffect(() => {
+        fetchRecipe();
+    }, [fetchRecipe]);
+
+    const issuePiece = async (payload) => {
+        setIssuingPiece(true);
+        setIssuePieceError(null);
+        try {
+            await productionApi.packingRecipes.issuePiece(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setIssuePieceError(extractErrorMessage(err, 'Failed to issue piece'));
+            throw err;
+        } finally {
+            setIssuingPiece(false);
+        }
+    };
+
+    const updateIssuedPiece = async (payload) => {
+        setUpdatingPiece(true);
+        setUpdatePieceError(null);
+        try {
+            await productionApi.packingRecipes.updateIssuedPiece(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setUpdatePieceError(extractErrorMessage(err, 'Failed to update issued piece'));
+            throw err;
+        } finally {
+            setUpdatingPiece(false);
+        }
+    };
+
+    const issueMaterial = async (payload) => {
+        setIssuingMaterial(true);
+        setIssueMaterialError(null);
+        try {
+            await productionApi.packingRecipes.issueMaterial(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setIssueMaterialError(extractErrorMessage(err, 'Failed to issue material'));
+            throw err;
+        } finally {
+            setIssuingMaterial(false);
+        }
+    };
+
+    const updateIssuedMaterial = async (payload) => {
+        setUpdatingMaterial(true);
+        setUpdateMaterialError(null);
+        try {
+            await productionApi.packingRecipes.updateIssuedMaterial(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setUpdateMaterialError(extractErrorMessage(err, 'Failed to update issued material'));
+            throw err;
+        } finally {
+            setUpdatingMaterial(false);
+        }
+    };
+
+    const updateDescription = async (description) => {
+        setUpdatingDescription(true);
+        setUpdateDescriptionError(null);
+        try {
+            await productionApi.packingRecipes.updateDescription(id, { description });
+            await fetchRecipe();
+        } catch (err) {
+            setUpdateDescriptionError(extractErrorMessage(err, 'Failed to update description'));
+            throw err;
+        } finally {
+            setUpdatingDescription(false);
+        }
+    };
+
+    const finish = async (shelfAllocations) => {
+        setFinishing(true);
+        setFinishError(null);
+        try {
+            await productionApi.packingRecipes.finish(id, { shelf_allocations: shelfAllocations });
+            await fetchRecipe();
+        } catch (err) {
+            setFinishError(extractErrorMessage(err, 'Failed to finish recipe'));
+            throw err;
+        } finally {
+            setFinishing(false);
+        }
+    };
+
+    return {
+        recipe, loading, error, refetch: fetchRecipe,
+        issuePiece, issuingPiece, issuePieceError,
+        updateIssuedPiece, updatingPiece, updatePieceError,
+        issueMaterial, issuingMaterial, issueMaterialError,
+        updateIssuedMaterial, updatingMaterial, updateMaterialError,
+        updateDescription, updatingDescription, updateDescriptionError,
+        finish, finishing, finishError,
+    };
+};
+
 // WIP Products — read-only paginated list.
 export const useWipProducts = (initialFilters = {}) => {
     const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
@@ -326,5 +497,14 @@ export const useWipProducts = (initialFilters = {}) => {
 export const useWipInventory = (initialFilters = {}) => {
     const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
         usePaginatedList((params) => productionApi.wipInventory.getAll(params), initialFilters);
+    return { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch };
+};
+
+// FG Inventory — read-only paginated list, mirrors useWipInventory. Powers
+// the standalone Finished Goods page; AllInventoryPage's finished_goods tab
+// goes through useCombinedInventory (useInventory.js) instead.
+export const useFgInventory = (initialFilters = {}) => {
+    const { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch } =
+        usePaginatedList((params) => productionApi.fgInventory.getAll(params), initialFilters);
     return { data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch };
 };

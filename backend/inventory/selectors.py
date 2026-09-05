@@ -5,7 +5,8 @@ from backend.search import search_q
 from production.utils import WIP_PRODUCT_SELECT_RELATED
 
 from .models import (
-    LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow, ShelfStock,
+    LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgShelfStock,
+    Inventory, InventoryStatsFlow, ShelfStock,
     WipInventory, WipInventoryStatsFlow, WipShelfStock,
 )
 
@@ -73,21 +74,28 @@ def get_wip_inventory_stats() -> WipInventoryStatsFlow:
     return WipInventoryStatsFlow.get_instance()
 
 
+def get_fg_inventory_stats() -> FgInventoryStatsFlow:
+    """O(1) FG inventory stats — FG-side twin of get_inventory_stats."""
+    return FgInventoryStatsFlow.get_instance()
+
+
 def get_combined_inventory_stats() -> dict:
     """
-    O(1) stats for the All Inventory page header — just two singleton
-    reads added together, never a live count/sum. Both source singletons
-    are themselves O(1) (see get_inventory_stats/get_wip_inventory_stats),
-    so this stays O(1) regardless of how many products exist.
+    O(1) stats for the All Inventory page header — three singleton reads
+    added together, never a live count/sum. Every source singleton is
+    itself O(1) (see get_inventory_stats/get_wip_inventory_stats/
+    get_fg_inventory_stats), so this stays O(1) regardless of how many
+    products exist.
     """
     rm = get_inventory_stats()
     wip = get_wip_inventory_stats()
+    fg = get_fg_inventory_stats()
     return {
-        "total_products"     : rm.total_products + wip.total_products,
-        "total_stock"        : rm.total_stock + wip.total_stock,
-        "low_stock_count"    : rm.low_stock_count + wip.low_stock_count,
-        "out_of_stock_count" : rm.out_of_stock_count + wip.out_of_stock_count,
-        "last_updated_at"    : max(rm.last_updated_at, wip.last_updated_at),
+        "total_products"     : rm.total_products + wip.total_products + fg.total_products,
+        "total_stock"        : rm.total_stock + wip.total_stock + fg.total_stock,
+        "low_stock_count"    : rm.low_stock_count + wip.low_stock_count + fg.low_stock_count,
+        "out_of_stock_count" : rm.out_of_stock_count + wip.out_of_stock_count + fg.out_of_stock_count,
+        "last_updated_at"    : max(rm.last_updated_at, wip.last_updated_at, fg.last_updated_at),
     }
 
 
@@ -246,14 +254,82 @@ def get_combined_inventory_rows(*, search: str = None, type_filter: str = None, 
                 "product_id": inv.product_id,
                 "type": "wip_piece" if inv.product.stage == "cutting" else "wip_core",
                 "name": inv.product.name,
-                "code": None,
+                "code": inv.product.code,
                 "category": "WIP",
+                "quantity": inv.quantity,
+                "last_updated_at": inv.last_updated_at,
+            })
+
+    if type_filter in (None, "finished_goods"):
+        if stock_view == "low":
+            fg_qs = get_low_stock_fg_inventory(search=search)
+        elif stock_view == "out":
+            fg_qs = get_out_of_stock_fg_inventory(search=search)
+        else:
+            fg_qs = get_all_fg_inventory(search=search)
+        for inv in fg_qs:
+            rows.append({
+                "id": f"fg-{inv.product_id}",
+                "product_id": inv.product_id,
+                "type": "finished_goods",
+                "name": inv.product.name,
+                "code": inv.product.code,
+                "category": "Finished Goods",
                 "quantity": inv.quantity,
                 "last_updated_at": inv.last_updated_at,
             })
 
     rows.sort(key=lambda r: r["name"])
     return rows
+
+
+# ---------------------------------------------------------------------------
+# FG Inventory / Shelf Stock — mirrors the WIP section above exactly, pointed
+# at the FG models. production.FgProduct (the catalog) stays in production;
+# these selectors just read the tracking tables here.
+# ---------------------------------------------------------------------------
+
+def get_all_fg_inventory(*, search: str = None) -> QuerySet:
+    qs = FgInventory.objects.select_related(
+        "product", "product__binding", "product__yard", "product__length_mm",
+    ).filter(product__is_deleted=False)
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "product__name"))
+    return qs
+
+
+def get_low_stock_fg_inventory(*, search: str = None) -> QuerySet:
+    """Breakdown behind the "Low Stock" card for FG — FG-side twin of get_low_stock_inventory."""
+    return get_all_fg_inventory(search=search).filter(quantity__gt=0, quantity__lte=LOW_STOCK_THRESHOLD)
+
+
+def get_out_of_stock_fg_inventory(*, search: str = None) -> QuerySet:
+    """Breakdown behind the "Out of Stock" card for FG — FG-side twin of get_out_of_stock_inventory."""
+    return get_all_fg_inventory(search=search).filter(quantity__lte=0)
+
+
+def get_fg_shelf_stock_rows(shelf_id: int, *, search: str = None) -> QuerySet:
+    """FG products + quantities currently on one shelf — mirrors get_wip_shelf_stock_rows."""
+    qs = FgShelfStock.objects.select_related("product").filter(
+        shelf_id=shelf_id, quantity__gt=0, product__is_deleted=False,
+    )
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "product__name"))
+    return qs.order_by("product__name")
+
+
+def get_candidate_shelves_for_fg_product(fg_product_id: int, *, search: str = None):
+    """FG-equivalent of get_candidate_shelves_for_wip_product above, pointed at Shelf's "fg_stock_rows" related_name."""
+    from purchases.models import Shelf
+
+    qs = Shelf.objects.filter(
+        is_deleted=False, fg_stock_rows__product_id=fg_product_id, fg_stock_rows__quantity__gt=0,
+    )
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "name"))
+    return qs.annotate(
+        available_quantity=Sum("fg_stock_rows__quantity")
+    ).order_by("name")
 
 
 def get_candidate_shelves_for_wip_product(wip_product_id: int, *, search: str = None):

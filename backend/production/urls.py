@@ -3,15 +3,24 @@ from django.urls import path
 from .views import (
     AddBreakdownItemView,
     AddCuttingBreakdownItemView,
+    CandidateShelvesForFgProductListView,
     CandidateShelvesForWipProductListView,
     CuttingRecipeListCreateView,
     CuttingRecipeRetrieveView,
+    FgInventoryListView,
+    FgShelfStockListView,
     FinishCuttingRecipeView,
+    FinishPackingRecipeView,
     FinishRecipeView,
+    IssuableCuttingPieceListView,
     IssuableProductListView,
     IssuableWipCoreListView,
     IssueCuttingMaterialView,
     IssueMaterialView,
+    IssuePackingMaterialView,
+    IssuePackingPieceView,
+    PackingRecipeListCreateView,
+    PackingRecipeRetrieveView,
     RecipeListCreateView,
     RecipeRetrieveView,
     RewoundCoreBindingListView,
@@ -23,6 +32,9 @@ from .views import (
     UpdateCuttingIssuedMaterialView,
     UpdateCuttingRecipeDescriptionView,
     UpdateIssuedMaterialView,
+    UpdatePackingIssuedMaterialView,
+    UpdatePackingIssuedPieceView,
+    UpdatePackingRecipeDescriptionView,
     UpdateRecipeDescriptionView,
     WipInventoryListView,
     WipProductListView,
@@ -73,4 +85,26 @@ urlpatterns = [
     path("cutting-recipes/<int:pk>/issued-material/", UpdateCuttingIssuedMaterialView.as_view(),    name="cutting-recipe-update-issued-material"),
     path("cutting-recipes/<int:pk>/breakdown-items/", AddCuttingBreakdownItemView.as_view(),        name="cutting-recipe-add-breakdown-item"),
     path("cutting-recipes/<int:pk>/finish/",           FinishCuttingRecipeView.as_view(),           name="cutting-recipe-finish"),
+
+    # FG Product / Inventory — read-only
+    path("fg-inventory/", FgInventoryListView.as_view(), name="fg-inventory-list"),
+
+    # FG shelf stock — Shelf detail page's FG tab
+    path("shelves/<int:pk>/fg-stock/", FgShelfStockListView.as_view(), name="shelf-fg-stock-list"),
+
+    # Cut Pieces issuable into a Packing recipe
+    path("issuable-cutting-pieces/", IssuableCuttingPieceListView.as_view(), name="issuable-cutting-piece-list"),
+
+    # Shelves currently holding a given FG product (consumption-side picker)
+    path("fg-shelves/candidates/", CandidateShelvesForFgProductListView.as_view(), name="fg-shelf-candidates"),
+
+    # Recipes (Packing)
+    path("packing-recipes/",     PackingRecipeListCreateView.as_view(), name="packing-recipe-list-create"),
+    path("packing-recipes/<int:pk>/", PackingRecipeRetrieveView.as_view(), name="packing-recipe-detail"),
+    path("packing-recipes/<int:pk>/description/",     UpdatePackingRecipeDescriptionView.as_view(), name="packing-recipe-update-description"),
+    path("packing-recipes/<int:pk>/issue-piece/",     IssuePackingPieceView.as_view(),               name="packing-recipe-issue-piece"),
+    path("packing-recipes/<int:pk>/issued-piece/",    UpdatePackingIssuedPieceView.as_view(),         name="packing-recipe-update-issued-piece"),
+    path("packing-recipes/<int:pk>/issue-material/",  IssuePackingMaterialView.as_view(),             name="packing-recipe-issue-material"),
+    path("packing-recipes/<int:pk>/issued-material/", UpdatePackingIssuedMaterialView.as_view(),      name="packing-recipe-update-issued-material"),
+    path("packing-recipes/<int:pk>/finish/",           FinishPackingRecipeView.as_view(),             name="packing-recipe-finish"),
 ]

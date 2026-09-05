@@ -6,9 +6,21 @@ discussion on not repeating purchases/billing's file-growth mistake).
 """
 from decimal import Decimal
 
-from purchases.services import _validate_shelf_ids_exist
+from purchases.services import _validate_shelf_ids_exist, next_reference
 
 from ..models import Recipe
+
+
+def next_wip_product_code() -> str:
+    """Sequential code for a new WIP product: WIP-2026-0001. Same shared counter mechanism as recipe_number."""
+    from ..models import WipProduct
+    return next_reference(counter_key="WIP", prefix_label="WIP", model=WipProduct, field="code")
+
+
+def next_fg_product_code() -> str:
+    """Sequential code for a new FG product: FG-2026-0001."""
+    from ..models import FgProduct
+    return next_reference(counter_key="FG", prefix_label="FG", model=FgProduct, field="code")
 
 
 def _fmt(value: Decimal) -> str:

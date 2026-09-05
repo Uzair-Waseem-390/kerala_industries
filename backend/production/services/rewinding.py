@@ -23,7 +23,7 @@ from ..models import (
 from ..selectors import get_issued_material
 from ..utils import compute_wip_variant_key, inches_to_mm
 from ._shared import (
-    _fmt, draw_fifo, get_locked_recipe, normalize_shelf_allocations,
+    _fmt, draw_fifo, get_locked_recipe, next_wip_product_code, normalize_shelf_allocations,
     require_under_processing, return_fifo,
 )
 
@@ -317,7 +317,8 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
         try:
             with transaction.atomic():
                 wip_product = WipProduct.objects.create(
-                    name=name, family=wip_family, binding=binding, yard=yard_lookup, length_mm=length_lookup,
+                    name=name, code=next_wip_product_code(), family=wip_family, binding=binding,
+                    yard=yard_lookup, length_mm=length_lookup,
                     stage=WipProduct.Stage.REWINDING, variant_key=variant_key, created_by=user, updated_by=user,
                 )
         except IntegrityError:

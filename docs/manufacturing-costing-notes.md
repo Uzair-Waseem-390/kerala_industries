@@ -120,3 +120,25 @@ fully unbuilt.
   A merged "All Inventory" endpoint (`GET /inventory/all/`) now exists,
   Python-merging RM + WIP rows into one flat list (genuinely bounded
   snapshot, not a growing-history merge — see architecture.md).
+- Auto-generated unique product codes (2026-09): RM already had this
+  (`PRO-<year>-####` on auto-created variants). `WipProduct.code` added
+  (`WIP-<year>-####`, two-step migration + `backfill_wip_product_codes` for
+  pre-existing rows). `FgProduct.code` (`FG-<year>-####`) built in from day
+  one. All three share the same `next_reference`/`DocumentCounter`
+  mechanism recipe numbers already use — no new ad-hoc numbering scheme.
+- Packing stage built (2026-09) — Finished Goods now exists. `production.FgProduct`
+  deliberately reuses WIP's own `RewoundCoreBinding`/`Yard`/`LengthMm` FKs
+  (not a fresh FG-scoped lookup set) because Packing doesn't transform the
+  product — a packed piece is the *same* identity as its source WIP piece
+  ("no name change"), so get-or-create by that identity is what makes FG
+  reuse work at all. `FgInventory`/`FgShelfStock`/`FgShelfStockMovement`
+  live in `inventory` (same RM/WIP split), `FgInventoryStatsFlow` mirrors
+  the other two. `Recipe.RecipeType.PACKING`: two independent inputs (a Cut
+  Piece + an RM Packing Material, no shared model since they point at
+  different source tables), no breakdown stage (output qty == issued piece
+  qty, 1:1) — piece's own already-locked FIFO cost + packing cost spread
+  flat per piece = FG unit cost. Answers one of the open questions above:
+  Cut Pieces are issued by piece count only, never by length — length is
+  already fixed per distinct WipProduct row (baked into the product
+  identity itself, e.g. "binding 90 100 yard 24"), not a separate
+  dimension at Packing time.

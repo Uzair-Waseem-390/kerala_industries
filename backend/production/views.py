@@ -4,26 +4,32 @@ from rest_framework.views import APIView
 
 from .permissions import IsAdminOrSuperuser
 from .selectors import (
-    get_all_cutting_recipes, get_all_recipes, get_all_rewound_core_bindings,
-    get_all_rewound_core_length_mms, get_all_rewound_core_yards, get_all_wip_inventory,
-    get_all_wip_products, get_candidate_shelves_for_wip_product, get_cutting_recipe_by_id,
-    get_issuable_products, get_issuable_wip_cores, get_recipe_by_id, get_rewound_core_binding_by_id,
+    get_all_cutting_recipes, get_all_fg_inventory, get_all_packing_recipes, get_all_recipes,
+    get_all_rewound_core_bindings, get_all_rewound_core_length_mms, get_all_rewound_core_yards,
+    get_all_wip_inventory, get_all_wip_products, get_candidate_shelves_for_fg_product,
+    get_candidate_shelves_for_wip_product, get_cutting_recipe_by_id, get_fg_shelf_stock_rows,
+    get_issuable_cutting_pieces, get_issuable_products, get_issuable_wip_cores,
+    get_packing_recipe_by_id, get_recipe_by_id, get_rewound_core_binding_by_id,
     get_rewound_core_length_mm_by_id, get_rewound_core_yard_by_id, get_wip_product_by_id,
     get_wip_shelf_stock_rows,
 )
 from .serializers import (
     AddBreakdownItemSerializer, AddCuttingBreakdownItemSerializer, CandidateShelfSerializer,
-    CreateCuttingRecipeSerializer, CuttingRecipeReadSerializer, IssuableProductSerializer,
-    IssuableWipCoreSerializer, IssueCuttingMaterialSerializer, IssueMaterialSerializer,
-    RecipeCreateSerializer, RecipeReadSerializer, RewoundCoreBindingReadSerializer,
-    RewoundCoreLengthMmReadSerializer, RewoundCoreYardReadSerializer, UpdateIssuedMaterialSerializer,
-    UpdateRecipeDescriptionSerializer, WipInventoryReadSerializer, WipProductReadSerializer,
-    WipShelfStockReadSerializer,
+    CreateCuttingRecipeSerializer, CreatePackingRecipeSerializer, CuttingRecipeReadSerializer,
+    FgInventoryReadSerializer, FgShelfStockReadSerializer, FinishPackingRecipeSerializer,
+    IssuableCuttingPieceSerializer, IssuableProductSerializer, IssuableWipCoreSerializer,
+    IssueCuttingMaterialSerializer, IssueMaterialSerializer, IssuePackingMaterialSerializer,
+    IssuePackingPieceSerializer, PackingRecipeReadSerializer, RecipeCreateSerializer,
+    RecipeReadSerializer, RewoundCoreBindingReadSerializer, RewoundCoreLengthMmReadSerializer,
+    RewoundCoreYardReadSerializer, UpdateIssuedMaterialSerializer, UpdateRecipeDescriptionSerializer,
+    WipInventoryReadSerializer, WipProductReadSerializer, WipShelfStockReadSerializer,
 )
 from .services import (
-    add_breakdown_item, add_cutting_breakdown_item, create_cutting_recipe, create_recipe,
-    finish_cutting_recipe, finish_recipe, issue_cutting_material, issue_material,
-    update_cutting_issued_material, update_issued_material, update_recipe_description,
+    add_breakdown_item, add_cutting_breakdown_item, create_cutting_recipe, create_packing_recipe,
+    create_recipe, finish_cutting_recipe, finish_packing_recipe, finish_recipe,
+    issue_cutting_material, issue_material, issue_packing_material, issue_packing_piece,
+    update_cutting_issued_material, update_issued_material, update_packing_issued_material,
+    update_packing_issued_piece, update_recipe_description,
 )
 
 
@@ -136,9 +142,9 @@ class IssuableProductListView(generics.ListAPIView):
 
     def get_queryset(self):
         kind = self.request.query_params.get("kind")
-        if kind not in ("jumbo", "cores"):
+        if kind not in ("jumbo", "cores", "packing"):
             from rest_framework.exceptions import ValidationError
-            raise ValidationError({"kind": "kind must be 'jumbo' or 'cores'."})
+            raise ValidationError({"kind": "kind must be 'jumbo', 'cores', or 'packing'."})
         return get_issuable_products(kind=kind, search=self.request.query_params.get("search"))
 
 
@@ -365,3 +371,165 @@ class FinishCuttingRecipeView(APIView):
     def post(self, request, pk):
         finish_cutting_recipe(recipe_id=pk, user=request.user)
         return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# FG Product / Inventory - read-only
+# ---------------------------------------------------------------------------
+
+class IssuableCuttingPieceListView(generics.ListAPIView):
+    """GET /production/issuable-cutting-pieces/?search=... - Cut Pieces only, for Packing issuance."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = IssuableCuttingPieceSerializer
+
+    def get_queryset(self):
+        return get_issuable_cutting_pieces(search=self.request.query_params.get("search"))
+
+
+class FgInventoryListView(generics.ListAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = FgInventoryReadSerializer
+
+    def get_queryset(self):
+        return get_all_fg_inventory(search=self.request.query_params.get("search"))
+
+
+class FgShelfStockListView(generics.ListAPIView):
+    """GET /production/shelves/<pk>/fg-stock/ - FG products + quantities on one shelf."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = FgShelfStockReadSerializer
+
+    def get_queryset(self):
+        from purchases.selectors import get_shelf_by_id
+        get_shelf_by_id(self.kwargs["pk"])  # 404s if the shelf doesn't exist
+        return get_fg_shelf_stock_rows(self.kwargs["pk"], search=self.request.query_params.get("search"))
+
+
+class CandidateShelvesForFgProductListView(generics.ListAPIView):
+    """GET /production/fg-shelves/candidates/?fg_product_id=<id>&search=... - mirrors CandidateShelvesForWipProductListView."""
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = CandidateShelfSerializer
+
+    def get_queryset(self):
+        from rest_framework.exceptions import ValidationError
+        fg_product_id = self.request.query_params.get("fg_product_id")
+        if not fg_product_id:
+            raise ValidationError({"fg_product_id": "This query parameter is required."})
+        return get_candidate_shelves_for_fg_product(
+            int(fg_product_id), search=self.request.query_params.get("search"),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Recipe (Packing) - parallel endpoint set to Rewinding/Cutting's, pointed at
+# the Packing service/selector functions and its own read serializer.
+# ---------------------------------------------------------------------------
+
+class PackingRecipeListCreateView(generics.ListCreateAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+
+    def get_serializer_class(self):
+        return CreatePackingRecipeSerializer if self.request.method == "POST" else PackingRecipeReadSerializer
+
+    def get_queryset(self):
+        p = self.request.query_params
+        return get_all_packing_recipes(status=p.get("status"), search=p.get("search"))
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        recipe = create_packing_recipe(name=d["name"], description=d.get("description", ""), user=request.user)
+        return Response(PackingRecipeReadSerializer(recipe).data, status=status.HTTP_201_CREATED)
+
+
+class PackingRecipeRetrieveView(generics.RetrieveAPIView):
+    permission_classes = [IsAdminOrSuperuser]
+    serializer_class    = PackingRecipeReadSerializer
+
+    def get_object(self):
+        return get_packing_recipe_by_id(self.kwargs["pk"])
+
+
+class UpdatePackingRecipeDescriptionView(APIView):
+    """PATCH /production/packing-recipes/<pk>/description/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateRecipeDescriptionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        update_recipe_description(recipe_id=pk, description=serializer.validated_data["description"], user=request.user)
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class IssuePackingPieceView(APIView):
+    """POST /production/packing-recipes/<pk>/issue-piece/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        serializer = IssuePackingPieceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        issue_packing_piece(
+            recipe_id=pk, wip_product_id=d["wip_product_id"], quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_201_CREATED)
+
+
+class UpdatePackingIssuedPieceView(APIView):
+    """PATCH /production/packing-recipes/<pk>/issued-piece/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateIssuedMaterialSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        update_packing_issued_piece(
+            recipe_id=pk, new_quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class IssuePackingMaterialView(APIView):
+    """POST /production/packing-recipes/<pk>/issue-material/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        serializer = IssuePackingMaterialSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        issue_packing_material(
+            recipe_id=pk, product_id=d["product_id"], quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_201_CREATED)
+
+
+class UpdatePackingIssuedMaterialView(APIView):
+    """PATCH /production/packing-recipes/<pk>/issued-material/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateIssuedMaterialSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        update_packing_issued_material(
+            recipe_id=pk, new_quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class FinishPackingRecipeView(APIView):
+    """POST /production/packing-recipes/<pk>/finish/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        serializer = FinishPackingRecipeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        finish_packing_recipe(
+            recipe_id=pk, shelf_allocations=serializer.validated_data["shelf_allocations"], user=request.user,
+        )
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)

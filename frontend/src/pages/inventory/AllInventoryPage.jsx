@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Boxes, PackageCheck } from 'lucide-react';
+import { Boxes } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
@@ -20,9 +20,6 @@ import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
 import Tabs from '../../components/ui/Tabs';
 
-// 'finished_goods' isn't a real backend type filter — Finished Goods has no
-// inventory model yet (see docs/manufacturing-costing-notes.md). Selecting
-// it shows a coming-soon empty state client-side instead of hitting the API.
 const TYPE_TABS = [
     { value: 'all', label: 'All' },
     { value: 'raw_material', label: 'Raw Material' },
@@ -35,13 +32,14 @@ const TYPE_BADGE = {
     raw_material: { variant: 'default', label: 'Raw Material' },
     wip_core: { variant: 'warning', label: 'WIP — Core' },
     wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
 };
 
 // Every product's inventory in one place — Raw Material, WIP (cores +
-// pieces), and (once built) Finished Goods. Client asked for one page that
-// "covers everything" instead of separate RM/WIP screens, with the same
-// stat cards, manage-inventory buttons, and click-through product detail
-// the RM-only Inventory page already has.
+// pieces), and Finished Goods. Client asked for one page that "covers
+// everything" instead of separate RM/WIP/FG screens, with the same stat
+// cards, manage-inventory buttons, and click-through product detail the
+// RM-only Inventory page already has.
 const AllInventoryPage = () => {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -56,8 +54,7 @@ const AllInventoryPage = () => {
     // page exactly, now covering WIP too (see backend stock_view param).
     const [stockView, setStockView] = useState('all');
 
-    const isFinishedGoodsView = activeType === 'finished_goods';
-    const typeFilter = isFinishedGoodsView || activeType === 'all' ? undefined : activeType;
+    const typeFilter = activeType === 'all' ? undefined : activeType;
 
     const {
         data: rows, meta, page, setPage, loading, initialLoading, error, refetch,
@@ -112,6 +109,9 @@ const AllInventoryPage = () => {
         try {
             if (row.type === 'raw_material') {
                 const shelves = await purchasesApi.shelves.getCandidates(row.product_id);
+                setShelfBreakdown(shelves?.results || shelves || []);
+            } else if (row.type === 'finished_goods') {
+                const shelves = await productionApi.fgShelfCandidates.getAll(row.product_id);
                 setShelfBreakdown(shelves?.results || shelves || []);
             } else {
                 const shelves = await productionApi.wipShelfCandidates.getAll(row.product_id);
@@ -308,13 +308,7 @@ const AllInventoryPage = () => {
             />
 
             <Card className="p-0 overflow-hidden" hover={false}>
-                {isFinishedGoodsView ? (
-                    <EmptyState
-                        icon={<PackageCheck className="w-8 h-8 text-neutral-400" />}
-                        title="Coming soon"
-                        description="Finished Goods tracking arrives once the Packing stage (WIP → Finished Goods) is built."
-                    />
-                ) : rows.length === 0 ? (
+                {rows.length === 0 ? (
                     <EmptyState
                         icon={<Boxes className="w-8 h-8 text-neutral-400" />}
                         title="No inventory found"
@@ -327,7 +321,7 @@ const AllInventoryPage = () => {
                 )}
             </Card>
 
-            {!isFinishedGoodsView && meta.totalPages > 1 && (
+            {meta.totalPages > 1 && (
                 <Pagination
                     currentPage={meta.currentPage}
                     totalPages={meta.totalPages}

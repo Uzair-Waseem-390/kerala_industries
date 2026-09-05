@@ -46,3 +46,22 @@ WIP_PRODUCT_SELECT_RELATED = (
     "length_mm", "length_mm__created_by", "length_mm__updated_by",
     "created_by", "updated_by",
 )
+
+# Same reasoning as WIP_PRODUCT_SELECT_RELATED, pointed at FgProduct — no
+# "family" entry since FgProduct has no family FK (unlike WipProduct).
+FG_PRODUCT_SELECT_RELATED = (
+    "binding", "binding__created_by", "binding__updated_by",
+    "yard", "yard__created_by", "yard__updated_by",
+    "length_mm", "length_mm__created_by", "length_mm__updated_by",
+    "created_by", "updated_by",
+)
+
+
+def compute_fg_variant_key(*, binding_id: int, yard_id: int, length_mm_id: int) -> str:
+    """
+    Deterministic fingerprint for an FgProduct — same mechanism as
+    compute_wip_variant_key, minus `stage` (FG has no substages). Packing
+    the same piece identity again (same binding/yard/length_mm) reuses this
+    row instead of creating a duplicate — "no name change" in practice.
+    """
+    return f"binding={binding_id}|yard={yard_id}|length_mm={length_mm_id}"

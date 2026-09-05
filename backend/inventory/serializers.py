@@ -39,7 +39,7 @@ class CombinedInventoryRowSerializer(serializers.Serializer):
     # numeric ids, and this is the row's React list key on the frontend.
     id               = serializers.CharField()
     product_id       = serializers.IntegerField()
-    type             = serializers.ChoiceField(choices=["raw_material", "wip_core", "wip_piece"])
+    type             = serializers.ChoiceField(choices=["raw_material", "wip_core", "wip_piece", "finished_goods"])
     name             = serializers.CharField()
     code             = serializers.CharField(allow_null=True)
     category         = serializers.CharField(allow_null=True)
