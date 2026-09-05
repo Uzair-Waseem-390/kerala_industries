@@ -22,3 +22,27 @@ def compute_wip_variant_key(*, binding_id: int, yard_id: int, length_mm_id: int,
     different things.
     """
     return f"binding={binding_id}|yard={yard_id}|length_mm={length_mm_id}|stage={stage}"
+
+
+# select_related path list for WipProduct — used wherever a queryset feeds
+# WipProductReadSerializer (directly, or nested under a breakdown item),
+# by both production's own selectors and inventory.selectors (which needs
+# it for WIP inventory listings but must not import through
+# production.selectors, to avoid a circular import with that package's
+# __init__.py re-exports — hence this lives in the leaf utils module, not
+# selectors/_shared.py).
+#
+# WipProductReadSerializer nests RewoundCoreBindingReadSerializer/
+# YardReadSerializer/LengthMmReadSerializer, each of which extends
+# AuditReadMixin (created_by/updated_by StringRelatedFields) — found via a
+# query-count check while verifying Cutting (2026-09): selecting only
+# "binding"/"yard"/"length_mm" themselves covers the object, but not THEIR
+# own created_by/updated_by, so every WipProduct row serialized fired up to
+# 6 extra queries (one per nested attribute's created_by/updated_by).
+WIP_PRODUCT_SELECT_RELATED = (
+    "family",
+    "binding", "binding__created_by", "binding__updated_by",
+    "yard", "yard__created_by", "yard__updated_by",
+    "length_mm", "length_mm__created_by", "length_mm__updated_by",
+    "created_by", "updated_by",
+)

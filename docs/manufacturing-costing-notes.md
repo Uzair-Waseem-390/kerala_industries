@@ -108,3 +108,15 @@ fully unbuilt.
 - `purchases.Product` frozen to exactly 4 fixed rows (Jumbo, Cores,
   Packing, Cartons — codes `PRO-1000`–`PRO-1003`), seeded by
   `seed_fixed_products` management command. No create/edit/delete API.
+- Production app built: `Recipe` (shared header, `recipe_type` = rewinding/
+  cutting), `WipProduct` (+ `RewoundCoreBinding`/`Yard`/`LengthMm` attribute
+  lookups) stay in `production`. `WipInventory`/`WipShelfStock`/
+  `WipShelfStockMovement` — the WIP *tracking* tables — were moved out to
+  the `inventory` app (2026-09, mechanical state-only move, same pattern as
+  the earlier purchases→inventory extraction; `production/wip_inventory.py`
+  deleted, its functions now live in `inventory/services.py` next to
+  `sync_inventory`/`apply_shelf_allocations`). Same split as RM: the catalog
+  stays with its producing app, the inventory tracking lives in `inventory`.
+  A merged "All Inventory" endpoint (`GET /inventory/all/`) now exists,
+  Python-merging RM + WIP rows into one flat list (genuinely bounded
+  snapshot, not a growing-history merge — see architecture.md).

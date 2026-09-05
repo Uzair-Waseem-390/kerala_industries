@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from inventory.models import WipInventory, WipShelfStock
 from purchases.serializers import ShelfAllocationInputSerializer
 
 from .models import (
@@ -9,7 +10,7 @@ from .models import (
     CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, RecipeBreakdownItem,
     RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial, RecipeMaterialConsumption,
     RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
-    WipInventory, WipProduct, WipShelfStock,
+    WipProduct,
 )
 
 

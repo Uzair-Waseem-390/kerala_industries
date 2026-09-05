@@ -3,8 +3,7 @@ from django.contrib import admin
 from .models import (
     CuttingBreakdownItem, CuttingIssuedMaterial, CuttingMaterialConsumption,
     Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeMaterialConsumption,
-    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
-    WipInventory, WipProduct, WipShelfStock, WipShelfStockMovement,
+    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
 )
 
 
@@ -60,28 +59,6 @@ class WipProductAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
     search_fields       = ["name"]
     list_select_related = ("family",)
     readonly_fields     = AuditAdminMixin.readonly_fields + ("variant_key",)
-
-
-@admin.register(WipInventory)
-class WipInventoryAdmin(admin.ModelAdmin):
-    list_display        = ["product", "quantity", "last_updated_at"]
-    search_fields       = ["product__name"]
-    list_select_related = ("product",)
-
-
-@admin.register(WipShelfStock)
-class WipShelfStockAdmin(admin.ModelAdmin):
-    list_display        = ["shelf", "product", "quantity", "last_updated_at"]
-    search_fields       = ["shelf__name", "product__name"]
-    list_select_related = ("shelf", "product")
-
-
-@admin.register(WipShelfStockMovement)
-class WipShelfStockMovementAdmin(admin.ModelAdmin):
-    list_display        = ["shelf", "product", "delta", "reason", "reference", "created_at"]
-    list_filter         = ["reason"]
-    search_fields       = ["shelf__name", "product__name", "reference"]
-    list_select_related = ("shelf", "product")
 
 
 class RecipeIssuedMaterialInline(admin.TabularInline):

@@ -129,70 +129,12 @@ class WipProduct(AuditMixin):
         return self.name
 
 
-class WipInventory(models.Model):
-    product         = models.OneToOneField(WipProduct, on_delete=models.PROTECT, related_name="inventory")
-    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
-    last_updated_at = models.DateTimeField(auto_now=True)
-    last_updated_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
-        related_name="wip_inventory_updates",
-    )
-
-    class Meta:
-        verbose_name        = "WIP Inventory"
-        verbose_name_plural = "WIP Inventories"
-        ordering            = ["product__name"]
-
-    def __str__(self):
-        return f"{self.product.name} — qty: {self.quantity}"
-
-
-class WipShelfStock(models.Model):
-    """
-    Live physical quantity of one WIP product on one shelf — same role as
-    inventory.ShelfStock plays for RM. Reuses purchases.Shelf (a physical
-    location is product-family-agnostic).
-    """
-    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_stock_rows")
-    product         = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="shelf_stock_rows")
-    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0)
-    last_updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name        = "WIP Shelf Stock"
-        verbose_name_plural = "WIP Shelf Stock"
-        unique_together     = [("shelf", "product")]
-
-    def __str__(self):
-        return f"{self.shelf.name} — {self.product.name}: {self.quantity}"
-
-
-class WipShelfStockMovement(models.Model):
-    """Append-only audit ledger for WipShelfStock changes — mirrors inventory.ShelfStockMovement."""
-
-    class Reason(models.TextChoices):
-        RECIPE_BREAKDOWN_PUTAWAY  = "recipe_breakdown_putaway",  "Recipe Breakdown Put-Away"
-        CUTTING_ISSUE_CONSUMPTION = "cutting_issue_consumption", "Cutting Issue Consumption"
-        CUTTING_BREAKDOWN_PUTAWAY = "cutting_breakdown_putaway", "Cutting Breakdown Put-Away"
-
-    shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_movements")
-    product    = models.ForeignKey(WipProduct, on_delete=models.PROTECT, related_name="shelf_movements")
-    delta      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Positive = added to shelf, negative = removed from shelf.")
-    reason     = models.CharField(max_length=30, choices=Reason.choices, db_index=True)
-    reference  = models.CharField(max_length=30, blank=True, default="", help_text="e.g. REC-2026-0001")
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
-        related_name="wip_shelf_stock_movements",
-    )
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        verbose_name        = "WIP Shelf Stock Movement"
-        verbose_name_plural = "WIP Shelf Stock Movements"
-        ordering            = ["-created_at"]
-
-    def __str__(self):
-        return f"{self.shelf.name} — {self.product.name}: {self.delta:+} ({self.reason})"
+# WipInventory / WipShelfStock / WipShelfStockMovement moved to the
+# inventory app (2026-09) — "operate everything WIP-inventory-related from
+# the inventory app" per project decision. See inventory/models.py; Meta.db_table
+# there is pinned to these same original table names, so this is a state-only
+# move (production/migrations/..._remove_wip_models_state_only.py), not a
+# real schema change. WipProduct (the catalog) stays here.
 
 
 # ---------------------------------------------------------------------------

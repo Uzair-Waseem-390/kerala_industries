@@ -4,16 +4,17 @@ from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
+from inventory.models import WipShelfStockMovement
+from inventory.services import apply_wip_shelf_allocations, sync_wip_inventory, validate_wip_shelf_consumption
 from purchases.services import _unique_constraint_guard, next_reference
 
 from ..models import (
     CuttingBreakdownItem, CuttingBreakdownItemShelfAllocation, CuttingIssuedMaterial,
     CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, RecipeBreakdownItem,
-    WipProduct, WipShelfStockMovement,
+    WipProduct,
 )
 from ..selectors import get_available_wip_batches_for_fifo, get_cutting_issued_material
 from ..utils import compute_wip_variant_key
-from ..wip_inventory import apply_wip_shelf_allocations, sync_wip_inventory, validate_wip_shelf_consumption
 from ._shared import (
     _fmt, draw_fifo, get_locked_recipe, normalize_shelf_allocations,
     require_under_processing, return_fifo,

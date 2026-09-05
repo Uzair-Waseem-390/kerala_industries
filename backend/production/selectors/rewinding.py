@@ -6,9 +6,9 @@ from backend.search import search_q
 from ..models import (
     Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
     RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
-    RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,
+    RewoundCoreYard, WipProduct,
 )
-from ._shared import WIP_PRODUCT_SELECT_RELATED
+from ..utils import WIP_PRODUCT_SELECT_RELATED
 
 
 def _clean(value):
@@ -60,28 +60,9 @@ def get_wip_product_by_id(pk: int) -> WipProduct:
     return get_object_or_404(WipProduct.objects.select_related(*_WIP_PRODUCT_RELATED), pk=pk, is_deleted=False)
 
 
-def get_all_wip_inventory(*, search: str = None, stage: str = None) -> QuerySet:
-    qs = WipInventory.objects.select_related(*[f"product__{f}" for f in _WIP_PRODUCT_RELATED], "product")
-    if _clean(stage):
-        qs = qs.filter(product__stage=_clean(stage))
-    if _clean(search):
-        qs = qs.filter(search_q(_clean(search), "product__name"))
-    return qs
-
-
-def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None, stage: str = None) -> QuerySet:
-    """
-    WIP products + quantities currently on one shelf — powers the Shelf
-    detail page's WIP tab. Mirrors inventory.selectors.get_shelf_stock_rows
-    exactly, pointed at WipShelfStock. Only "product" (id/name) is read —
-    same minimal-select_related reasoning as the RM version.
-    """
-    qs = WipShelfStock.objects.select_related("product").filter(shelf_id=shelf_id, quantity__gt=0)
-    if _clean(stage):
-        qs = qs.filter(product__stage=_clean(stage))
-    if _clean(search):
-        qs = qs.filter(search_q(_clean(search), "product__name"))
-    return qs.order_by("product__name")
+# get_all_wip_inventory / get_wip_shelf_stock_rows moved to
+# inventory.selectors (2026-09), alongside the WipInventory/WipShelfStock
+# models themselves.
 
 
 # ---------------------------------------------------------------------------

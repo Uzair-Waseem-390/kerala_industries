@@ -268,6 +268,15 @@ const InventoryPage = () => {
             render: (value) => value?.name || 'N/A',
         },
         {
+            key: 'product',
+            label: 'Type',
+            render: (value) => (
+                <Badge variant={value?.stage === 'cutting' ? 'info' : 'default'}>
+                    {value?.stage === 'cutting' ? 'Piece' : 'Core'}
+                </Badge>
+            ),
+        },
+        {
             key: 'quantity',
             label: 'Quantity',
             render: (value) => {

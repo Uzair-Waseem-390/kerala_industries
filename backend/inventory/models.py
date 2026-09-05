@@ -159,6 +159,83 @@ class StockMovementFlow(models.Model):
         return instance
 
 
+# ---------------------------------------------------------------------------
+# WIP Inventory (mechanically relocated from production/models.py, 2026-09)
+#
+# Same pattern as the RM move above: Meta.db_table is pinned to the
+# ORIGINAL table name (production_<modelname>) so this is a pure Django
+# state relabel, not a real table rename — see the paired
+# SeparateDatabaseAndState migrations in this app and in production.
+# WipProduct itself (the WIP catalog: name, binding/yard/length_mm
+# attributes) stays in production, mirroring how purchases.Product (the RM
+# catalog) stays in purchases while the tracking tables live here.
+# ---------------------------------------------------------------------------
+
+class WipInventory(models.Model):
+    product         = models.OneToOneField("production.WipProduct", on_delete=models.PROTECT, related_name="inventory")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
+    last_updated_at = models.DateTimeField(auto_now=True)
+    last_updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="wip_inventory_updates",
+    )
+
+    class Meta:
+        db_table            = "production_wipinventory"
+        verbose_name        = "WIP Inventory"
+        verbose_name_plural = "WIP Inventories"
+        ordering            = ["product__name"]
+
+    def __str__(self):
+        return f"{self.product.name} — qty: {self.quantity}"
+
+
+class WipShelfStock(models.Model):
+    """Live physical quantity of one WIP product on one shelf — WIP-side twin of ShelfStock."""
+    shelf           = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_stock_rows")
+    product         = models.ForeignKey("production.WipProduct", on_delete=models.PROTECT, related_name="shelf_stock_rows")
+    quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    last_updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table            = "production_wipshelfstock"
+        verbose_name        = "WIP Shelf Stock"
+        verbose_name_plural = "WIP Shelf Stock"
+        unique_together     = [("shelf", "product")]
+
+    def __str__(self):
+        return f"{self.shelf.name} — {self.product.name}: {self.quantity}"
+
+
+class WipShelfStockMovement(models.Model):
+    """Append-only audit ledger for WipShelfStock changes — WIP-side twin of ShelfStockMovement."""
+
+    class Reason(models.TextChoices):
+        RECIPE_BREAKDOWN_PUTAWAY  = "recipe_breakdown_putaway",  "Recipe Breakdown Put-Away"
+        CUTTING_ISSUE_CONSUMPTION = "cutting_issue_consumption", "Cutting Issue Consumption"
+        CUTTING_BREAKDOWN_PUTAWAY = "cutting_breakdown_putaway", "Cutting Breakdown Put-Away"
+
+    shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="wip_movements")
+    product    = models.ForeignKey("production.WipProduct", on_delete=models.PROTECT, related_name="shelf_movements")
+    delta      = models.DecimalField(max_digits=14, decimal_places=4, help_text="Positive = added to shelf, negative = removed from shelf.")
+    reason     = models.CharField(max_length=30, choices=Reason.choices, db_index=True)
+    reference  = models.CharField(max_length=30, blank=True, default="", help_text="e.g. REC-2026-0001")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name="wip_shelf_stock_movements",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table            = "production_wipshelfstockmovement"
+        verbose_name        = "WIP Shelf Stock Movement"
+        verbose_name_plural = "WIP Shelf Stock Movements"
+        ordering            = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.shelf.name} — {self.product.name}: {self.delta:+} ({self.reason})"
+
+
 # Products with 0 < quantity <= LOW_STOCK_THRESHOLD count as "low stock";
 # quantity <= 0 counts as "out of stock". Single source of truth for the
 # stats singleton, the breakdown selectors, and the backfill command.

@@ -51,3 +51,17 @@ export const useShelfStock = (shelfId, searchTerm, family = 'rm', stage) => {
 
     return usePaginatedList(fetchStockPage, {}, 25, [shelfId, searchTerm, family, stage]);
 };
+
+// All Inventory — the merged RM+WIP list (one flat table, backend does the
+// merge — see inventory.selectors.get_combined_inventory_rows). `typeFilter`:
+// 'raw_material' | 'wip_core' | 'wip_piece' | undefined (all).
+export const useCombinedInventory = (searchTerm, typeFilter) => {
+    const fetchCombinedPage = (params) => {
+        const p = { ...params };
+        if (searchTerm) p.search = searchTerm;
+        if (typeFilter) p.type = typeFilter;
+        return inventoryApi.inventory.getAllCombined(p);
+    };
+
+    return usePaginatedList(fetchCombinedPage, {}, 25, [searchTerm, typeFilter]);
+};

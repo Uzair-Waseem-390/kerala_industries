@@ -2,13 +2,17 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from backend.paginations import StandardResultsSetPagination
+
 from .permissions import IsAdminOrSuperuserOrReadOnly
 from .selectors import (
-    get_all_inventory, get_inventory_by_product_id, get_inventory_stats,
-    get_low_stock_inventory, get_out_of_stock_inventory, get_shelf_stock_rows,
+    get_all_inventory, get_combined_inventory_rows, get_inventory_by_product_id,
+    get_inventory_stats, get_low_stock_inventory, get_out_of_stock_inventory,
+    get_shelf_stock_rows,
 )
 from .serializers import (
-    InventoryReadSerializer, InventoryStatsSerializer, ShelfStockReadSerializer,
+    CombinedInventoryRowSerializer, InventoryReadSerializer, InventoryStatsSerializer,
+    ShelfStockReadSerializer,
 )
 
 
@@ -97,3 +101,28 @@ class InventoryRetrieveView(generics.RetrieveAPIView):
 
     def get_object(self):
         return get_inventory_by_product_id(self.kwargs["product_id"])
+
+
+class CombinedInventoryListView(APIView):
+    """
+    GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece
+    Every product's inventory in one merged, paginated list — Raw
+    Material and WIP together (Finished Goods has no real inventory model
+    yet, see docs/manufacturing-costing-notes.md). Source is a plain
+    Python list (see selectors.get_combined_inventory_rows), so pagination
+    is applied manually here with the same paginator class every other
+    list endpoint uses, rather than DRF's generic ListAPIView (which
+    expects a queryset).
+    """
+    permission_classes = [IsAdminOrSuperuserOrReadOnly]
+    pagination_class   = StandardResultsSetPagination
+
+    def get(self, request):
+        rows = get_combined_inventory_rows(
+            search=request.query_params.get("search"),
+            type_filter=request.query_params.get("type"),
+        )
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(rows, request, view=self)
+        serializer = CombinedInventoryRowSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)

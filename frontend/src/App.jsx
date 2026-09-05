@@ -41,6 +41,8 @@ import WipInventoryPage from './pages/production/WipInventoryPage';
 
 // Inventory pages
 import InventoryPage from './pages/inventory/InventoryPage';
+import FinishedGoodsPage from './pages/inventory/FinishedGoodsPage';
+import AllInventoryPage from './pages/inventory/AllInventoryPage';
 
 // Rates pages
 import RatesPage from './pages/rates/RatesPage';
@@ -392,6 +394,22 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <InventoryPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/inventory/finished-goods" element={
+          <ProtectedRoute>
+            <Layout>
+              <FinishedGoodsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/inventory/all" element={
+          <ProtectedRoute>
+            <Layout>
+              <AllInventoryPage />
             </Layout>
           </ProtectedRoute>
         } />

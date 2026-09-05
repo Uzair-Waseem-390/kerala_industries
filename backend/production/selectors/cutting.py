@@ -7,7 +7,7 @@ from ..models import (
     CuttingBreakdownItem, CuttingBreakdownItemShelfAllocation, CuttingIssuedMaterial,
     CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, WipProduct,
 )
-from ._shared import WIP_PRODUCT_SELECT_RELATED
+from ..utils import WIP_PRODUCT_SELECT_RELATED
 
 
 def _clean(value):

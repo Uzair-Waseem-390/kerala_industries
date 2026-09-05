@@ -4,8 +4,9 @@ from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from inventory.models import ShelfStockMovement
+from inventory.models import ShelfStockMovement, WipShelfStockMovement
 from inventory.services import apply_shelf_allocations as apply_rm_shelf_allocations
+from inventory.services import apply_wip_shelf_allocations, sync_wip_inventory
 from inventory.services import sync_inventory as sync_rm_inventory
 from purchases.models import CORES_PRODUCT_CODE, Family, JUMBO_PRODUCT_CODE
 from purchases.selectors import get_available_purchase_items_for_fifo, get_product_by_id
@@ -17,11 +18,10 @@ from purchases.services import (
 from ..models import (
     Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
     RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
-    RewoundCoreYard, WipProduct, WipShelfStockMovement,
+    RewoundCoreYard, WipProduct,
 )
 from ..selectors import get_issued_material
 from ..utils import compute_wip_variant_key, inches_to_mm
-from ..wip_inventory import apply_wip_shelf_allocations, sync_wip_inventory
 from ._shared import (
     _fmt, draw_fifo, get_locked_recipe, normalize_shelf_allocations,
     require_under_processing, return_fifo,

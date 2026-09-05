@@ -27,6 +27,12 @@ export const inventoryApi = {
             return api.get(`/inventory/out-of-stock/${query ? `?${query}` : ''}`);
         },
         getByProduct: (productId) => api.get(`/inventory/${productId}/`),
+        // Every product's inventory, RM + WIP merged into one flat list.
+        // `type`: 'raw_material' | 'wip_core' | 'wip_piece' | undefined (all).
+        getAllCombined: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/inventory/all/${query ? `?${query}` : ''}`);
+        },
     },
 
     // Shelf stock — products + quantities currently physically on one

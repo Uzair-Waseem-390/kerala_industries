@@ -8,6 +8,7 @@ import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
 import Tabs from '../../components/ui/Tabs';
+import Badge from '../../components/ui/Badge';
 
 // Cores-vs-pieces sub-filter — 'all' sends no `stage` param at all (matches
 // every WIP product), the other two map directly to the backend's `stage`
@@ -41,6 +42,15 @@ const WipInventoryPage = () => {
             key: 'product',
             label: 'WIP Product',
             render: (value) => value?.name || 'N/A',
+        },
+        {
+            key: 'product',
+            label: 'Type',
+            render: (value) => (
+                <Badge variant={value?.stage === 'cutting' ? 'info' : 'default'}>
+                    {value?.stage === 'cutting' ? 'Piece' : 'Core'}
+                </Badge>
+            ),
         },
         {
             key: 'quantity',
