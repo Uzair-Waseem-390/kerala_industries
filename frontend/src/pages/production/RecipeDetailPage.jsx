@@ -408,7 +408,7 @@ const RecipeDetailPage = () => {
                 ) : (
                     <h2 className="text-2xl font-semibold text-neutral-900">Recipe Not Found</h2>
                 )}
-                <BackLink to="/production/recipes" className="mt-4">Back to Recipes</BackLink>
+                <BackLink to="/production/recipes" className="mt-4">Back to Rewinding Recipes</BackLink>
             </div>
         );
     }
@@ -455,7 +455,7 @@ const RecipeDetailPage = () => {
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <BackLink to="/production/recipes">Back to Recipes</BackLink>
+                    <BackLink to="/production/recipes">Back to Rewinding Recipes</BackLink>
                     <h1 className="text-3xl font-bold text-neutral-900 mt-1">{recipe.recipe_number} — {recipe.name}</h1>
                     <div className="flex gap-2 mt-1 flex-wrap items-center">
                         <RecipeStatusBadge status={recipe.status} />

@@ -125,7 +125,7 @@ const RecipesPage = () => {
                         <FlaskConical className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900">Recipes</h1>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900">Rewinding Recipes</h1>
                         <p className="text-neutral-500 mt-0.5 text-sm sm:text-base">
                             Rewinding production batches — issue raw materials, record output, finish to lock in cost
                         </p>
@@ -138,7 +138,7 @@ const RecipesPage = () => {
                     }}
                     icon={Plus}
                 >
-                    New Recipe
+                    New Rewinding Recipe
                 </Button>
             </div>
 
@@ -185,8 +185,8 @@ const RecipesPage = () => {
                 {recipes.length === 0 ? (
                     <EmptyState
                         icon={<FlaskConical className="w-8 h-8 text-neutral-400" />}
-                        title="No recipes found"
-                        description={searchTerm || Object.keys(filters).length > 0 ? 'Try adjusting your search or filters.' : 'Get started by creating your first recipe.'}
+                        title="No rewinding recipes found"
+                        description={searchTerm || Object.keys(filters).length > 0 ? 'Try adjusting your search or filters.' : 'Get started by creating your first rewinding recipe.'}
                     />
                 ) : (
                     <div className={loading ? 'opacity-60 transition-opacity p-2' : 'transition-opacity p-2'}>
@@ -213,7 +213,7 @@ const RecipesPage = () => {
                     setShowCreateModal(false);
                     resetForm();
                 }}
-                title="New Recipe"
+                title="New Rewinding Recipe"
             >
                 <form onSubmit={handleCreate} className="space-y-4">
                     {formError && <InlineAlert variant="error" message={formError} />}

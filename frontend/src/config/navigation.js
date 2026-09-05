@@ -57,7 +57,7 @@ export const navGroups = [
         icon: FlaskConical,
         adminOnly: true,
         items: [
-            { name: 'Recipes', path: '/production/recipes', icon: FlaskConical },
+            { name: 'Rewinding Recipes', path: '/production/recipes', icon: FlaskConical },
             { name: 'WIP Inventory', path: '/production/wip-inventory', icon: Layers },
         ],
     },
