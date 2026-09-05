@@ -58,6 +58,13 @@ def meters_to_yards(meters: Decimal) -> Decimal:
     return yards.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
+def yards_to_meters(yards: Decimal) -> Decimal:
+    """Inverse of meters_to_yards — same factor, so round-trips exactly."""
+    y = Decimal(str(yards))
+    meters = y / METERS_TO_YARDS_FACTOR
+    return meters.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
 # ---------------------------------------------------------------------------
 # Product variant key
 # ---------------------------------------------------------------------------

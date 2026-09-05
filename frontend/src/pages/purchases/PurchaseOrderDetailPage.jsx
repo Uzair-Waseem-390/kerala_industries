@@ -24,6 +24,7 @@ import ReturnForm from '../../components/purchases/ReturnForm';
 import SavePDFModal from '../../components/purchases/SavePDFModal';
 import PurchaseOrderFormModal from '../../components/purchases/PurchaseOrderFormModal';
 import ShelfAllocationEditor from '../../components/shared/ShelfAllocationEditor';
+import CorrectJumboLengthModal from '../../components/purchases/CorrectJumboLengthModal';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 
@@ -61,6 +62,7 @@ const PurchaseOrderDetailPage = () => {
     const [returnToAccept, setReturnToAccept] = useState(null);
     const [acceptingReturn, setAcceptingReturn] = useState(false);
     const [activeTab, setActiveTab] = useState('items');
+    const [correctingItem, setCorrectingItem] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -337,13 +339,47 @@ const PurchaseOrderDetailPage = () => {
                                             ))}
                                         </ul>
                                     )}
+                                    {(item.rate_per_kg != null || item.expected_length_m != null) && (
+                                        <ul className="mt-1 text-xs text-neutral-500 space-y-0.5">
+                                            {item.rate_per_kg != null && (
+                                                <li>Rate per kg (PKR): {parseFloat(item.rate_per_kg).toFixed(2)}</li>
+                                            )}
+                                            {item.expected_length_m != null && item.weight_kg != null && (
+                                                <li>Weight (kg): {parseFloat(item.weight_kg).toFixed(2)}</li>
+                                            )}
+                                            {item.expected_length_m != null && parseFloat(item.freight_cost) > 0 && (
+                                                <li>Freight Cost (PKR): {parseFloat(item.freight_cost).toFixed(2)}</li>
+                                            )}
+                                            {item.expected_length_m != null && (
+                                                <li>Expected Length (m): {parseFloat(item.expected_length_m).toFixed(2)}</li>
+                                            )}
+                                            {item.exact_length_m != null && (
+                                                <li>Exact Length (m): {parseFloat(item.exact_length_m).toFixed(2)}</li>
+                                            )}
+                                            {item.quantity_in_meters != null && (
+                                                <li>Current Quantity (m): {parseFloat(item.quantity_in_meters).toFixed(2)}</li>
+                                            )}
+                                            {item.expected_length_m != null && order.status === 'confirmed' && (
+                                                <li>
+                                                    <button
+                                                        type="button"
+                                                        className="text-primary-600 hover:text-primary-700 hover:underline font-medium"
+                                                        onClick={() => setCorrectingItem(item)}
+                                                    >
+                                                        Update Exact Meters
+                                                    </button>
+                                                </li>
+                                            )}
+                                        </ul>
+                                    )}
                                 </td>
                                 <td className="px-3 py-2 text-sm">
                                     {item.quantity}
-                                    {item.product_name?.startsWith('Jumbo') && (
-                                        <span className="block text-xs text-neutral-500">
-                                            {(parseFloat(item.quantity) * 0.9144).toFixed(2)} m
-                                        </span>
+                                    {item.expected_length_m != null && (
+                                        <span className="block text-xs text-neutral-500">yards</span>
+                                    )}
+                                    {item.expected_length_m == null && item.rate_per_kg != null && (
+                                        <span className="block text-xs text-neutral-500">kg (weight)</span>
                                     )}
                                 </td>
                                 <td className="px-3 py-2 text-sm">
@@ -775,6 +811,17 @@ const PurchaseOrderDetailPage = () => {
                 confirmText="Accept"
                 variant="primary"
                 loading={acceptingReturn}
+            />
+
+            {/* Correct Jumbo Exact Length */}
+            <CorrectJumboLengthModal
+                isOpen={!!correctingItem}
+                onClose={() => setCorrectingItem(null)}
+                item={correctingItem ? { ...correctingItem, product_id: correctingItem.product } : null}
+                onCorrected={() => {
+                    setCorrectingItem(null);
+                    fetchData();
+                }}
             />
         </div>
     );

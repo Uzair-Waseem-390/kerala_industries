@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from payment_methods.serializers import MethodAllocationInputSerializer
 
+from .utils import yards_to_meters
 from .models import (
     CartonSize, CoreLength, CoreName, CoreThickness, Family, JumboName,
     LostInventoryItem, LostInventoryRecord, PackingSize, Product,
@@ -337,6 +338,7 @@ class PurchaseItemReadSerializer(serializers.ModelSerializer):
     returnable_quantity = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
     allocated_quantity  = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
     shelf_allocations   = PurchaseItemShelfAllocationReadSerializer(many=True, read_only=True)
+    quantity_in_meters  = serializers.SerializerMethodField()
 
     class Meta:
         model  = PurchaseItem
@@ -346,8 +348,15 @@ class PurchaseItemReadSerializer(serializers.ModelSerializer):
             "unit_price", "gst", "wht", "description",
             "gross_amount", "gst_amount", "wht_amount", "total_price",
             "allocated_quantity", "shelf_allocations",
+            "weight_kg", "rate_per_kg", "freight_cost",
+            "expected_length_m", "exact_length_m", "quantity_in_meters",
         ]
         read_only_fields = fields
+
+    def get_quantity_in_meters(self, obj):
+        if obj.expected_length_m is None:
+            return None
+        return yards_to_meters(obj.quantity)
 
 
 class PurchaseBatchSerializer(serializers.ModelSerializer):
