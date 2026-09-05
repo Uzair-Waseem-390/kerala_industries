@@ -338,7 +338,14 @@ const PurchaseOrderDetailPage = () => {
                                         </ul>
                                     )}
                                 </td>
-                                <td className="px-3 py-2 text-sm">{item.quantity}</td>
+                                <td className="px-3 py-2 text-sm">
+                                    {item.quantity}
+                                    {item.product_name?.startsWith('Jumbo') && (
+                                        <span className="block text-xs text-neutral-500">
+                                            {(parseFloat(item.quantity) * 0.9144).toFixed(2)} m
+                                        </span>
+                                    )}
+                                </td>
                                 <td className="px-3 py-2 text-sm">
                                     {typeof item.unit_price === 'string' ? parseFloat(item.unit_price).toFixed(2) : '0.00'}
                                 </td>
