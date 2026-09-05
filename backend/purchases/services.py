@@ -19,10 +19,10 @@ from .models import (
 # apply_shelf_delta/apply_shelf_allocations/_adjust_stock_movement (and the
 # private inventory-stats-bucket helpers delete_product still needs) moved
 # with them; purchases keeps calling them via these imports.
-from inventory.models import Inventory, InventoryStatsFlow, ShelfStock, ShelfStockMovement
+from inventory.models import Inventory, InventoryStatsFlow, ProductRegistryEntry, ShelfStock, ShelfStockMovement
 from inventory.services import (
     _adjust_stock_movement, _apply_stats_deltas, _stock_bucket,
-    apply_shelf_allocations, apply_shelf_delta, sync_inventory,
+    apply_shelf_allocations, apply_shelf_delta, create_registry_entry, sync_inventory,
 )
 from .selectors import (
     get_available_purchase_items_for_fifo, get_carton_size_by_id,
@@ -656,6 +656,10 @@ def get_or_create_product_variant(
                 variant_key=variant_key,
                 created_by=user, updated_by=user,
                 **attribute_ids,
+            )
+            create_registry_entry(
+                type=ProductRegistryEntry.Type.RAW_MATERIAL, rm_product=product,
+                name=product.name, code=product.code, category=base_product.family.name,
             )
     except IntegrityError:
         # Lost a create race against a concurrent identical purchase — same

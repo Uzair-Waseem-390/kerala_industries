@@ -5,10 +5,10 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from inventory.models import FgShelfStockMovement, ShelfStockMovement, WipShelfStockMovement
+from inventory.models import FgShelfStockMovement, ProductRegistryEntry, ShelfStockMovement, WipShelfStockMovement
 from inventory.services import (
     apply_fg_shelf_allocations, apply_shelf_allocations as apply_rm_shelf_allocations,
-    apply_wip_shelf_allocations, sync_fg_inventory, sync_wip_inventory,
+    apply_wip_shelf_allocations, create_registry_entry, sync_fg_inventory, sync_wip_inventory,
     validate_wip_shelf_consumption,
 )
 from inventory.services import sync_inventory as sync_rm_inventory
@@ -397,6 +397,10 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
                     name=piece_product.name, code=next_fg_product_code(),
                     binding=piece_product.binding, yard=piece_product.yard, length_mm=piece_product.length_mm,
                     variant_key=variant_key, created_by=user, updated_by=user,
+                )
+                create_registry_entry(
+                    type=ProductRegistryEntry.Type.FINISHED_GOODS, fg_product=fg_product,
+                    name=fg_product.name, code=fg_product.code, category="Finished Goods",
                 )
         except IntegrityError:
             # Lost a create race against a concurrent identical Packing

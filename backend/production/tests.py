@@ -203,6 +203,17 @@ class PackingHappyPathTests(PackingRecipeTestBase):
             length_mm=self.piece_batch.length_mm, quantity=Decimal("2"), remaining_quantity=Decimal("2"),
             unit_cost_snapshot=Decimal("100.0000"), created_by=self.admin, updated_by=self.admin,
         )
+        # The FIFO batch alone isn't enough to issue against — WipInventory/
+        # WipShelfStock (what issue_packing_piece's shelf-availability check
+        # actually reads) need the extra 2 units too, same as a real Cutting
+        # finish would have put away via sync_wip_inventory/apply_wip_shelf_allocations.
+        from inventory.services import apply_wip_shelf_allocations, sync_wip_inventory
+        from inventory.models import WipShelfStockMovement
+        sync_wip_inventory(product=self.piece, quantity_delta=Decimal("2"), user=self.admin)
+        apply_wip_shelf_allocations(
+            product=self.piece, allocations=[{"shelf": self.shelf, "quantity": Decimal("2")}],
+            sign=1, reason=WipShelfStockMovement.Reason.CUTTING_BREAKDOWN_PUTAWAY, user=self.admin,
+        )
 
         recipe = create_packing_recipe(name="Packing Uneven", user=self.admin)
         # Draws all 10 remaining from the first (317.3090/unit) batch, then
@@ -212,8 +223,8 @@ class PackingHappyPathTests(PackingRecipeTestBase):
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("11")}], user=self.admin,
         )
         issue_packing_material(
-            recipe_id=recipe.id, product_id=self.packing_material.id, quantity=Decimal("1.1"),
-            shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("1.1")}], user=self.admin,
+            recipe_id=recipe.id, product_id=self.packing_material.id, quantity=Decimal("1.15"),
+            shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("1.15")}], user=self.admin,
         )
         update_recipe_description(recipe_id=recipe.id, description="x", user=self.admin)
         finished = finish_packing_recipe(
@@ -223,7 +234,7 @@ class PackingHappyPathTests(PackingRecipeTestBase):
         )
 
         piece_total_cost = Decimal("10") * self.piece_batch.unit_cost_snapshot + Decimal("1") * Decimal("100.0000")
-        packing_total_cost = Decimal("1.1") * Decimal("100")
+        packing_total_cost = Decimal("1.15") * Decimal("100")
         combined_total = piece_total_cost + packing_total_cost
         expected_fg_cost = (combined_total / Decimal("11")).quantize(Decimal("0.0001"))
 

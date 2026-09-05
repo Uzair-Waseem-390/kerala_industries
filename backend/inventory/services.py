@@ -6,7 +6,7 @@ from purchases.models import Product, Shelf
 
 from .models import (
     LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgShelfStock, FgShelfStockMovement,
-    Inventory, InventoryStatsFlow, ProductStockMovement,
+    Inventory, InventoryStatsFlow, ProductRegistryEntry, ProductStockMovement,
     ShelfStock, ShelfStockMovement, StockMovementFlow, WipInventory, WipInventoryStatsFlow,
     WipShelfStock, WipShelfStockMovement,
 )
@@ -457,3 +457,22 @@ def apply_fg_shelf_allocations(*, product, allocations: list[dict], sign: int, r
         if to_update:
             FgShelfStock.objects.bulk_update(to_update, ["quantity", "last_updated_at"])
         FgShelfStockMovement.objects.bulk_create(movements)
+
+
+def create_registry_entry(
+    *, type: str, name: str, code: str = None, category: str = None,
+    rm_product=None, wip_product=None, fg_product=None,
+) -> ProductRegistryEntry:
+    """
+    Writes ONE registry row at product-creation time — call this from
+    exactly the same place each catalog's product row itself gets created
+    (purchases.get_or_create_product_variant, production's WipProduct
+    creation in rewinding.py/cutting.py, production.services.packing's
+    FgProduct creation). Never called again for that product afterward —
+    name/code/category are frozen once set, same convention already used
+    by all three product catalogs themselves.
+    """
+    return ProductRegistryEntry.objects.create(
+        type=type, name=name, code=code, category=category,
+        rm_product=rm_product, wip_product=wip_product, fg_product=fg_product,
+    )

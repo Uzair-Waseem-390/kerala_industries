@@ -2,11 +2,9 @@ from rest_framework import generics
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backend.paginations import StandardResultsSetPagination
-
 from .permissions import IsAdminOrSuperuserOrReadOnly
 from .selectors import (
-    get_all_inventory, get_combined_inventory_rows, get_combined_inventory_stats,
+    get_all_inventory, get_all_registry_products, get_combined_inventory_stats,
     get_inventory_by_product_id, get_inventory_stats, get_low_stock_inventory,
     get_out_of_stock_inventory, get_shelf_stock_rows,
 )
@@ -103,33 +101,27 @@ class InventoryRetrieveView(generics.RetrieveAPIView):
         return get_inventory_by_product_id(self.kwargs["product_id"])
 
 
-class CombinedInventoryListView(APIView):
+class CombinedInventoryListView(generics.ListAPIView):
     """
     GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece|finished_goods&stock_view=low|out
     Every product's inventory in one merged, paginated list — Raw
     Material, WIP, and Finished Goods together (see
-    docs/manufacturing-costing-notes.md). Source is a plain
-    Python list (see selectors.get_combined_inventory_rows), so pagination
-    is applied manually here with the same paginator class every other
-    list endpoint uses, rather than DRF's generic ListAPIView (which
-    expects a queryset). stock_view narrows to the Low Stock / Out of
-    Stock breakdown, same as the RM-only page's cards — still an indexed,
-    paginated query, not a live count (the counts themselves are the O(1)
-    stats endpoint, unaffected by this param).
+    docs/manufacturing-costing-notes.md). Backed by a real
+    ProductRegistryEntry queryset (selectors.get_all_registry_products) —
+    a single indexed, database-paginated query (O(page size)), not the
+    Python-side merge-and-sort of 3 separate querysets this replaced.
+    stock_view narrows to the Low Stock / Out of Stock breakdown, same as
+    the RM-only page's cards — still not a live count (the counts
+    themselves are the O(1) stats endpoint below, unaffected by this param).
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
-    pagination_class   = StandardResultsSetPagination
+    serializer_class   = CombinedInventoryRowSerializer
 
-    def get(self, request):
-        rows = get_combined_inventory_rows(
-            search=request.query_params.get("search"),
-            type_filter=request.query_params.get("type"),
-            stock_view=request.query_params.get("stock_view"),
+    def get_queryset(self):
+        p = self.request.query_params
+        return get_all_registry_products(
+            search=p.get("search"), type_filter=p.get("type"), stock_view=p.get("stock_view"),
         )
-        paginator = self.pagination_class()
-        page = paginator.paginate_queryset(rows, request, view=self)
-        serializer = CombinedInventoryRowSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
 
 
 class CombinedInventoryStatsView(APIView):

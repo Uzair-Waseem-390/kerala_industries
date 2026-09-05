@@ -4,8 +4,10 @@ from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from inventory.models import WipShelfStockMovement
-from inventory.services import apply_wip_shelf_allocations, sync_wip_inventory, validate_wip_shelf_consumption
+from inventory.models import ProductRegistryEntry, WipShelfStockMovement
+from inventory.services import (
+    apply_wip_shelf_allocations, create_registry_entry, sync_wip_inventory, validate_wip_shelf_consumption,
+)
 from purchases.services import _unique_constraint_guard, next_reference
 
 from ..models import (
@@ -220,6 +222,10 @@ def add_cutting_breakdown_item(*, recipe_id: int, length_mm: Decimal, quantity: 
                     yard=core_product.yard, length_mm=length_lookup,
                     stage=WipProduct.Stage.CUTTING, variant_key=variant_key,
                     created_by=user, updated_by=user,
+                )
+                create_registry_entry(
+                    type=ProductRegistryEntry.Type.WIP_PIECE, wip_product=wip_product,
+                    name=wip_product.name, code=wip_product.code, category="WIP",
                 )
         except IntegrityError:
             # Lost a create race against a concurrent identical breakdown —

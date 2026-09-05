@@ -368,6 +368,71 @@ class FgInventoryStatsFlow(models.Model):
         return instance
 
 
+class ProductRegistryEntry(models.Model):
+    """
+    One row per product across all 3 stages (RM/WIP/FG) — a pure identity
+    index (name/code/category), NOT a stock ledger. `quantity` is fetched
+    live at read time via a join to the matching stage's own Inventory
+    table (see selectors.get_all_registry_products), never denormalized
+    here — that avoids a 4th place needing to stay in sync on every stock
+    movement (sync_inventory/sync_wip_inventory/sync_fg_inventory are
+    already the single writers for their own tables; adding a registry
+    write to every one of those would be a new drift vector for no real
+    benefit, since name/code/category never change after creation anyway).
+
+    Written ONCE, at product-creation time (see
+    purchases.services.get_or_create_product_variant,
+    production.services.rewinding/cutting's WipProduct creation,
+    production.services.packing's FgProduct creation) — never updated
+    afterward, matching this project's existing "these fields are frozen
+    once set" convention for all three product catalogs.
+
+    Built to replace get_combined_inventory_rows' old Python-side merge of
+    3 separately-fetched, separately-sorted querysets (O(catalog size) on
+    every request) with a single indexed, offset-paginated query (O(page
+    size)) — see docs/manufacturing-costing-notes.md and
+    instructions/multi-inventory-expansion.md's already-planned "future
+    registry model" note, which anticipated this exact shape.
+    """
+    class Type(models.TextChoices):
+        RAW_MATERIAL   = "raw_material",   "Raw Material"
+        WIP_CORE       = "wip_core",       "WIP Core"
+        WIP_PIECE      = "wip_piece",      "WIP Piece"
+        FINISHED_GOODS = "finished_goods", "Finished Goods"
+
+    type        = models.CharField(max_length=20, choices=Type.choices, db_index=True)
+    # Exactly one of these three is set per row (enforced by the
+    # CheckConstraint below) — mirrors the design note's "real FK columns,
+    # one nullable FK per stage's product table" over a generic
+    # source_model/source_id string pair, for referential integrity.
+    rm_product  = models.OneToOneField("purchases.Product", null=True, blank=True, on_delete=models.CASCADE, related_name="registry_entry")
+    wip_product = models.OneToOneField("production.WipProduct", null=True, blank=True, on_delete=models.CASCADE, related_name="registry_entry")
+    fg_product  = models.OneToOneField("production.FgProduct", null=True, blank=True, on_delete=models.CASCADE, related_name="registry_entry")
+    name        = models.CharField(max_length=255, db_index=True)
+    code        = models.CharField(max_length=30, null=True, blank=True)
+    category    = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        verbose_name        = "Product Registry Entry"
+        verbose_name_plural = "Product Registry Entries"
+        indexes = [
+            models.Index(fields=["type", "name"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                name="registry_exactly_one_product_fk",
+                condition=(
+                    (models.Q(rm_product__isnull=False) & models.Q(wip_product__isnull=True) & models.Q(fg_product__isnull=True)) |
+                    (models.Q(rm_product__isnull=True) & models.Q(wip_product__isnull=False) & models.Q(fg_product__isnull=True)) |
+                    (models.Q(rm_product__isnull=True) & models.Q(wip_product__isnull=True) & models.Q(fg_product__isnull=False))
+                ),
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.type})"
+
+
 class WipInventoryStatsFlow(models.Model):
     """
     WIP-side twin of InventoryStatsFlow — same O(1)-stats role, same shape

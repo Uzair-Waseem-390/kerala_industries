@@ -27,24 +27,40 @@ class InventoryStatsSerializer(serializers.Serializer):
     last_updated_at    = serializers.DateTimeField(read_only=True)
 
 
+_REGISTRY_ID_PREFIX = {"raw_material": "rm", "wip_core": "wip", "wip_piece": "wip", "finished_goods": "fg"}
+
+
 class CombinedInventoryRowSerializer(serializers.Serializer):
     """
-    One row of the merged All Inventory view — RM and WIP products
-    normalized into a common shape (see selectors.get_combined_inventory_rows).
-    Plain Serializer, not ModelSerializer: the source is a list of dicts,
-    not a queryset of one model.
+    One row of the merged All Inventory view — now backed by a real
+    ProductRegistryEntry queryset (see selectors.get_all_registry_products),
+    not a Python-merged list of dicts. `id`/`product_id` are computed
+    (SerializerMethodField) rather than plain model fields, so the wire
+    format stays byte-for-byte identical to the old Python-merge version —
+    zero frontend changes needed for this rewrite.
     """
-    # Namespaced string ("rm-14"/"wip-14"), not a bare product id — RM and
-    # WIP products are independent auto-increment sequences that can share
-    # numeric ids, and this is the row's React list key on the frontend.
-    id               = serializers.CharField()
-    product_id       = serializers.IntegerField()
+    id               = serializers.SerializerMethodField()
+    product_id       = serializers.SerializerMethodField()
     type             = serializers.ChoiceField(choices=["raw_material", "wip_core", "wip_piece", "finished_goods"])
     name             = serializers.CharField()
     code             = serializers.CharField(allow_null=True)
     category         = serializers.CharField(allow_null=True)
     quantity         = serializers.DecimalField(max_digits=14, decimal_places=4)
-    last_updated_at  = serializers.DateTimeField()
+    # Can be NULL when the product's own Inventory/WipInventory/FgInventory
+    # row doesn't exist yet (e.g. an RM variant created by a draft purchase
+    # order that was never confirmed) — quantity itself is Coalesce'd to 0
+    # for this case (see get_all_registry_products), but there's no
+    # equally meaningful "zero" for a timestamp, so this stays nullable.
+    last_updated_at  = serializers.DateTimeField(allow_null=True)
+
+    def get_product_id(self, obj):
+        return obj.rm_product_id or obj.wip_product_id or obj.fg_product_id
+
+    def get_id(self, obj):
+        # RM/WIP/FG products are independent auto-increment sequences that
+        # can share numeric ids, and this is the row's React list key on
+        # the frontend — namespaced, not a bare product id.
+        return f"{_REGISTRY_ID_PREFIX[obj.type]}-{self.get_product_id(obj)}"
 
 
 class ShelfStockReadSerializer(serializers.ModelSerializer):

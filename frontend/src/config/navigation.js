@@ -8,6 +8,7 @@ import {
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
     Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers, Scissors, PackageCheck,
+    PackageOpen,
 } from 'lucide-react';
 
 export const mainNavigation = [
@@ -75,6 +76,7 @@ export const navGroups = [
         items: [
             { name: 'Rewinding Recipes', path: '/production/recipes', icon: FlaskConical },
             { name: 'Cutting Recipes', path: '/production/cutting-recipes', icon: Scissors },
+            { name: 'Packing Recipes', path: '/production/packing-recipes', icon: PackageOpen },
         ],
     },
     {

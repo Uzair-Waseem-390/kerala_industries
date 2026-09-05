@@ -1,4 +1,7 @@
-from django.db.models import QuerySet, Sum
+from decimal import Decimal
+
+from django.db.models import Case, DateTimeField, DecimalField, Q, QuerySet, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404
 
 from backend.search import search_q
@@ -6,7 +9,7 @@ from production.utils import WIP_PRODUCT_SELECT_RELATED
 
 from .models import (
     LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgShelfStock,
-    Inventory, InventoryStatsFlow, ShelfStock,
+    Inventory, InventoryStatsFlow, ProductRegistryEntry, ShelfStock,
     WipInventory, WipInventoryStatsFlow, WipShelfStock,
 )
 
@@ -190,97 +193,78 @@ def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None, stage: str = 
     return qs.order_by("product__name")
 
 
-def get_combined_inventory_rows(*, search: str = None, type_filter: str = None, stock_view: str = None) -> list[dict]:
+def get_all_registry_products(*, search: str = None, type_filter: str = None, stock_view: str = None) -> QuerySet:
     """
-    Every product's inventory row, RM and WIP alike, normalized into one
-    flat shape and merged in Python. RM (`Inventory`) and WIP
-    (`WipInventory`) are genuinely separate tables (different product
-    catalogs, purchases.Product vs production.WipProduct — see
-    instructions/multi-inventory-expansion.md's "structurally separate"
-    principle), so there's no single queryset to filter/order — but the
-    total row count is bounded by the number of distinct products in the
-    business (never "all history", just a current snapshot), so merging
-    the two already-filtered, already-indexed querysets in Python here is
-    the same class of "genuinely bounded live aggregation" architecture.md
-    allows for something like the Inventory Valuation report, not the
-    unbounded live-merge pattern it warns against for growing event data.
+    Every product's identity row, RM/WIP/FG alike, as ONE real queryset —
+    replaces the old get_combined_inventory_rows, which fully materialized
+    and Python-sorted 3 separately-fetched querysets on every request
+    (O(catalog size) regardless of page requested). ProductRegistryEntry is
+    a pure identity index (see its docstring); `quantity`/`last_updated_at`
+    are fetched live via a conditional join to whichever stage's own
+    Inventory table applies per row (Case/When on `type`) — never
+    denormalized onto the registry itself, so there's no new place that
+    needs to stay in sync on every stock movement.
 
-    type_filter: 'raw_material' | 'wip_core' | 'wip_piece' | None (all).
-    stock_view: 'low' | 'out' | None (all) — same breakdown the Low
-    Stock/Out of Stock cards drive on the RM-only page, now covering WIP
-    too. `quantity` is indexed on both Inventory and WipInventory, so this
-    filter is pushed down to each underlying queryset (not applied after
-    the Python merge) — still a normal indexed, paginated list query, not
-    a live count (the COUNTS themselves come from the O(1) stats
-    singletons in get_combined_inventory_stats, untouched by this).
-    Pagination is handled by the caller (paginating this list directly,
-    same as any DRF-paginated queryset).
+    Soft-deleted products are excluded the same way the old per-type
+    selectors did (product__is_deleted=False), just via a join here instead
+    of starting from the Inventory table.
+
+    type_filter: 'raw_material' | 'wip_core' | 'wip_piece' | 'finished_goods' | None (all).
+    stock_view: 'low' | 'out' | None (all) — same Low Stock/Out of Stock
+    breakdown as before. Filtering on the Case/When quantity here doesn't
+    use each stage's own quantity index the way filtering the original
+    per-stage queryset directly would (the DB evaluates the CASE per
+    matched row rather than range-scanning one column) — acceptable given
+    the same "genuinely bounded by product count" reasoning architecture.md
+    already accepts for this catalog (never "all history"), and this
+    is still one real query with `type` pushed down via an index, not a
+    live count (the COUNTS themselves stay O(1) via get_combined_inventory_stats,
+    untouched by this). ORDER BY + LIMIT/OFFSET (applied by the caller's
+    pagination) run at the database, not in Python.
+
+    quantity is Coalesce'd to 0 — an RM variant's registry row is written
+    at product-creation time (get_or_create_product_variant, when a draft
+    purchase order is created), but its Inventory row isn't created until
+    sync_inventory first runs at PurchaseOrder confirm — a real gap (a
+    draft that's never confirmed, or gets deleted, leaves a registry row
+    with no matching Inventory row, permanently). Without the Coalesce,
+    that row's quantity annotation is NULL: invisible from BOTH
+    stock_view=low (NULL > 0 is false) and stock_view=out (NULL <= 0 is
+    also false) while showing `quantity: null` on "All" — found by audit.
+    Zero is the semantically correct value here anyway (no confirmed stock
+    movement has ever touched this product), matching Inventory.quantity's
+    own default=0 for a freshly-created row.
     """
-    rows: list[dict] = []
+    zero = Value(Decimal("0"), output_field=DecimalField(max_digits=14, decimal_places=4))
+    qs = ProductRegistryEntry.objects.filter(
+        Q(type=ProductRegistryEntry.Type.RAW_MATERIAL, rm_product__is_deleted=False) |
+        Q(type__in=[ProductRegistryEntry.Type.WIP_CORE, ProductRegistryEntry.Type.WIP_PIECE], wip_product__is_deleted=False) |
+        Q(type=ProductRegistryEntry.Type.FINISHED_GOODS, fg_product__is_deleted=False)
+    ).annotate(
+        quantity=Coalesce(Case(
+            When(type=ProductRegistryEntry.Type.RAW_MATERIAL, then="rm_product__inventory__quantity"),
+            When(type__in=[ProductRegistryEntry.Type.WIP_CORE, ProductRegistryEntry.Type.WIP_PIECE], then="wip_product__inventory__quantity"),
+            When(type=ProductRegistryEntry.Type.FINISHED_GOODS, then="fg_product__inventory__quantity"),
+            output_field=DecimalField(max_digits=14, decimal_places=4),
+        ), zero),
+        last_updated_at=Case(
+            When(type=ProductRegistryEntry.Type.RAW_MATERIAL, then="rm_product__inventory__last_updated_at"),
+            When(type__in=[ProductRegistryEntry.Type.WIP_CORE, ProductRegistryEntry.Type.WIP_PIECE], then="wip_product__inventory__last_updated_at"),
+            When(type=ProductRegistryEntry.Type.FINISHED_GOODS, then="fg_product__inventory__last_updated_at"),
+            output_field=DateTimeField(),
+        ),
+    )
 
-    if type_filter in (None, "raw_material"):
-        if stock_view == "low":
-            rm_qs = get_low_stock_inventory(search=search)
-        elif stock_view == "out":
-            rm_qs = get_out_of_stock_inventory(search=search)
-        else:
-            rm_qs = get_all_inventory(search=search)
-        for inv in rm_qs:
-            rows.append({
-                # RM and WIP products are independent auto-increment
-                # sequences (separate tables) — a bare numeric id can
-                # collide between the two, so the row id is namespaced.
-                "id": f"rm-{inv.product_id}",
-                "product_id": inv.product_id,
-                "type": "raw_material",
-                "name": inv.product.name,
-                "code": inv.product.code,
-                "category": inv.product.family.name if inv.product.family_id else None,
-                "quantity": inv.quantity,
-                "last_updated_at": inv.last_updated_at,
-            })
+    if type_filter:
+        qs = qs.filter(type=type_filter)
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "name", "code"))
+    if stock_view == "low":
+        qs = qs.filter(quantity__gt=0, quantity__lte=LOW_STOCK_THRESHOLD)
+    elif stock_view == "out":
+        qs = qs.filter(quantity__lte=0)
 
-    if type_filter in (None, "wip_core", "wip_piece"):
-        wip_stage = {"wip_core": "rewinding", "wip_piece": "cutting"}.get(type_filter)
-        if stock_view == "low":
-            wip_qs = get_low_stock_wip_inventory(search=search, stage=wip_stage)
-        elif stock_view == "out":
-            wip_qs = get_out_of_stock_wip_inventory(search=search, stage=wip_stage)
-        else:
-            wip_qs = get_all_wip_inventory(search=search, stage=wip_stage)
-        for inv in wip_qs:
-            rows.append({
-                "id": f"wip-{inv.product_id}",
-                "product_id": inv.product_id,
-                "type": "wip_piece" if inv.product.stage == "cutting" else "wip_core",
-                "name": inv.product.name,
-                "code": inv.product.code,
-                "category": "WIP",
-                "quantity": inv.quantity,
-                "last_updated_at": inv.last_updated_at,
-            })
-
-    if type_filter in (None, "finished_goods"):
-        if stock_view == "low":
-            fg_qs = get_low_stock_fg_inventory(search=search)
-        elif stock_view == "out":
-            fg_qs = get_out_of_stock_fg_inventory(search=search)
-        else:
-            fg_qs = get_all_fg_inventory(search=search)
-        for inv in fg_qs:
-            rows.append({
-                "id": f"fg-{inv.product_id}",
-                "product_id": inv.product_id,
-                "type": "finished_goods",
-                "name": inv.product.name,
-                "code": inv.product.code,
-                "category": "Finished Goods",
-                "quantity": inv.quantity,
-                "last_updated_at": inv.last_updated_at,
-            })
-
-    rows.sort(key=lambda r: r["name"])
-    return rows
+    return qs.order_by("name")
 
 
 # ---------------------------------------------------------------------------
