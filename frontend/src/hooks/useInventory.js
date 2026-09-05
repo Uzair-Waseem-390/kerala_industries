@@ -54,14 +54,17 @@ export const useShelfStock = (shelfId, searchTerm, family = 'rm', stage) => {
 
 // All Inventory — the merged RM+WIP list (one flat table, backend does the
 // merge — see inventory.selectors.get_combined_inventory_rows). `typeFilter`:
-// 'raw_material' | 'wip_core' | 'wip_piece' | undefined (all).
-export const useCombinedInventory = (searchTerm, typeFilter) => {
+// 'raw_material' | 'wip_core' | 'wip_piece' | undefined (all). `stockView`:
+// 'all' | 'low' | 'out' — same Low Stock/Out of Stock card breakdown the
+// RM-only page has, now covering WIP too.
+export const useCombinedInventory = (searchTerm, typeFilter, stockView = 'all') => {
     const fetchCombinedPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
         if (typeFilter) p.type = typeFilter;
+        if (stockView !== 'all') p.stock_view = stockView;
         return inventoryApi.inventory.getAllCombined(p);
     };
 
-    return usePaginatedList(fetchCombinedPage, {}, 25, [searchTerm, typeFilter]);
+    return usePaginatedList(fetchCombinedPage, {}, 25, [searchTerm, typeFilter, stockView]);
 };

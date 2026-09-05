@@ -6,9 +6,9 @@ from backend.paginations import StandardResultsSetPagination
 
 from .permissions import IsAdminOrSuperuserOrReadOnly
 from .selectors import (
-    get_all_inventory, get_combined_inventory_rows, get_inventory_by_product_id,
-    get_inventory_stats, get_low_stock_inventory, get_out_of_stock_inventory,
-    get_shelf_stock_rows,
+    get_all_inventory, get_combined_inventory_rows, get_combined_inventory_stats,
+    get_inventory_by_product_id, get_inventory_stats, get_low_stock_inventory,
+    get_out_of_stock_inventory, get_shelf_stock_rows,
 )
 from .serializers import (
     CombinedInventoryRowSerializer, InventoryReadSerializer, InventoryStatsSerializer,
@@ -105,14 +105,17 @@ class InventoryRetrieveView(generics.RetrieveAPIView):
 
 class CombinedInventoryListView(APIView):
     """
-    GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece
+    GET /inventory/all/?search=&type=raw_material|wip_core|wip_piece&stock_view=low|out
     Every product's inventory in one merged, paginated list — Raw
     Material and WIP together (Finished Goods has no real inventory model
     yet, see docs/manufacturing-costing-notes.md). Source is a plain
     Python list (see selectors.get_combined_inventory_rows), so pagination
     is applied manually here with the same paginator class every other
     list endpoint uses, rather than DRF's generic ListAPIView (which
-    expects a queryset).
+    expects a queryset). stock_view narrows to the Low Stock / Out of
+    Stock breakdown, same as the RM-only page's cards — still an indexed,
+    paginated query, not a live count (the counts themselves are the O(1)
+    stats endpoint, unaffected by this param).
     """
     permission_classes = [IsAdminOrSuperuserOrReadOnly]
     pagination_class   = StandardResultsSetPagination
@@ -121,8 +124,23 @@ class CombinedInventoryListView(APIView):
         rows = get_combined_inventory_rows(
             search=request.query_params.get("search"),
             type_filter=request.query_params.get("type"),
+            stock_view=request.query_params.get("stock_view"),
         )
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(rows, request, view=self)
         serializer = CombinedInventoryRowSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
+
+
+class CombinedInventoryStatsView(APIView):
+    """
+    GET /inventory/all/stats/
+    O(1) stats for the All Inventory page header (total products, total
+    stock, low stock, out of stock) — RM + WIP combined. Two singleton
+    reads added together, same as every other stats endpoint in this app;
+    never scales with the number of products.
+    """
+    permission_classes = [IsAdminOrSuperuserOrReadOnly]
+
+    def get(self, request):
+        return Response(InventoryStatsSerializer(get_combined_inventory_stats()).data)

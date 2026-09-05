@@ -33,6 +33,8 @@ export const inventoryApi = {
             const query = new URLSearchParams(params).toString();
             return api.get(`/inventory/all/${query ? `?${query}` : ''}`);
         },
+        // O(1) RM+WIP combined stats for the All Inventory page header.
+        getAllCombinedStats: () => api.get('/inventory/all/stats/'),
     },
 
     // Shelf stock — products + quantities currently physically on one

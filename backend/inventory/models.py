@@ -245,13 +245,17 @@ LOW_STOCK_THRESHOLD = 5
 class InventoryStatsFlow(models.Model):
     """
     Single live record — O(1) inventory stats for the Inventory page cards
-    (total products, low stock, out of stock). Counts cover inventory rows
-    of non-deleted products only, matching what the inventory list shows.
-    Kept in sync by services.sync_inventory() (the ONLY quantity writer,
-    used by purchases AND billing) and services.delete_product(); rebuilt
-    from live data by backfill_inventory_stats.
+    (total products, total stock, low stock, out of stock). Counts cover
+    inventory rows of non-deleted products only, matching what the
+    inventory list shows. Kept in sync by services.sync_inventory() (the
+    ONLY quantity writer, used by purchases AND billing) and
+    services.delete_product(); rebuilt from live data by
+    backfill_inventory_stats. total_stock is maintained via the actual
+    APPLIED delta (post floor-at-0 clamping), never the raw requested
+    delta, so it can never drift from a live re-sum.
     """
     total_products     = models.PositiveIntegerField(default=0)
+    total_stock        = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     low_stock_count    = models.PositiveIntegerField(default=0)
     out_of_stock_count = models.PositiveIntegerField(default=0)
     last_updated_at    = models.DateTimeField(auto_now=True)
@@ -263,7 +267,38 @@ class InventoryStatsFlow(models.Model):
 
     def __str__(self):
         return (
-            f"InventoryStatsFlow — total {self.total_products}, "
+            f"InventoryStatsFlow — total {self.total_products}, stock {self.total_stock}, "
+            f"low {self.low_stock_count}, out {self.out_of_stock_count}"
+        )
+
+    @classmethod
+    def get_instance(cls):
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+
+class WipInventoryStatsFlow(models.Model):
+    """
+    WIP-side twin of InventoryStatsFlow — same O(1)-stats role, same shape
+    (total products, total stock, low stock, out of stock — WIP gets the
+    same LOW_STOCK_THRESHOLD treatment as RM, per project decision), kept
+    in sync by services.sync_wip_inventory(). A real new table (not a
+    state-only relocation like WipInventory/WipShelfStock/
+    WipShelfStockMovement) — WIP never had stats tracking before.
+    """
+    total_products     = models.PositiveIntegerField(default=0)
+    total_stock        = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    low_stock_count    = models.PositiveIntegerField(default=0)
+    out_of_stock_count = models.PositiveIntegerField(default=0)
+    last_updated_at    = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "WIP Inventory Stats Flow"
+        verbose_name_plural = "WIP Inventory Stats Flow"
+
+    def __str__(self):
+        return (
+            f"WipInventoryStatsFlow — total {self.total_products}, stock {self.total_stock}, "
             f"low {self.low_stock_count}, out {self.out_of_stock_count}"
         )
 

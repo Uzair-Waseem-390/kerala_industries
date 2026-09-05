@@ -19,9 +19,9 @@ from .models import (
 # apply_shelf_delta/apply_shelf_allocations/_adjust_stock_movement (and the
 # private inventory-stats-bucket helpers delete_product still needs) moved
 # with them; purchases keeps calling them via these imports.
-from inventory.models import Inventory, ShelfStock, ShelfStockMovement
+from inventory.models import Inventory, InventoryStatsFlow, ShelfStock, ShelfStockMovement
 from inventory.services import (
-    _adjust_stock_movement, _apply_inventory_stats_deltas, _stock_bucket,
+    _adjust_stock_movement, _apply_stats_deltas, _stock_bucket,
     apply_shelf_allocations, apply_shelf_delta, sync_inventory,
 )
 from .selectors import (
@@ -697,8 +697,9 @@ def delete_product(*, pk: int, user) -> None:
     inventory = Inventory.objects.filter(product=product).first()
     if inventory is not None:
         bucket = _stock_bucket(inventory.quantity)
-        _apply_inventory_stats_deltas(
-            total_delta=-1,
+        _apply_stats_deltas(
+            stats_model=InventoryStatsFlow,
+            total_delta=-1, stock_delta=-inventory.quantity,
             low_delta=-1 if bucket == "low" else 0,
             out_delta=-1 if bucket == "out" else 0,
         )

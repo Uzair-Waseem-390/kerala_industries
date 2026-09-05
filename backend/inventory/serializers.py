@@ -16,8 +16,12 @@ class InventoryReadSerializer(serializers.ModelSerializer):
 
 
 class InventoryStatsSerializer(serializers.Serializer):
-    """O(1) stats cards — read straight off the InventoryStatsFlow singleton."""
+    """
+    O(1) stats cards — read straight off the InventoryStatsFlow singleton
+    (or the merged dict from get_combined_inventory_stats, same shape).
+    """
     total_products     = serializers.IntegerField(read_only=True)
+    total_stock        = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     low_stock_count    = serializers.IntegerField(read_only=True)
     out_of_stock_count = serializers.IntegerField(read_only=True)
     last_updated_at    = serializers.DateTimeField(read_only=True)
@@ -34,6 +38,7 @@ class CombinedInventoryRowSerializer(serializers.Serializer):
     # WIP products are independent auto-increment sequences that can share
     # numeric ids, and this is the row's React list key on the frontend.
     id               = serializers.CharField()
+    product_id       = serializers.IntegerField()
     type             = serializers.ChoiceField(choices=["raw_material", "wip_core", "wip_piece"])
     name             = serializers.CharField()
     code             = serializers.CharField(allow_null=True)

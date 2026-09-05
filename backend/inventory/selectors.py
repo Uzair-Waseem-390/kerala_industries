@@ -6,7 +6,7 @@ from production.utils import WIP_PRODUCT_SELECT_RELATED
 
 from .models import (
     LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow, ShelfStock,
-    WipInventory, WipShelfStock,
+    WipInventory, WipInventoryStatsFlow, WipShelfStock,
 )
 
 
@@ -66,6 +66,29 @@ def get_inventory_stats() -> InventoryStatsFlow:
     backfill_inventory_stats.
     """
     return InventoryStatsFlow.get_instance()
+
+
+def get_wip_inventory_stats() -> WipInventoryStatsFlow:
+    """O(1) WIP inventory stats — WIP-side twin of get_inventory_stats."""
+    return WipInventoryStatsFlow.get_instance()
+
+
+def get_combined_inventory_stats() -> dict:
+    """
+    O(1) stats for the All Inventory page header — just two singleton
+    reads added together, never a live count/sum. Both source singletons
+    are themselves O(1) (see get_inventory_stats/get_wip_inventory_stats),
+    so this stays O(1) regardless of how many products exist.
+    """
+    rm = get_inventory_stats()
+    wip = get_wip_inventory_stats()
+    return {
+        "total_products"     : rm.total_products + wip.total_products,
+        "total_stock"        : rm.total_stock + wip.total_stock,
+        "low_stock_count"    : rm.low_stock_count + wip.low_stock_count,
+        "out_of_stock_count" : rm.out_of_stock_count + wip.out_of_stock_count,
+        "last_updated_at"    : max(rm.last_updated_at, wip.last_updated_at),
+    }
 
 
 def get_low_stock_inventory(*, search: str = None, family_id: str = None) -> QuerySet:
@@ -130,6 +153,18 @@ def get_all_wip_inventory(*, search: str = None, stage: str = None) -> QuerySet:
     return qs
 
 
+def get_low_stock_wip_inventory(*, search: str = None, stage: str = None) -> QuerySet:
+    """Breakdown behind the "Low Stock" card for WIP — WIP-side twin of get_low_stock_inventory."""
+    return get_all_wip_inventory(search=search, stage=stage).filter(
+        quantity__gt=0, quantity__lte=LOW_STOCK_THRESHOLD,
+    )
+
+
+def get_out_of_stock_wip_inventory(*, search: str = None, stage: str = None) -> QuerySet:
+    """Breakdown behind the "Out of Stock" card for WIP — WIP-side twin of get_out_of_stock_inventory."""
+    return get_all_wip_inventory(search=search, stage=stage).filter(quantity__lte=0)
+
+
 def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None, stage: str = None) -> QuerySet:
     """
     WIP products + quantities currently on one shelf — powers the Shelf
@@ -147,7 +182,7 @@ def get_wip_shelf_stock_rows(shelf_id: int, *, search: str = None, stage: str = 
     return qs.order_by("product__name")
 
 
-def get_combined_inventory_rows(*, search: str = None, type_filter: str = None) -> list[dict]:
+def get_combined_inventory_rows(*, search: str = None, type_filter: str = None, stock_view: str = None) -> list[dict]:
     """
     Every product's inventory row, RM and WIP alike, normalized into one
     flat shape and merged in Python. RM (`Inventory`) and WIP
@@ -163,18 +198,32 @@ def get_combined_inventory_rows(*, search: str = None, type_filter: str = None) 
     unbounded live-merge pattern it warns against for growing event data.
 
     type_filter: 'raw_material' | 'wip_core' | 'wip_piece' | None (all).
+    stock_view: 'low' | 'out' | None (all) — same breakdown the Low
+    Stock/Out of Stock cards drive on the RM-only page, now covering WIP
+    too. `quantity` is indexed on both Inventory and WipInventory, so this
+    filter is pushed down to each underlying queryset (not applied after
+    the Python merge) — still a normal indexed, paginated list query, not
+    a live count (the COUNTS themselves come from the O(1) stats
+    singletons in get_combined_inventory_stats, untouched by this).
     Pagination is handled by the caller (paginating this list directly,
     same as any DRF-paginated queryset).
     """
     rows: list[dict] = []
 
     if type_filter in (None, "raw_material"):
-        for inv in get_all_inventory(search=search):
+        if stock_view == "low":
+            rm_qs = get_low_stock_inventory(search=search)
+        elif stock_view == "out":
+            rm_qs = get_out_of_stock_inventory(search=search)
+        else:
+            rm_qs = get_all_inventory(search=search)
+        for inv in rm_qs:
             rows.append({
                 # RM and WIP products are independent auto-increment
                 # sequences (separate tables) — a bare numeric id can
                 # collide between the two, so the row id is namespaced.
                 "id": f"rm-{inv.product_id}",
+                "product_id": inv.product_id,
                 "type": "raw_material",
                 "name": inv.product.name,
                 "code": inv.product.code,
@@ -185,9 +234,16 @@ def get_combined_inventory_rows(*, search: str = None, type_filter: str = None) 
 
     if type_filter in (None, "wip_core", "wip_piece"):
         wip_stage = {"wip_core": "rewinding", "wip_piece": "cutting"}.get(type_filter)
-        for inv in get_all_wip_inventory(search=search, stage=wip_stage):
+        if stock_view == "low":
+            wip_qs = get_low_stock_wip_inventory(search=search, stage=wip_stage)
+        elif stock_view == "out":
+            wip_qs = get_out_of_stock_wip_inventory(search=search, stage=wip_stage)
+        else:
+            wip_qs = get_all_wip_inventory(search=search, stage=wip_stage)
+        for inv in wip_qs:
             rows.append({
                 "id": f"wip-{inv.product_id}",
+                "product_id": inv.product_id,
                 "type": "wip_piece" if inv.product.stage == "cutting" else "wip_core",
                 "name": inv.product.name,
                 "code": None,

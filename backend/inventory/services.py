@@ -6,8 +6,8 @@ from purchases.models import Product, Shelf
 
 from .models import (
     LOW_STOCK_THRESHOLD, Inventory, InventoryStatsFlow, ProductStockMovement,
-    ShelfStock, ShelfStockMovement, StockMovementFlow, WipShelfStock, WipShelfStockMovement,
-    WipInventory,
+    ShelfStock, ShelfStockMovement, StockMovementFlow, WipInventory, WipInventoryStatsFlow,
+    WipShelfStock, WipShelfStockMovement,
 )
 
 
@@ -67,17 +67,22 @@ def _stock_bucket(quantity: int) -> str:
     return "ok"
 
 
-def _apply_inventory_stats_deltas(*, total_delta: int = 0, low_delta: int = 0, out_delta: int = 0) -> None:
+def _apply_stats_deltas(*, stats_model, total_delta: int = 0, low_delta: int = 0, out_delta: int = 0, stock_delta=0) -> None:
     """
-    Adjusts the InventoryStatsFlow singleton with F() expressions so the
-    arithmetic happens inside the database — concurrent stock movements can
-    never overwrite each other's counter updates.
+    Adjusts a stats-flow singleton (InventoryStatsFlow or
+    WipInventoryStatsFlow — both share the same 4 counter fields) with
+    F() expressions so the arithmetic happens inside the database —
+    concurrent stock movements can never overwrite each other's counter
+    updates. stock_delta must be the ACTUAL applied quantity delta (after
+    any floor-at-0 clamping the caller already did), not the raw requested
+    delta, or total_stock would drift from a live re-sum over time.
     """
-    if not (total_delta or low_delta or out_delta):
+    if not (total_delta or low_delta or out_delta or stock_delta):
         return
-    InventoryStatsFlow.get_instance()  # ensure the singleton row exists
-    InventoryStatsFlow.objects.filter(pk=1).update(
+    stats_model.get_instance()  # ensure the singleton row exists
+    stats_model.objects.filter(pk=1).update(
         total_products     = F("total_products") + total_delta,
+        total_stock        = F("total_stock") + stock_delta,
         low_stock_count    = F("low_stock_count") + low_delta,
         out_of_stock_count = F("out_of_stock_count") + out_delta,
         last_updated_at    = timezone.now(),
@@ -127,7 +132,8 @@ def sync_inventory(*, product: Product, quantity_delta: int, user=None) -> None:
         inventory, created = (
             Inventory.objects.select_for_update().get_or_create(product=product)
         )
-        old_bucket = None if created else _stock_bucket(inventory.quantity)
+        old_quantity = 0 if created else inventory.quantity
+        old_bucket = None if created else _stock_bucket(old_quantity)
 
         inventory.quantity = max(0, inventory.quantity + quantity_delta)
         update_fields = ["quantity", "last_updated_at"]
@@ -136,7 +142,9 @@ def sync_inventory(*, product: Product, quantity_delta: int, user=None) -> None:
             update_fields.append("last_updated_by")
         inventory.save(update_fields=update_fields)
 
-        _apply_inventory_stats_deltas(
+        applied_delta = inventory.quantity - old_quantity
+        _apply_stats_deltas(
+            stats_model=InventoryStatsFlow, stock_delta=applied_delta,
             **_stats_deltas_for_transition(old_bucket, _stock_bucket(inventory.quantity))
         )
 
@@ -270,15 +278,29 @@ def validate_wip_shelf_consumption(*, product, allocations: list[dict]) -> None:
 
 
 def sync_wip_inventory(*, product, quantity_delta, user=None) -> None:
-    """THE single writer for WipInventory.quantity. Floored at 0."""
+    """
+    THE single writer for WipInventory.quantity. Floored at 0. Keeps
+    WipInventoryStatsFlow in sync exactly like sync_inventory keeps
+    InventoryStatsFlow in sync (same bucket/threshold rules apply to WIP —
+    project decision) — see that function's docstring for the reasoning.
+    """
     with transaction.atomic():
-        inventory, _ = WipInventory.objects.select_for_update().get_or_create(product=product)
+        inventory, created = WipInventory.objects.select_for_update().get_or_create(product=product)
+        old_quantity = 0 if created else inventory.quantity
+        old_bucket = None if created else _stock_bucket(old_quantity)
+
         inventory.quantity = max(0, inventory.quantity + quantity_delta)
         update_fields = ["quantity", "last_updated_at"]
         if user is not None:
             inventory.last_updated_by = user
             update_fields.append("last_updated_by")
         inventory.save(update_fields=update_fields)
+
+        applied_delta = inventory.quantity - old_quantity
+        _apply_stats_deltas(
+            stats_model=WipInventoryStatsFlow, stock_delta=applied_delta,
+            **_stats_deltas_for_transition(old_bucket, _stock_bucket(inventory.quantity))
+        )
 
 
 def apply_wip_shelf_allocations(*, product, allocations: list[dict], sign: int, reason: str, reference: str = "", user=None) -> None:
