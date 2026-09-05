@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 
 from backend.search import search_q
 
-from .models import (
+from ..models import (
     Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
     RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
     RewoundCoreYard, WipInventory, WipProduct, WipShelfStock,

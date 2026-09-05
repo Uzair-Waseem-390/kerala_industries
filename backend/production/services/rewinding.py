@@ -14,14 +14,14 @@ from purchases.services import (
     validate_allocations_complete, validate_shelf_consumption,
 )
 
-from .models import (
+from ..models import (
     Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
     RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
     RewoundCoreYard, WipProduct, WipShelfStockMovement,
 )
-from .selectors import get_issued_material
-from .utils import compute_wip_variant_key, inches_to_mm
-from .wip_inventory import apply_wip_shelf_allocations, sync_wip_inventory
+from ..selectors import get_issued_material
+from ..utils import compute_wip_variant_key, inches_to_mm
+from ..wip_inventory import apply_wip_shelf_allocations, sync_wip_inventory
 
 
 def _next_recipe_number() -> str:
