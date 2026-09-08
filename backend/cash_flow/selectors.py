@@ -47,6 +47,8 @@ def get_cashflow_stats() -> dict:
         "total_expenses_amount"     : cf.total_expenses_amount,
         "total_number_of_expenses"  : cf.total_expenses_count,
         "total_recurring_expenses_paid" : cf.total_recurring_expenses_paid,
+        "total_direct_labor_paid"       : cf.total_direct_labor_paid,
+        "total_factory_overhead_paid"   : cf.total_factory_overhead_paid,
 
         # Lost inventory — gross fields stay gross (never decrease); net is
         # computed here for the dashboard card, mirroring how
@@ -574,6 +576,32 @@ def get_cash_in_hand_breakdown_from_sources(
     except Exception:
         pass
 
+    # --- Outflows: manufacturing costs payments (Direct Labor, Factory Overhead) ---
+    # manufacturing_costs is a separate app — import defensively, same as recurring_expenses.
+    try:
+        from manufacturing_costs.models import PayableEntity, Payment as MfgPayment
+
+        mfg_qs = MfgPayment.objects.filter(is_deleted=False).select_related("entity", "entity__employee", "entity__machine")
+        if _clean(date_from):
+            mfg_qs = mfg_qs.filter(payment_date__gte=_clean(date_from))
+        if _clean(date_to):
+            mfg_qs = mfg_qs.filter(payment_date__lte=_clean(date_to))
+
+        for p in mfg_qs:
+            movement_type_str = "direct_labor_payment" if p.entity.type == PayableEntity.Type.EMPLOYEE else "factory_overhead_payment"
+            movements.append({
+                "direction"  : "outflow",
+                "type"       : movement_type_str,
+                "date"       : str(p.payment_date),
+                "created_at" : p.created_at,
+                "description": f"{p.entity} — {p.reference_number}",
+                "reference"  : p.reference_number,
+                "amount"     : p.amount,
+                "method"     : None,
+            })
+    except Exception:
+        pass
+
     # Filter by direction if requested
     if _clean(movement_type):
         movements = [m for m in movements if m["direction"] == _clean(movement_type)]
@@ -691,6 +719,14 @@ def get_cash_flow_totals_up_to(as_of_date=None) -> dict:
     try:
         from recurring_expenses.models import RecurringExpenseAssignmentPayment
         outflow += _sum(_lte(RecurringExpenseAssignmentPayment.objects.filter(
+            is_deleted=False,
+        ), "payment_date"))
+    except Exception:
+        pass
+
+    try:
+        from manufacturing_costs.models import Payment as MfgPayment
+        outflow += _sum(_lte(MfgPayment.objects.filter(
             is_deleted=False,
         ), "payment_date"))
     except Exception:

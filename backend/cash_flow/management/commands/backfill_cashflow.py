@@ -30,6 +30,8 @@ class Command(BaseCommand):
         cf.total_purchases_cash       = Decimal("0")
         cf.total_expenses_amount      = Decimal("0")
         cf.total_recurring_expenses_paid = Decimal("0")
+        cf.total_direct_labor_paid    = Decimal("0")
+        cf.total_factory_overhead_paid = Decimal("0")
         cf.total_lost_inventory_worth = Decimal("0")
         cf.total_lost_inventory_recovered = Decimal("0")
         cf.total_purchase_returns_value = Decimal("0")
@@ -278,6 +280,30 @@ class Command(BaseCommand):
         except Exception:
             pass  # recurring_expenses app absent — fine, nothing to adjust
 
+        # 5f. Manufacturing costs payments (Direct Labor, Factory Overhead) —
+        #     mirrors cash_flow.services.sync_direct_labor_payment_made/
+        #     sync_factory_overhead_payment_made. Only PAYMENTS touch
+        #     cash_in_hand — creating an Employee/Machine or adjusting
+        #     FactoryOverheadSetting never does.
+        try:
+            from manufacturing_costs.models import PayableEntity, Payment as MfgPayment
+
+            total_direct_labor_paid = Decimal("0")
+            total_factory_overhead_paid = Decimal("0")
+            for p in MfgPayment.objects.filter(is_deleted=False).select_related("entity"):
+                if p.entity.type == PayableEntity.Type.EMPLOYEE:
+                    total_direct_labor_paid += p.amount
+                else:
+                    total_factory_overhead_paid += p.amount
+                cf.cash_in_hand -= p.amount
+            cf.cash_in_hand = max(Decimal("0"), cf.cash_in_hand)
+            cf.total_direct_labor_paid = total_direct_labor_paid
+            cf.total_factory_overhead_paid = total_factory_overhead_paid
+            self.stdout.write(f"  total_direct_labor_paid (deducted): {total_direct_labor_paid}")
+            self.stdout.write(f"  total_factory_overhead_paid (deducted): {total_factory_overhead_paid}")
+        except Exception:
+            pass  # manufacturing_costs app absent — fine, nothing to adjust
+
         # 6. Advance payments already deducted from cash_in_hand
         advance_payments = SupplierPayment.objects.filter(
             is_deleted=False,
@@ -364,6 +390,8 @@ Final CashFlow state:
   total_purchases_cash          : {cf.total_purchases_cash}
   total_expenses_amount         : {cf.total_expenses_amount}
   total_recurring_expenses_paid : {cf.total_recurring_expenses_paid}
+  total_direct_labor_paid       : {cf.total_direct_labor_paid}
+  total_factory_overhead_paid   : {cf.total_factory_overhead_paid}
   total_lost_inventory_worth    : {cf.total_lost_inventory_worth}
   total_lost_inventory_recovered: {cf.total_lost_inventory_recovered}
   total_purchase_returns_value  : {cf.total_purchase_returns_value}

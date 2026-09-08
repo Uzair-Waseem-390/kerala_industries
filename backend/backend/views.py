@@ -39,7 +39,7 @@ class TriggerAllCatchUpsView(APIView):
     pages/hooks happen to be wired up. Returns only a small confirmation
     object — no dashboard data lives here on purpose.
 
-    There are exactly six such mechanisms in the whole codebase (verified
+    There are exactly seven such mechanisms in the whole codebase (verified
     by two independent sweeps across every app — nothing else uses this
     pattern; every other Flow singleton is kept current at write time,
     event-driven, and needs no trigger):
@@ -54,6 +54,9 @@ class TriggerAllCatchUpsView(APIView):
         5. credit_score — overdue-invoice credit score catch-up, one entry
                           per customer with a newly-overdue invoice
         6. users       — expired JWT token flush (throttled to once/24h)
+        7. manufacturing_costs — payable-entity monthly snapshot catch-up,
+                          one entry per (entity, closed month) — mirrors
+                          assets' own marker-gated per-entity sweep
 
     Order matters: assets and investors run first because profits reads
     both of their outputs (asset depreciation for the deduction breakdown,
@@ -63,10 +66,12 @@ class TriggerAllCatchUpsView(APIView):
     (asset/investor catch-ups already ran, so those figures are current too).
     credit_score depends only on billing data (always live-updated, no
     ordering dependency on the other catch-ups) so it can run anywhere
-    after profits; the token flush is independent of everything and runs last.
+    after profits; manufacturing_costs has no dependency on any other phase
+    either, so it runs alongside credit_score; the token flush is
+    independent of everything and runs last.
 
     Each phase is isolated in its own try/except — one app's failure never
-    blocks the other two (same defensive-import discipline already used for
+    blocks the others (same defensive-import discipline already used for
     cross-app reads elsewhere in this project, e.g. cash_flow's breakdown
     functions).
     """
@@ -78,6 +83,7 @@ class TriggerAllCatchUpsView(APIView):
         months_finalized, profits_error = self._run_profits_catchup(user=request.user)
         balance_sheet_snapshots_created, balance_sheet_error = self._run_balance_sheet_catchup()
         credit_scores_recalculated, credit_score_error = self._run_credit_score_catchup(user=request.user)
+        mfg_snapshots_created, mfg_cost_error = self._run_manufacturing_costs_catchup()
         tokens_flushed, tokens_error = self._run_token_flush()
 
         return Response({
@@ -91,6 +97,8 @@ class TriggerAllCatchUpsView(APIView):
             "balance_sheet_error": balance_sheet_error,
             "credit_scores_recalculated": credit_scores_recalculated,
             "credit_score_error": credit_score_error,
+            "mfg_cost_snapshots_created": mfg_snapshots_created,
+            "mfg_cost_error": mfg_cost_error,
             "tokens_flushed": tokens_flushed,
             "tokens_error": tokens_error,
         })
@@ -157,6 +165,17 @@ class TriggerAllCatchUpsView(APIView):
             from credit_score.services import run_overdue_catchup
 
             return run_overdue_catchup(user=user), None
+        except Exception as exc:
+            return 0, str(exc)
+
+    def _run_manufacturing_costs_catchup(self):
+        """Reuses manufacturing_costs.services.catch_up_manufacturing_costs_snapshots(),
+        which is itself marker-gated (O(1) unless a new month has closed
+        since the last catch-up) — see ManufacturingCostsFlow."""
+        try:
+            from manufacturing_costs.services import catch_up_manufacturing_costs_snapshots
+
+            return catch_up_manufacturing_costs_snapshots(), None
         except Exception as exc:
             return 0, str(exc)
 

@@ -22,6 +22,8 @@ def _adjust_cashflow(
     total_purchases_cash_delta         : Decimal = Decimal("0"),
     total_expenses_amount_delta        : Decimal = Decimal("0"),
     total_recurring_expenses_paid_delta : Decimal = Decimal("0"),
+    total_direct_labor_paid_delta       : Decimal = Decimal("0"),
+    total_factory_overhead_paid_delta   : Decimal = Decimal("0"),
     total_lost_inventory_worth_delta   : Decimal = Decimal("0"),
     total_lost_inventory_recovered_delta : Decimal = Decimal("0"),
     total_purchase_returns_value_delta : Decimal = Decimal("0"),
@@ -107,6 +109,12 @@ def _adjust_cashflow(
         )
         cf.total_recurring_expenses_paid = max(
             Decimal("0"), cf.total_recurring_expenses_paid + total_recurring_expenses_paid_delta
+        )
+        cf.total_direct_labor_paid = max(
+            Decimal("0"), cf.total_direct_labor_paid + total_direct_labor_paid_delta
+        )
+        cf.total_factory_overhead_paid = max(
+            Decimal("0"), cf.total_factory_overhead_paid + total_factory_overhead_paid_delta
         )
         cf.total_lost_inventory_worth = max(
             Decimal("0"), cf.total_lost_inventory_worth + total_lost_inventory_worth_delta
@@ -313,6 +321,17 @@ def _payload_recurring_expense_payment(p):
     )
 
 
+def _payload_manufacturing_cost_payment(p):
+    from manufacturing_costs.models import PayableEntity
+    movement_type = "direct_labor_payment" if p.entity.type == PayableEntity.Type.EMPLOYEE else "factory_overhead_payment"
+    return dict(
+        direction="outflow", movement_type=movement_type,
+        date=p.payment_date, occurred_at=p.created_at,
+        description=f"{p.entity} — {p.reference_number}",
+        reference=p.reference_number, amount=p.amount, method=None,
+    )
+
+
 _MOVEMENT_BUILDERS = {
     "data_entry.openingcashentry"                        : _payload_opening_cash,
     "billing.payment"                                    : _payload_invoice_payment,
@@ -328,6 +347,7 @@ _MOVEMENT_BUILDERS = {
     "assets.asset"                                       : _payload_asset,
     "assets.assetdisposal"                               : _payload_asset_disposal,
     "recurring_expenses.recurringexpenseassignmentpayment": _payload_recurring_expense_payment,
+    "manufacturing_costs.payment"                         : _payload_manufacturing_cost_payment,
 }
 
 
@@ -1043,6 +1063,56 @@ def sync_recurring_expense_payment_deleted(*, amount: Decimal, user) -> None:
         cash_in_hand_delta       = +amount,
         total_cash_outflow_delta = -amount,
         total_recurring_expenses_paid_delta = -amount,
+        user=user,
+    )
+
+
+def sync_direct_labor_payment_made(*, amount: Decimal, user) -> None:
+    """
+    Called by manufacturing_costs.services.create_payment when a payment is
+    recorded against an Employee (Direct Labor). This is the ONLY moment
+    cash leaves the business for a labor payment — creating/editing an
+    Employee's rate never touches cash_in_hand.
+    """
+    _adjust_cashflow(
+        cash_in_hand_delta       = -amount,
+        total_cash_outflow_delta = +amount,
+        total_direct_labor_paid_delta = +amount,
+        user=user,
+    )
+
+
+def sync_direct_labor_payment_deleted(*, amount: Decimal, user) -> None:
+    """Called by manufacturing_costs.services.delete_payment — reverses sync_direct_labor_payment_made exactly."""
+    _adjust_cashflow(
+        cash_in_hand_delta       = +amount,
+        total_cash_outflow_delta = -amount,
+        total_direct_labor_paid_delta = -amount,
+        user=user,
+    )
+
+
+def sync_factory_overhead_payment_made(*, amount: Decimal, user) -> None:
+    """
+    Called by manufacturing_costs.services.create_payment when a payment is
+    recorded against a Machine/Rent/Electricity PayableEntity (Factory
+    Overhead). Adjusting FactoryOverheadSetting never touches cash_in_hand
+    on its own — only an actual recorded payment does.
+    """
+    _adjust_cashflow(
+        cash_in_hand_delta       = -amount,
+        total_cash_outflow_delta = +amount,
+        total_factory_overhead_paid_delta = +amount,
+        user=user,
+    )
+
+
+def sync_factory_overhead_payment_deleted(*, amount: Decimal, user) -> None:
+    """Called by manufacturing_costs.services.delete_payment — reverses sync_factory_overhead_payment_made exactly."""
+    _adjust_cashflow(
+        cash_in_hand_delta       = +amount,
+        total_cash_outflow_delta = -amount,
+        total_factory_overhead_paid_delta = -amount,
         user=user,
     )
 

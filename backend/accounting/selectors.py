@@ -386,7 +386,7 @@ def get_fixed_asset_register_summary(rows: list = None) -> dict:
 OPERATING_MOVEMENT_TYPES = {
     "invoice_payment", "advance_payment", "expense", "supplier_payment",
     "tax_payment", "wht_payment", "cash_lost", "cash_found",
-    "recurring_expense_payment",
+    "recurring_expense_payment", "direct_labor_payment", "factory_overhead_payment",
 }
 INVESTING_MOVEMENT_TYPES = {"asset_purchase", "asset_sold"}
 FINANCING_MOVEMENT_TYPES = {
@@ -410,6 +410,8 @@ _MOVEMENT_TYPE_LABELS = {
     "cash_lost": "Cash Lost",
     "cash_found": "Cash Found",
     "recurring_expense_payment": "Recurring Expense Payments",
+    "direct_labor_payment": "Direct Labor Payments",
+    "factory_overhead_payment": "Factory Overhead Payments",
     "asset_purchase": "Fixed Asset Purchases",
     "asset_sold": "Fixed Asset Sale Proceeds",
     "investor_investment": "Investor Contributions",

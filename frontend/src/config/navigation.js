@@ -8,7 +8,7 @@ import {
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
     Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers, Scissors, PackageCheck,
-    PackageOpen,
+    PackageOpen, HardHat, Cog, ListChecks,
 } from 'lucide-react';
 
 export const mainNavigation = [
@@ -188,6 +188,19 @@ export const navGroups = [
             { name: 'A/R Aging', path: '/accounting/ar-aging', icon: TrendingUp },
             { name: 'A/P Aging', path: '/accounting/ap-aging', icon: TrendingDown },
             { name: 'Fixed Asset Register', path: '/accounting/fixed-asset-register', icon: Building2 },
+        ],
+    },
+    {
+        key: 'manufacturingCosts',
+        label: 'Manufacturing Costs',
+        icon: HardHat,
+        adminOnly: true,
+        items: [
+            { name: 'Overview', path: '/manufacturing-costs', icon: HardHat },
+            { name: 'Employees', path: '/manufacturing-costs/employees', icon: Users },
+            { name: 'Machines', path: '/manufacturing-costs/machines', icon: Cog },
+            { name: 'Payable Entities', path: '/manufacturing-costs/payable-entities', icon: ListChecks },
+            { name: 'Payments', path: '/manufacturing-costs/payments', icon: Wallet },
         ],
     },
     {

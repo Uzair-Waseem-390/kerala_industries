@@ -159,6 +159,14 @@ import RecurringExpenseAssignmentDetailPage from './pages/recurringExpenses/Recu
 import RecurringExpensePaymentDetailPage from './pages/recurringExpenses/RecurringExpensePaymentDetailPage';
 import RecurringExpenseMonthlyStatsPage from './pages/recurringExpenses/RecurringExpenseMonthlyStatsPage';
 
+// Manufacturing Costs pages
+import ManufacturingCostsOverviewPage from './pages/manufacturingCosts/ManufacturingCostsOverviewPage';
+import ManufacturingCostEmployeesPage from './pages/manufacturingCosts/ManufacturingCostEmployeesPage';
+import ManufacturingCostMachinesPage from './pages/manufacturingCosts/ManufacturingCostMachinesPage';
+import ManufacturingCostPayableEntitiesPage from './pages/manufacturingCosts/ManufacturingCostPayableEntitiesPage';
+import ManufacturingCostPayableEntityDetailPage from './pages/manufacturingCosts/ManufacturingCostPayableEntityDetailPage';
+import ManufacturingCostPaymentsPage from './pages/manufacturingCosts/ManufacturingCostPaymentsPage';
+
 // Data Entry (superuser-only bootstrap tool)
 import DataEntryPage from './pages/dataentry/DataEntryPage';
 
@@ -1184,6 +1192,55 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <RecurringExpenseMonthlyStatsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        {/* Manufacturing Costs Routes */}
+        <Route path="/manufacturing-costs" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostsOverviewPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/employees" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostEmployeesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/machines" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostMachinesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/payable-entities" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostPayableEntitiesPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/payable-entities/:id" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostPayableEntityDetailPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/payments" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostPaymentsPage />
             </Layout>
           </ProtectedRoute>
         } />

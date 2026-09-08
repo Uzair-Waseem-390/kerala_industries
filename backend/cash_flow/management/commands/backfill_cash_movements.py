@@ -101,6 +101,13 @@ class Command(BaseCommand):
         except Exception:
             pass
 
+        try:
+            from manufacturing_costs.models import Payment as MfgPayment
+            for p in MfgPayment.objects.filter(is_deleted=False).select_related("entity", "entity__employee", "entity__machine"):
+                self._record(batch, p)
+        except Exception:
+            pass
+
         CashMovement.objects.bulk_create(batch, batch_size=500)
         self.stdout.write(self.style.SUCCESS(
             f"\nCashMovement backfill complete — {len(batch)} events created."
