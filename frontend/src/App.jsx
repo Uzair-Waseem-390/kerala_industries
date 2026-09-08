@@ -166,6 +166,7 @@ import ManufacturingCostMachinesPage from './pages/manufacturingCosts/Manufactur
 import ManufacturingCostPayableEntitiesPage from './pages/manufacturingCosts/ManufacturingCostPayableEntitiesPage';
 import ManufacturingCostPayableEntityDetailPage from './pages/manufacturingCosts/ManufacturingCostPayableEntityDetailPage';
 import ManufacturingCostPaymentsPage from './pages/manufacturingCosts/ManufacturingCostPaymentsPage';
+import ManufacturingCostPaymentDetailPage from './pages/manufacturingCosts/ManufacturingCostPaymentDetailPage';
 
 // Data Entry (superuser-only bootstrap tool)
 import DataEntryPage from './pages/dataentry/DataEntryPage';
@@ -1241,6 +1242,14 @@ const AppContent = () => {
           <ProtectedRoute>
             <Layout>
               <ManufacturingCostPaymentsPage />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/manufacturing-costs/payments/:id" element={
+          <ProtectedRoute>
+            <Layout>
+              <ManufacturingCostPaymentDetailPage />
             </Layout>
           </ProtectedRoute>
         } />

@@ -285,7 +285,11 @@ const ManufacturingCostPayableEntityDetailPage = () => {
                     />
                 ) : (
                     <>
-                        <Table columns={columns} data={payments} />
+                        <Table
+                            columns={columns}
+                            data={payments}
+                            onRowClick={(row) => navigate(`/manufacturing-costs/payments/${row.id}`)}
+                        />
                         {meta.totalPages > 1 && (
                             <Pagination currentPage={meta.currentPage} totalPages={meta.totalPages} onPageChange={setPage} />
                         )}

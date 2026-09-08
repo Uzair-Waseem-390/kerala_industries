@@ -167,7 +167,7 @@ const ManufacturingCostPaymentsPage = () => {
                     <Table
                         columns={columns}
                         data={payments}
-                        onRowClick={(row) => navigate(`/manufacturing-costs/payable-entities/${row.entity}`)}
+                        onRowClick={(row) => navigate(`/manufacturing-costs/payments/${row.id}`)}
                     />
                 )}
             </div>
