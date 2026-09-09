@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from payment_methods.serializers import MethodAllocationInputSerializer
 
-from .models import Employee, FactoryOverheadSetting, Machine, PayableEntity, Payment
+from .models import Employee, FactoryOverheadSetting, Machine, ManufacturingCostsStats, PayableEntity, Payment
 
 
 # ---------------------------------------------------------------------------
@@ -176,3 +176,19 @@ class PaymentWriteSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("At least one method must be selected.")
         return value
+
+
+# ---------------------------------------------------------------------------
+# Overview page stats — Page 1
+# ---------------------------------------------------------------------------
+
+class ManufacturingCostsStatsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = ManufacturingCostsStats
+        fields = [
+            "total_employees", "total_machines",
+            "total_estimated_monthly_dl", "total_estimated_monthly_foh",
+            "last_month_dl_paid", "last_month_foh_paid",
+            "last_updated_at",
+        ]
+        read_only_fields = fields

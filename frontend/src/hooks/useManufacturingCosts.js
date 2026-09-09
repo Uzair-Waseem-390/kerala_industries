@@ -2,6 +2,32 @@ import { useState, useEffect, useCallback } from 'react';
 import { manufacturingCostsApi } from '../services/manufacturingCostsApi';
 import { usePaginatedList } from './usePaginatedList';
 
+// Overview page (Page 1) — one singleton read, mirrors useCashFlowStats exactly.
+export const useManufacturingCostsStats = () => {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    const fetchStats = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const result = await manufacturingCostsApi.stats.get();
+            setData(result);
+        } catch (err) {
+            setError(err.message || 'Failed to fetch stats');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchStats();
+    }, [fetchStats]);
+
+    return { data, loading, error, refetch: fetchStats };
+};
+
 // Hook for employee management (create + update + soft-delete).
 export const useManufacturingCostEmployees = (initialFilters = {}) => {
     const {

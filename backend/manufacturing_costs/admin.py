@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (
-    Employee, FactoryOverheadSetting, Machine, ManufacturingCostsFlow,
+    Employee, FactoryOverheadSetting, Machine, ManufacturingCostsFlow, ManufacturingCostsStats,
     PayableEntity, PayableEntityMonthlySnapshot, Payment,
 )
 
@@ -69,6 +69,20 @@ class PayableEntityMonthlySnapshotAdmin(admin.ModelAdmin):
 @admin.register(ManufacturingCostsFlow)
 class ManufacturingCostsFlowAdmin(admin.ModelAdmin):
     list_display = ["snapshots_caught_up_through", "last_updated_at"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ManufacturingCostsStats)
+class ManufacturingCostsStatsAdmin(admin.ModelAdmin):
+    list_display = [
+        "total_employees", "total_machines", "total_estimated_monthly_dl",
+        "total_estimated_monthly_foh", "last_month_dl_paid", "last_month_foh_paid", "last_updated_at",
+    ]
 
     def has_add_permission(self, request):
         return False

@@ -8,13 +8,14 @@ from .permissions import IsAdminOrSuperuser
 from .selectors import (
     get_all_employees, get_all_machines, get_all_payable_entities, get_all_payments,
     get_employee_by_id, get_factory_overhead_setting, get_machine_by_id,
-    get_payable_entity_by_id, get_payable_entity_stats, get_payment_by_id,
-    get_payments_for_entity,
+    get_manufacturing_costs_stats, get_payable_entity_by_id, get_payable_entity_stats,
+    get_payment_by_id, get_payments_for_entity,
 )
 from .serializers import (
     EmployeeReadSerializer, EmployeeWriteSerializer, FactoryOverheadSettingSerializer,
-    MachineReadSerializer, MachineWriteSerializer, PayableEntityReadSerializer,
-    PayableEntityStatsSerializer, PaymentReadSerializer, PaymentWriteSerializer,
+    MachineReadSerializer, MachineWriteSerializer, ManufacturingCostsStatsSerializer,
+    PayableEntityReadSerializer, PayableEntityStatsSerializer, PaymentReadSerializer,
+    PaymentWriteSerializer,
 )
 from .services import (
     create_employee, create_machine, create_payment, delete_employee, delete_machine,
@@ -218,3 +219,15 @@ class PaymentRetrieveDestroyView(generics.RetrieveDestroyAPIView):
     def destroy(self, request, *args, **kwargs):
         delete_payment(pk=self.kwargs["pk"], user=request.user)
         return Response({"detail": "Payment deleted and cash-in-hand restored."}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Page 1 — Overview stats
+# ---------------------------------------------------------------------------
+
+class ManufacturingCostsStatsView(APIView):
+    """GET /manufacturing-costs/stats/ — one singleton read, O(1)."""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def get(self, request):
+        return Response(ManufacturingCostsStatsSerializer(get_manufacturing_costs_stats()).data, status=status.HTTP_200_OK)

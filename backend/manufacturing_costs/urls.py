@@ -6,6 +6,7 @@ from .views import (
     FactoryOverheadSettingView,
     MachineListCreateView,
     MachineRetrieveUpdateDestroyView,
+    ManufacturingCostsStatsView,
     PayableEntityDeleteView,
     PayableEntityListView,
     PayableEntityPaymentListView,
@@ -16,6 +17,9 @@ from .views import (
 )
 
 urlpatterns = [
+    # Page 1 — Overview stats
+    path("stats/", ManufacturingCostsStatsView.as_view(), name="mfg-stats"),
+
     # Page 2 — Employees (Direct Labor)
     path("employees/",     EmployeeListCreateView.as_view(),          name="mfg-employee-list-create"),
     path("employees/<int:pk>/", EmployeeRetrieveUpdateDestroyView.as_view(), name="mfg-employee-detail"),

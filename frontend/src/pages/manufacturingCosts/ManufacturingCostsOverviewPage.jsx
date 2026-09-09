@@ -1,9 +1,13 @@
-import { Link } from 'react-router-dom';
-import { ShieldAlert, Users, Cog, Receipt, Wallet, ArrowRight, Factory } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ShieldAlert, Users, Cog, Receipt, Wallet, ArrowRight, Factory, HardHat, Zap, CalendarClock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useManufacturingCostsStats } from '../../hooks/useManufacturingCosts';
+import { useCashFlowStats } from '../../hooks/useCashFlow';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import InlineAlert from '../../components/ui/InlineAlert';
+import StatCard from '../../components/dashboard/StatCard';
+import StatCardSkeleton from '../../components/dashboard/StatCardSkeleton';
 
 const navItems = [
     {
@@ -26,7 +30,11 @@ const navItems = [
 
 const ManufacturingCostsOverviewPage = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
+
+    const { data: stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useManufacturingCostsStats();
+    const { data: cashStats, loading: cashLoading } = useCashFlowStats();
 
     if (!isAdmin) {
         return (
@@ -40,8 +48,13 @@ const ManufacturingCostsOverviewPage = () => {
         );
     }
 
+    const loading = statsLoading || cashLoading;
+    const goToEmployees = () => navigate('/manufacturing-costs/employees');
+    const goToMachines = () => navigate('/manufacturing-costs/machines');
+    const goToPayments = () => navigate('/manufacturing-costs/payments');
+
     return (
-        <div className="space-y-6">
+        <div className="space-y-8">
             <div className="flex items-start gap-4">
                 <div className="hidden sm:flex w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-700 to-accent-600 items-center justify-center flex-shrink-0 shadow-lg shadow-primary-900/20">
                     <Factory className="w-6 h-6 text-white" />
@@ -54,10 +67,107 @@ const ManufacturingCostsOverviewPage = () => {
                 </div>
             </div>
 
-            <InlineAlert
-                variant="info"
-                message="Stats for this overview are coming in a later phase — for now, use the sections below."
-            />
+            {statsError && (
+                <InlineAlert variant="error" message={statsError} onRetry={refetchStats} />
+            )}
+
+            {/* Resources — headcount + this month's budget picture, both O(1) reads off the stored stats singleton. */}
+            <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-neutral-900">Resources & This Month's Estimate</h2>
+                {loading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCardSkeleton color="blue" />
+                        <StatCardSkeleton color="purple" />
+                        <StatCardSkeleton color="amber" />
+                        <StatCardSkeleton color="orange" />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCard
+                            label="Total Employees"
+                            value={stats?.total_employees}
+                            icon={Users}
+                            color="blue"
+                            isCurrency={false}
+                            subtitle="Active"
+                            onClick={goToEmployees}
+                        />
+                        <StatCard
+                            label="Total Machines"
+                            value={stats?.total_machines}
+                            icon={Cog}
+                            color="purple"
+                            isCurrency={false}
+                            subtitle="Active"
+                            onClick={goToMachines}
+                        />
+                        <StatCard
+                            label="Estimated Monthly DL"
+                            value={stats?.total_estimated_monthly_dl}
+                            icon={HardHat}
+                            color="amber"
+                            subtitle="Σ employee salaries"
+                            onClick={goToEmployees}
+                        />
+                        <StatCard
+                            label="Estimated Monthly FOH"
+                            value={stats?.total_estimated_monthly_foh}
+                            icon={Zap}
+                            color="orange"
+                            subtitle="Machines + Rent + Electricity"
+                            onClick={goToMachines}
+                        />
+                    </div>
+                )}
+            </div>
+
+            {/* Payments — real cash already paid out, all-time (CashFlow) and last closed month (this app's own monthly snapshot). */}
+            <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-neutral-900">Payments</h2>
+                {loading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCardSkeleton color="green" />
+                        <StatCardSkeleton color="green" />
+                        <StatCardSkeleton color="red" />
+                        <StatCardSkeleton color="red" />
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCard
+                            label="Total DL Paid"
+                            value={cashStats?.total_direct_labor_paid}
+                            icon={Wallet}
+                            color="green"
+                            subtitle="All-time"
+                            onClick={goToPayments}
+                        />
+                        <StatCard
+                            label="Total FOH Paid"
+                            value={cashStats?.total_factory_overhead_paid}
+                            icon={Wallet}
+                            color="green"
+                            subtitle="All-time"
+                            onClick={goToPayments}
+                        />
+                        <StatCard
+                            label="Last Month DL Paid"
+                            value={stats?.last_month_dl_paid}
+                            icon={CalendarClock}
+                            color="red"
+                            subtitle="Last closed month"
+                            onClick={goToPayments}
+                        />
+                        <StatCard
+                            label="Last Month FOH Paid"
+                            value={stats?.last_month_foh_paid}
+                            icon={CalendarClock}
+                            color="red"
+                            subtitle="Last closed month"
+                            onClick={goToPayments}
+                        />
+                    </div>
+                )}
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {navItems.map(({ to, title, icon: Icon, description }) => (

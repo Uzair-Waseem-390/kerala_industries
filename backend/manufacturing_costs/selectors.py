@@ -7,7 +7,7 @@ from django.utils import timezone
 from backend.search import search_q
 
 from .models import (
-    Employee, FactoryOverheadSetting, Machine, PayableEntity,
+    Employee, FactoryOverheadSetting, Machine, ManufacturingCostsStats, PayableEntity,
     PayableEntityMonthlySnapshot, Payment,
 )
 from .services import catch_up_manufacturing_costs_snapshots, get_or_create_fixed_entity
@@ -161,3 +161,14 @@ def get_payment_by_id(pk: int) -> Payment:
         Payment.objects.select_related("entity", "entity__employee", "entity__machine", "created_by"),
         pk=pk, is_deleted=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Overview page stats — one singleton read, O(1). catch_up runs first so
+# last_month_dl_paid/last_month_foh_paid are never stale by more than the
+# gap since the last read anywhere in this app this month.
+# ---------------------------------------------------------------------------
+
+def get_manufacturing_costs_stats() -> ManufacturingCostsStats:
+    catch_up_manufacturing_costs_snapshots()
+    return ManufacturingCostsStats.get_instance()

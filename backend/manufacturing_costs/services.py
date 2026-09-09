@@ -7,7 +7,7 @@ from django.utils import timezone
 from purchases.services import next_reference
 
 from .models import (
-    Employee, FactoryOverheadSetting, Machine, ManufacturingCostsFlow,
+    Employee, FactoryOverheadSetting, Machine, ManufacturingCostsFlow, ManufacturingCostsStats,
     PayableEntity, PayableEntityMonthlySnapshot, Payment,
 )
 
@@ -48,6 +48,12 @@ def create_employee(*, name: str, monthly_salary: Decimal, avg_hours_per_day: De
     employee.save()
 
     PayableEntity.objects.create(type=PayableEntity.Type.EMPLOYEE, employee=employee)
+
+    ManufacturingCostsStats.get_instance()
+    ManufacturingCostsStats.objects.filter(pk=1).update(
+        total_employees=F("total_employees") + 1,
+        total_estimated_monthly_dl=F("total_estimated_monthly_dl") + employee.monthly_salary,
+    )
     return employee
 
 
@@ -55,6 +61,7 @@ def create_employee(*, name: str, monthly_salary: Decimal, avg_hours_per_day: De
 def update_employee(*, pk: int, user, **fields) -> Employee:
     from rest_framework.exceptions import ValidationError
     employee = Employee.objects.select_for_update().get(pk=pk, is_deleted=False)
+    old_monthly_salary = employee.monthly_salary
 
     update_fields = ["updated_by", "updated_at"]
     for field in ("name", "monthly_salary", "avg_hours_per_day", "working_days_per_month"):
@@ -73,6 +80,12 @@ def update_employee(*, pk: int, user, **fields) -> Employee:
     employee.updated_by = user
     update_fields.append("rate_per_hour")
     employee.save(update_fields=update_fields)
+
+    salary_delta = employee.monthly_salary - old_monthly_salary
+    if salary_delta != 0:
+        ManufacturingCostsStats.objects.filter(pk=1).update(
+            total_estimated_monthly_dl=F("total_estimated_monthly_dl") + salary_delta,
+        )
     return employee
 
 
@@ -80,6 +93,11 @@ def update_employee(*, pk: int, user, **fields) -> Employee:
 def delete_employee(*, pk: int, user) -> None:
     employee = Employee.objects.get(pk=pk, is_deleted=False)
     _soft_delete(employee, user)
+
+    ManufacturingCostsStats.objects.filter(pk=1).update(
+        total_employees=F("total_employees") - 1,
+        total_estimated_monthly_dl=F("total_estimated_monthly_dl") - employee.monthly_salary,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +168,12 @@ def create_machine(*, name: str, category: str, avg_hours_per_day: Decimal, work
     )
     PayableEntity.objects.create(type=PayableEntity.Type.MACHINE, machine=machine)
 
+    ManufacturingCostsStats.get_instance()
+    ManufacturingCostsStats.objects.filter(pk=1).update(
+        total_machines=F("total_machines") + 1,
+        total_estimated_monthly_foh=F("total_estimated_monthly_foh") + machine.monthly_repair_cost,
+    )
+
     setting = FactoryOverheadSetting.get_instance()
     _recompute_all_machine_rates(rent_amount=setting.rent_amount, electricity_amount=setting.electricity_amount)
     machine.refresh_from_db(fields=["rate_per_hour"])
@@ -160,6 +184,7 @@ def create_machine(*, name: str, category: str, avg_hours_per_day: Decimal, work
 def update_machine(*, pk: int, user, **fields) -> Machine:
     from rest_framework.exceptions import ValidationError
     machine = Machine.objects.select_for_update().get(pk=pk, is_deleted=False)
+    old_monthly_repair_cost = machine.monthly_repair_cost
 
     update_fields = ["updated_by", "updated_at"]
     for field in ("name", "category", "avg_hours_per_day", "working_days_per_month", "monthly_repair_cost"):
@@ -179,6 +204,12 @@ def update_machine(*, pk: int, user, **fields) -> Machine:
     machine.updated_by = user
     machine.save(update_fields=update_fields)
 
+    repair_cost_delta = machine.monthly_repair_cost - old_monthly_repair_cost
+    if repair_cost_delta != 0:
+        ManufacturingCostsStats.objects.filter(pk=1).update(
+            total_estimated_monthly_foh=F("total_estimated_monthly_foh") + repair_cost_delta,
+        )
+
     setting = FactoryOverheadSetting.get_instance()
     _recompute_all_machine_rates(rent_amount=setting.rent_amount, electricity_amount=setting.electricity_amount)
     machine.refresh_from_db(fields=["rate_per_hour"])
@@ -189,6 +220,11 @@ def update_machine(*, pk: int, user, **fields) -> Machine:
 def delete_machine(*, pk: int, user) -> None:
     machine = Machine.objects.get(pk=pk, is_deleted=False)
     _soft_delete(machine, user)
+
+    ManufacturingCostsStats.objects.filter(pk=1).update(
+        total_machines=F("total_machines") - 1,
+        total_estimated_monthly_foh=F("total_estimated_monthly_foh") - machine.monthly_repair_cost,
+    )
 
     setting = FactoryOverheadSetting.get_instance()
     _recompute_all_machine_rates(rent_amount=setting.rent_amount, electricity_amount=setting.electricity_amount)
@@ -211,6 +247,7 @@ def update_factory_overhead_setting(*, rent_amount: Decimal = None, electricity_
     FactoryOverheadSetting.get_instance()  # ensure the singleton row exists
     setting = FactoryOverheadSetting.objects.select_for_update().get(pk=1)
     update_fields = ["updated_by", "updated_at"]
+    old_rent, old_electricity = setting.rent_amount, setting.electricity_amount
 
     if rent_amount is not None:
         if rent_amount < 0:
@@ -225,6 +262,13 @@ def update_factory_overhead_setting(*, rent_amount: Decimal = None, electricity_
 
     setting.updated_by = user
     setting.save(update_fields=update_fields)
+
+    foh_delta = (setting.rent_amount - old_rent) + (setting.electricity_amount - old_electricity)
+    if foh_delta != 0:
+        ManufacturingCostsStats.get_instance()
+        ManufacturingCostsStats.objects.filter(pk=1).update(
+            total_estimated_monthly_foh=F("total_estimated_monthly_foh") + foh_delta,
+        )
 
     _recompute_all_machine_rates(rent_amount=setting.rent_amount, electricity_amount=setting.electricity_amount)
     return setting
@@ -396,6 +440,23 @@ def catch_up_manufacturing_costs_snapshots() -> int:
 
             next_period = _add_month(next_period)
 
+    # Stamp the Overview page's "last month" figures — a single bounded
+    # aggregate over PayableEntityMonthlySnapshot rows for the one just-
+    # closed period (bounded by entity count, never by payment history), NOT
+    # a live scan of Payment rows. Snapshots for that period are guaranteed
+    # to exist by this point (the while loop above always reaches next_period
+    # == current_period, i.e. covers every period strictly before it).
+    last_month_period = _previous_month(current_period)
+    dl_total = PayableEntityMonthlySnapshot.objects.filter(
+        period=last_month_period, entity__type=PayableEntity.Type.EMPLOYEE,
+    ).aggregate(total=Sum("total_paid"))["total"] or Decimal("0")
+    foh_total = PayableEntityMonthlySnapshot.objects.filter(
+        period=last_month_period,
+        entity__type__in=[PayableEntity.Type.MACHINE, PayableEntity.Type.RENT, PayableEntity.Type.ELECTRICITY],
+    ).aggregate(total=Sum("total_paid"))["total"] or Decimal("0")
+    ManufacturingCostsStats.get_instance()
+    ManufacturingCostsStats.objects.filter(pk=1).update(last_month_dl_paid=dl_total, last_month_foh_paid=foh_total)
+
     ManufacturingCostsFlow.objects.filter(pk=1).update(snapshots_caught_up_through=current_period)
     return created_count
 
@@ -405,6 +466,13 @@ def _add_month(period: str) -> str:
     if m == 12:
         return f"{y + 1:04d}-01"
     return f"{y:04d}-{m + 1:02d}"
+
+
+def _previous_month(period: str) -> str:
+    y, m = (int(p) for p in period.split("-"))
+    if m == 1:
+        return f"{y - 1:04d}-12"
+    return f"{y:04d}-{m - 1:02d}"
 
 
 def _period_bounds(period: str):

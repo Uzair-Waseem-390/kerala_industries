@@ -281,6 +281,45 @@ class ManufacturingCostsFlow(models.Model):
         return instance
 
 
+class ManufacturingCostsStats(models.Model):
+    """
+    Singleton — the Overview page's ENTIRE data source, same get_instance()
+    discipline as every other Flow-style stats model in this codebase
+    (CashFlow, InventoryStatsFlow, ...). Every field here is maintained
+    incrementally at the exact write sites that change it (see services.py),
+    never derived from a live Sum()/Count() at read time — one row, one
+    query, genuinely O(1).
+
+    total_estimated_monthly_dl  = Σ active employees' monthly_salary.
+    total_estimated_monthly_foh = Σ active machines' monthly_repair_cost
+                                   + FactoryOverheadSetting.rent_amount
+                                   + FactoryOverheadSetting.electricity_amount.
+    last_month_dl_paid/last_month_foh_paid are stamped once a month by
+    catch_up_manufacturing_costs_snapshots (a bounded aggregate over
+    PayableEntityMonthlySnapshot rows for the one just-closed period — NOT a
+    live scan of Payment history), not touched anywhere else.
+    """
+    total_employees             = models.PositiveIntegerField(default=0)
+    total_machines               = models.PositiveIntegerField(default=0)
+    total_estimated_monthly_dl   = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    total_estimated_monthly_foh  = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    last_month_dl_paid           = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    last_month_foh_paid          = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    last_updated_at              = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "Manufacturing Costs Stats"
+        verbose_name_plural  = "Manufacturing Costs Stats"
+
+    def __str__(self):
+        return "ManufacturingCostsStats"
+
+    @classmethod
+    def get_instance(cls):
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+
 class Payment(models.Model):
     """
     One real payment against a PayableEntity — the ONLY thing in this app

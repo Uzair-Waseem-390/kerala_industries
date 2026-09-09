@@ -1,6 +1,9 @@
 import { api } from '../utils/api';
 
 export const manufacturingCostsApi = {
+    stats: {
+        get: () => api.get('/manufacturing-costs/stats/'),
+    },
     employees: {
         getAll: (params = {}) => {
             const query = new URLSearchParams(params).toString();
