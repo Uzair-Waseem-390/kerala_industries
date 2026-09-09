@@ -271,6 +271,7 @@ class MonthlyProfitDetailSerializer(serializers.ModelSerializer):
             "expenses_paid", "recurring_expenses_paid", "gst_paid", "wht_paid",
             "lost_cash", "found_cash", "lost_inventory", "found_inventory",
             "depreciation", "disposal_gain_loss",
+            "direct_labor_paid", "factory_overhead_paid",
             "net_profit",
             "total_investor_share_percent", "total_investor_share_amount",
             "owner_share_percent", "owner_share_amount",
@@ -305,6 +306,8 @@ class CurrentMonthProfitSerializer(serializers.Serializer):
     found_inventory                = serializers.DecimalField(max_digits=20, decimal_places=4)
     depreciation                   = serializers.DecimalField(max_digits=20, decimal_places=4)
     disposal_gain_loss             = serializers.DecimalField(max_digits=20, decimal_places=4)
+    direct_labor_paid              = serializers.DecimalField(max_digits=20, decimal_places=4)
+    factory_overhead_paid          = serializers.DecimalField(max_digits=20, decimal_places=4)
     net_profit                     = serializers.DecimalField(max_digits=20, decimal_places=4)
 
     # Live preview only — informational, matches the same % Business Worth

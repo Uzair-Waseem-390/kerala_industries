@@ -52,7 +52,9 @@ def _earliest_period():
 def compute_month_figures_in_one_query(first_day, last_day, period: str) -> dict:
     """
     The same ten month figures the _compute_* helpers below return, but in ONE
-    round-trip instead of ten.
+    round-trip instead of ten — PLUS direct_labor_paid/factory_overhead_paid,
+    added via a SECOND, separate query (see below for why that one isn't
+    folded into the same round trip).
 
     Why: each helper is a single-row `.aggregate()` against a different table.
     Individually they're cheap and correctly indexed — the cost is purely that
@@ -68,13 +70,25 @@ def compute_month_figures_in_one_query(first_day, last_day, period: str) -> dict
     trips cost a second that nobody notices. Fixing the hot path while leaving
     the irreversible writer on the long-proven code is the whole point — the
     ten helpers remain the single definition of each predicate, and
-    ProfitsEquivalenceTests asserts this function returns byte-identical
-    values to them.
+    accounting.tests.ProfitsCombinedQueryEquivalenceTests asserts this
+    function returns byte-identical values to them.
 
-    Each figure is a correlated scalar subquery hung off the ProfitFlow
-    singleton (guaranteed to exist via get_instance), grouped by a constant so
-    every subquery yields exactly one row. Coalesce handles the empty-table
-    case, which a bare Subquery would return as NULL.
+    Each of the original ten figures is a correlated scalar subquery hung off
+    the ProfitFlow singleton (guaranteed to exist via get_instance), grouped
+    by a constant so every subquery yields exactly one row. Coalesce handles
+    the empty-table case, which a bare Subquery would return as NULL.
+
+    direct_labor_paid/factory_overhead_paid come from a SEPARATE read of
+    ManufacturingCostsStats.this_month_dl_paid/this_month_foh_paid instead of
+    an 11th/12th correlated subquery over manufacturing_costs.Payment — those
+    two stats fields are already incrementally maintained (O(1), never a live
+    Sum, see manufacturing_costs.services), so reusing them here is a single
+    indexed PK lookup on a singleton rather than one more live aggregate over
+    a table that only grows. This makes the function two queries instead of
+    one on steady state — an accepted, deliberate tradeoff (a second
+    sub-millisecond singleton read, in exchange for eliminating a live
+    aggregate here entirely) — see
+    accounting.tests.ProfitsCombinedQueryEquivalenceTests.test_combined_query_is_one_query.
     """
     from django.db.models import DecimalField, IntegerField, OuterRef, Subquery, Value
     from django.db.models.functions import Coalesce
@@ -186,6 +200,9 @@ def compute_month_figures_in_one_query(first_day, last_day, period: str) -> dict
     def g(key):
         return row.get(key) or zero
 
+    from manufacturing_costs.models import ManufacturingCostsStats
+    mfg_stats = ManufacturingCostsStats.get_instance()
+
     return {
         "expenses_paid": g("_expenses"),
         "recurring_expenses_paid": g("_recurring"),
@@ -198,6 +215,8 @@ def compute_month_figures_in_one_query(first_day, last_day, period: str) -> dict
         # Stored negative, same abs() the individual helper applies.
         "depreciation": abs(g("_depreciation")),
         "disposal_gain_loss": g("_disposal_sold") - g("_disposal_scrapped"),
+        "direct_labor_paid": mfg_stats.this_month_dl_paid,
+        "factory_overhead_paid": mfg_stats.this_month_foh_paid,
     }
 
 
@@ -290,6 +309,38 @@ def _compute_depreciation(period: str) -> Decimal:
         entry_type=AssetValuationEntry.EntryType.DEPRECIATION, period=period,
     ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
     return abs(total)  # stored negative for depreciation entries
+
+
+def _compute_direct_labor_paid(first_day, last_day) -> Decimal:
+    """
+    Real cash paid to employees this month — manufacturing_costs.Payment
+    against Employee-type PayableEntity rows, date-ranged. Used ONLY by
+    _finalize_month (the frozen historical path — any past month); the live
+    current-month path reads ManufacturingCostsStats.this_month_dl_paid
+    directly instead (see compute_month_figures_in_one_query), which is
+    genuinely O(1) rather than a live Sum — this helper exists because
+    "this month's running total" doesn't apply to an arbitrary PAST month
+    being finalized during catch-up.
+    """
+    from manufacturing_costs.models import PayableEntity, Payment
+
+    total = Payment.objects.filter(
+        is_deleted=False, payment_date__gte=first_day, payment_date__lte=last_day,
+        entity__type=PayableEntity.Type.EMPLOYEE,
+    ).aggregate(total=Sum("amount"))["total"]
+    return total or Decimal("0")
+
+
+def _compute_factory_overhead_paid(first_day, last_day) -> Decimal:
+    """Same as _compute_direct_labor_paid, for Machine/Rent/Electricity-type entities (everything that isn't Employee)."""
+    from manufacturing_costs.models import PayableEntity, Payment
+
+    total = Payment.objects.filter(
+        is_deleted=False, payment_date__gte=first_day, payment_date__lte=last_day,
+    ).exclude(
+        entity__type=PayableEntity.Type.EMPLOYEE,
+    ).aggregate(total=Sum("amount"))["total"]
+    return total or Decimal("0")
 
 
 def _compute_disposal_gain_loss(first_day, last_day) -> Decimal:
@@ -404,12 +455,15 @@ def _finalize_month(period: str, user=None) -> MonthlyProfit:
     found_inventory            = _compute_found_inventory(first_day, last_day)
     depreciation              = _compute_depreciation(period)
     disposal_gain_loss        = _compute_disposal_gain_loss(first_day, last_day)
+    direct_labor_paid         = _compute_direct_labor_paid(first_day, last_day)
+    factory_overhead_paid     = _compute_factory_overhead_paid(first_day, last_day)
 
     net_profit = (
         row["net_gross_profit"]
         - expenses_paid - recurring_expenses_paid - gst_paid - wht_paid
         - lost_cash + found_cash - lost_inventory + found_inventory
         - depreciation + disposal_gain_loss
+        - direct_labor_paid - factory_overhead_paid
     )
 
     try:
@@ -427,6 +481,7 @@ def _finalize_month(period: str, user=None) -> MonthlyProfit:
                 lost_cash=lost_cash, found_cash=found_cash,
                 lost_inventory=lost_inventory, found_inventory=found_inventory,
                 depreciation=depreciation, disposal_gain_loss=disposal_gain_loss,
+                direct_labor_paid=direct_labor_paid, factory_overhead_paid=factory_overhead_paid,
                 net_profit=net_profit,
             )
     except IntegrityError:

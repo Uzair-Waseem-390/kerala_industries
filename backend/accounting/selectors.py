@@ -621,6 +621,8 @@ def get_income_statement(*, period: str = None) -> dict:
             "found_inventory": mp.found_inventory,
             "depreciation": mp.depreciation,
             "disposal_gain_loss": mp.disposal_gain_loss,
+            "direct_labor_paid": mp.direct_labor_paid,
+            "factory_overhead_paid": mp.factory_overhead_paid,
             "net_profit": mp.net_profit,
         }
         resolved_period = period

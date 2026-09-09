@@ -1230,14 +1230,34 @@ class ProfitsCombinedQueryEquivalenceTests(AccountingTestBase):
             ).id,
             new_worth=Decimal("560000"), revaluation_date=today, user=self.admin,
         )
+
+        from manufacturing_costs.models import Machine
+        from manufacturing_costs.services import create_employee, create_machine, create_payment
+
+        employee = create_employee(
+            name="Test Worker", monthly_salary=Decimal("30000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=Decimal("26"), user=self.admin,
+        )
+        machine = create_machine(
+            name="Test Machine", category=Machine.Category.CUTTING, monthly_repair_cost=Decimal("2000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=Decimal("26"), user=self.admin,
+        )
+        create_payment(
+            entity_id=employee.payable_entity.id, amount=Decimal("410.10"), payment_date=today,
+            method_allocations=self.cash_split("410.10"), user=self.admin,
+        )
+        create_payment(
+            entity_id=machine.payable_entity.id, amount=Decimal("205.05"), payment_date=today,
+            method_allocations=self.cash_split("205.05"), user=self.admin,
+        )
         return period
 
     def test_combined_query_matches_the_ten_individual_helpers(self):
         from profits.services import (
-            _compute_depreciation, _compute_disposal_gain_loss, _compute_expenses_paid,
-            _compute_found_cash, _compute_found_inventory, _compute_gst_paid,
-            _compute_lost_cash, _compute_lost_inventory, _month_bounds,
-            _compute_recurring_expenses_paid, _compute_wht_paid,
+            _compute_depreciation, _compute_direct_labor_paid, _compute_disposal_gain_loss,
+            _compute_expenses_paid, _compute_factory_overhead_paid, _compute_found_cash,
+            _compute_found_inventory, _compute_gst_paid, _compute_lost_cash, _compute_lost_inventory,
+            _month_bounds, _compute_recurring_expenses_paid, _compute_wht_paid,
             compute_month_figures_in_one_query,
         )
 
@@ -1257,6 +1277,14 @@ class ProfitsCombinedQueryEquivalenceTests(AccountingTestBase):
             "found_inventory": _compute_found_inventory(first_day, last_day),
             "depreciation": _compute_depreciation(period),
             "disposal_gain_loss": _compute_disposal_gain_loss(first_day, last_day),
+            # direct_labor_paid/factory_overhead_paid: the combined (live) path
+            # reads ManufacturingCostsStats.this_month_dl_paid/this_month_foh_paid
+            # (an incrementally-maintained O(1) counter) instead of a live Sum
+            # like the other figures — this asserts that counter agrees with a
+            # fresh live Sum over the same period, i.e. the incremental wiring
+            # in manufacturing_costs.services hasn't drifted.
+            "direct_labor_paid": _compute_direct_labor_paid(first_day, last_day),
+            "factory_overhead_paid": _compute_factory_overhead_paid(first_day, last_day),
         }
 
         for key, expected in individual.items():
@@ -1277,11 +1305,18 @@ class ProfitsCombinedQueryEquivalenceTests(AccountingTestBase):
     def test_combined_query_is_one_query(self):
         """
         Measures STEADY STATE, which is the only state that matters here: the
-        ProfitFlow singleton is created once in the system's lifetime, and on
-        the very first call the read-first fallback legitimately costs a few
-        extra queries (read miss -> get_or_create -> re-read). Every
-        subsequent call — i.e. every real page load — is one statement.
+        ProfitFlow/ManufacturingCostsStats singletons are each created once in
+        the system's lifetime, and on the very first call the read-first
+        fallback legitimately costs a few extra queries (read miss ->
+        get_or_create -> re-read). Every subsequent call — i.e. every real
+        page load — is exactly TWO statements: the original ten-figure
+        correlated-subquery round trip, plus one singleton read for
+        direct_labor_paid/factory_overhead_paid (see
+        compute_month_figures_in_one_query's docstring for why that one isn't
+        folded into the same query — it reuses an already-O(1) stats field
+        instead of adding an 11th/12th live subquery over Payment history).
         """
+        from manufacturing_costs.models import ManufacturingCostsStats
         from profits.models import ProfitFlow
         from profits.services import compute_month_figures_in_one_query, _month_bounds
 
@@ -1289,16 +1324,17 @@ class ProfitsCombinedQueryEquivalenceTests(AccountingTestBase):
         first_day, _ = _month_bounds(period)
         today = timezone.localdate()
 
-        ProfitFlow.get_instance()   # bootstrap done, as it is in any live system
+        ProfitFlow.get_instance()               # bootstrap done, as it is in any live system
+        ManufacturingCostsStats.get_instance()   # same
         compute_month_figures_in_one_query(first_day, today, period)
 
         with CaptureQueriesContext(connection) as ctx:
             compute_month_figures_in_one_query(first_day, today, period)
 
         self.assertEqual(
-            len(ctx.captured_queries), 1,
-            "the ten separate aggregates must collapse into exactly one "
-            f"statement; got {len(ctx.captured_queries)}",
+            len(ctx.captured_queries), 2,
+            "the ten separate aggregates must collapse into one statement, plus "
+            f"one ManufacturingCostsStats read; got {len(ctx.captured_queries)}",
         )
 
 

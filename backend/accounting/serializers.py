@@ -105,6 +105,8 @@ class IncomeStatementSerializer(serializers.Serializer):
     found_inventory                           = serializers.DecimalField(max_digits=20, decimal_places=4)
     depreciation                               = serializers.DecimalField(max_digits=20, decimal_places=4)
     disposal_gain_loss                          = serializers.DecimalField(max_digits=20, decimal_places=4)
+    direct_labor_paid                            = serializers.DecimalField(max_digits=20, decimal_places=4)
+    factory_overhead_paid                         = serializers.DecimalField(max_digits=20, decimal_places=4)
     net_profit                                   = serializers.DecimalField(max_digits=20, decimal_places=4)
     expense_breakdown                             = ExpenseBreakdownLineSerializer(many=True)
 

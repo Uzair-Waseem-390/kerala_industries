@@ -22,11 +22,14 @@ class MonthlyProfit(models.Model):
     row here — profits.selectors.get_current_month_profit() computes it
     live and marks it provisional.
 
-    net_profit = net_gross_profit minus every deduction below, plus every
-    addition, plus disposal_gain_loss (itself signed — a loss is already
-    negative, so it's ADDED, not subtracted). Not floored at 0 — a month
-    with heavy losses can legitimately show negative net profit, same "not
-    floored" convention as the Profit/Margin Report.
+    net_profit = net_gross_profit minus every deduction below (including
+    direct_labor_paid/factory_overhead_paid — real cash paid to employees/
+    machines/rent/electricity, same cash-basis treatment as every other
+    deduction here), plus every addition, plus disposal_gain_loss (itself
+    signed — a loss is already negative, so it's ADDED, not subtracted).
+    Not floored at 0 — a month with heavy losses can legitimately show
+    negative net profit, same "not floored" convention as the Profit/Margin
+    Report.
 
     Lost/found cash and lost/found inventory are stored as four SEPARATE
     figures, not netted against each other before storage — each is an
@@ -69,6 +72,10 @@ class MonthlyProfit(models.Model):
                                     help_text="Sum of AssetValuationEntry depreciation posted for this period.")
     disposal_gain_loss        = models.DecimalField(max_digits=20, decimal_places=4, default=0,
                                     help_text="Signed — positive for a net gain on asset disposals this month, negative for a net loss. Added, not subtracted.")
+    direct_labor_paid         = models.DecimalField(max_digits=20, decimal_places=4, default=0,
+                                    help_text="manufacturing_costs.Payment against Employee entities, dated this month.")
+    factory_overhead_paid     = models.DecimalField(max_digits=20, decimal_places=4, default=0,
+                                    help_text="manufacturing_costs.Payment against Machine/Rent/Electricity entities, dated this month.")
 
     net_profit = models.DecimalField(max_digits=20, decimal_places=4, default=0,
                     help_text="The 'real profit' for this month — net_gross_profit minus every deduction above, plus disposal_gain_loss.")

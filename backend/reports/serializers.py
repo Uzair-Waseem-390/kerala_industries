@@ -246,6 +246,7 @@ class NetProfitReportItemSerializer(serializers.ModelSerializer):
             "expenses_paid", "recurring_expenses_paid", "gst_paid", "wht_paid",
             "lost_cash", "found_cash", "lost_inventory", "found_inventory",
             "depreciation", "disposal_gain_loss",
+            "direct_labor_paid", "factory_overhead_paid",
             "net_profit", "total_investor_share_amount", "owner_share_amount",
         ]
         read_only_fields = fields

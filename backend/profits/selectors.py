@@ -204,12 +204,15 @@ def _compute_current_month_figures() -> dict:
     found_inventory          = figures["found_inventory"]
     depreciation             = figures["depreciation"]
     disposal_gain_loss       = figures["disposal_gain_loss"]
+    direct_labor_paid        = figures["direct_labor_paid"]
+    factory_overhead_paid    = figures["factory_overhead_paid"]
 
     net_profit = (
         row["net_gross_profit"]
         - expenses_paid - recurring_expenses_paid - gst_paid - wht_paid
         - lost_cash + found_cash - lost_inventory + found_inventory
         - depreciation + disposal_gain_loss
+        - direct_labor_paid - factory_overhead_paid
     )
 
     return {
@@ -231,6 +234,8 @@ def _compute_current_month_figures() -> dict:
         "found_inventory"             : found_inventory,
         "depreciation"                : depreciation,
         "disposal_gain_loss"          : disposal_gain_loss,
+        "direct_labor_paid"           : direct_labor_paid,
+        "factory_overhead_paid"       : factory_overhead_paid,
         "net_profit"                  : net_profit,
     }
 

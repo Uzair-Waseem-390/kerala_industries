@@ -850,7 +850,9 @@ class NetProfitReportPrintView(BaseReportPrintView):
         {"key": "lost_cash", "label": "Lost Cash"}, {"key": "found_cash", "label": "Found Cash"},
         {"key": "lost_inventory", "label": "Lost Inventory"}, {"key": "found_inventory", "label": "Found Inventory"},
         {"key": "depreciation", "label": "Depreciation"},
-        {"key": "disposal_gain_loss", "label": "Disposal Gain/Loss"}, {"key": "net_profit", "label": "Net Profit"},
+        {"key": "disposal_gain_loss", "label": "Disposal Gain/Loss"},
+        {"key": "direct_labor_paid", "label": "Direct Labor"}, {"key": "factory_overhead_paid", "label": "Factory Overhead"},
+        {"key": "net_profit", "label": "Net Profit"},
         {"key": "total_investor_share_amount", "label": "Investor Share"}, {"key": "owner_share_amount", "label": "Owner Share"},
     ]
     queryset_fn       = staticmethod(get_net_profit_report_queryset)
