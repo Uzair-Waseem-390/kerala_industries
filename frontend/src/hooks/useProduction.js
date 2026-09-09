@@ -70,9 +70,13 @@ export const useRecipeDetail = (id) => {
     const [addMachineError, setAddMachineError] = useState(null);
     const [removingMachineId, setRemovingMachineId] = useState(null);
 
-    const fetchRecipe = useCallback(async () => {
+    // `background: true` (used by every mutation's refetch below) skips the
+    // page-level loading flag — only the initial mount load should blank the
+    // whole page; a mutation already has its own inline `mutating` flag and
+    // must not also re-trigger the full-page spinner.
+    const fetchRecipe = useCallback(async ({ background = false } = {}) => {
         if (!id) return;
-        setLoading(true);
+        if (!background) setLoading(true);
         setError(null);
         try {
             const data = await productionApi.recipes.getById(id);
@@ -80,7 +84,7 @@ export const useRecipeDetail = (id) => {
         } catch (err) {
             setError(extractErrorMessage(err, 'Failed to load recipe'));
         } finally {
-            setLoading(false);
+            if (!background) setLoading(false);
         }
     }, [id]);
 
@@ -93,7 +97,7 @@ export const useRecipeDetail = (id) => {
         setIssueError(null);
         try {
             await productionApi.recipes.issueMaterial(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setIssueError(extractErrorMessage(err, 'Failed to issue material'));
             throw err;
@@ -107,7 +111,7 @@ export const useRecipeDetail = (id) => {
         setUpdateMaterialError(null);
         try {
             await productionApi.recipes.updateIssuedMaterial(id, kind, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateMaterialError(extractErrorMessage(err, 'Failed to update issued material'));
             throw err;
@@ -121,7 +125,7 @@ export const useRecipeDetail = (id) => {
         setAddBreakdownError(null);
         try {
             await productionApi.recipes.addBreakdownItem(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddBreakdownError(extractErrorMessage(err, 'Failed to add breakdown item'));
             throw err;
@@ -138,7 +142,7 @@ export const useRecipeDetail = (id) => {
         setUpdateDescriptionError(null);
         try {
             await productionApi.recipes.updateDescription(id, { description });
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateDescriptionError(extractErrorMessage(err, 'Failed to update description'));
             throw err;
@@ -152,7 +156,7 @@ export const useRecipeDetail = (id) => {
         setFinishError(null);
         try {
             await productionApi.recipes.finish(id);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setFinishError(extractErrorMessage(err, 'Failed to finish recipe'));
             throw err;
@@ -166,7 +170,7 @@ export const useRecipeDetail = (id) => {
         setSetTimeErrorState(null);
         try {
             await productionApi.recipes.setTime(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
             throw err;
@@ -180,7 +184,7 @@ export const useRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.recipes.addLabor(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
             throw err;
@@ -194,7 +198,7 @@ export const useRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.recipes.removeLabor(id, employeeId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
             throw err;
@@ -208,7 +212,7 @@ export const useRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.recipes.addMachine(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
             throw err;
@@ -222,7 +226,7 @@ export const useRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.recipes.removeMachine(id, machineId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
             throw err;
@@ -311,9 +315,9 @@ export const useCuttingRecipeDetail = (id) => {
     const [addMachineError, setAddMachineError] = useState(null);
     const [removingMachineId, setRemovingMachineId] = useState(null);
 
-    const fetchRecipe = useCallback(async () => {
+    const fetchRecipe = useCallback(async ({ background = false } = {}) => {
         if (!id) return;
-        setLoading(true);
+        if (!background) setLoading(true);
         setError(null);
         try {
             const data = await productionApi.cuttingRecipes.getById(id);
@@ -321,7 +325,7 @@ export const useCuttingRecipeDetail = (id) => {
         } catch (err) {
             setError(extractErrorMessage(err, 'Failed to load recipe'));
         } finally {
-            setLoading(false);
+            if (!background) setLoading(false);
         }
     }, [id]);
 
@@ -334,7 +338,7 @@ export const useCuttingRecipeDetail = (id) => {
         setIssueError(null);
         try {
             await productionApi.cuttingRecipes.issueMaterial(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setIssueError(extractErrorMessage(err, 'Failed to issue material'));
             throw err;
@@ -348,7 +352,7 @@ export const useCuttingRecipeDetail = (id) => {
         setUpdateMaterialError(null);
         try {
             await productionApi.cuttingRecipes.updateIssuedMaterial(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateMaterialError(extractErrorMessage(err, 'Failed to update issued material'));
             throw err;
@@ -362,7 +366,7 @@ export const useCuttingRecipeDetail = (id) => {
         setAddBreakdownError(null);
         try {
             await productionApi.cuttingRecipes.addBreakdownItem(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddBreakdownError(extractErrorMessage(err, 'Failed to add breakdown item'));
             throw err;
@@ -376,7 +380,7 @@ export const useCuttingRecipeDetail = (id) => {
         setUpdateDescriptionError(null);
         try {
             await productionApi.cuttingRecipes.updateDescription(id, { description });
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateDescriptionError(extractErrorMessage(err, 'Failed to update description'));
             throw err;
@@ -390,7 +394,7 @@ export const useCuttingRecipeDetail = (id) => {
         setFinishError(null);
         try {
             await productionApi.cuttingRecipes.finish(id);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setFinishError(extractErrorMessage(err, 'Failed to finish recipe'));
             throw err;
@@ -404,7 +408,7 @@ export const useCuttingRecipeDetail = (id) => {
         setSetTimeErrorState(null);
         try {
             await productionApi.cuttingRecipes.setTime(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
             throw err;
@@ -418,7 +422,7 @@ export const useCuttingRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.cuttingRecipes.addLabor(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
             throw err;
@@ -432,7 +436,7 @@ export const useCuttingRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.cuttingRecipes.removeLabor(id, employeeId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
             throw err;
@@ -446,7 +450,7 @@ export const useCuttingRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.cuttingRecipes.addMachine(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
             throw err;
@@ -460,7 +464,7 @@ export const useCuttingRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.cuttingRecipes.removeMachine(id, machineId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
             throw err;
@@ -553,9 +557,9 @@ export const usePackingRecipeDetail = (id) => {
     const [addMachineError, setAddMachineError] = useState(null);
     const [removingMachineId, setRemovingMachineId] = useState(null);
 
-    const fetchRecipe = useCallback(async () => {
+    const fetchRecipe = useCallback(async ({ background = false } = {}) => {
         if (!id) return;
-        setLoading(true);
+        if (!background) setLoading(true);
         setError(null);
         try {
             const data = await productionApi.packingRecipes.getById(id);
@@ -563,7 +567,7 @@ export const usePackingRecipeDetail = (id) => {
         } catch (err) {
             setError(extractErrorMessage(err, 'Failed to load recipe'));
         } finally {
-            setLoading(false);
+            if (!background) setLoading(false);
         }
     }, [id]);
 
@@ -576,7 +580,7 @@ export const usePackingRecipeDetail = (id) => {
         setIssuePieceError(null);
         try {
             await productionApi.packingRecipes.issuePiece(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setIssuePieceError(extractErrorMessage(err, 'Failed to issue piece'));
             throw err;
@@ -590,7 +594,7 @@ export const usePackingRecipeDetail = (id) => {
         setUpdatePieceError(null);
         try {
             await productionApi.packingRecipes.updateIssuedPiece(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdatePieceError(extractErrorMessage(err, 'Failed to update issued piece'));
             throw err;
@@ -604,7 +608,7 @@ export const usePackingRecipeDetail = (id) => {
         setIssueMaterialError(null);
         try {
             await productionApi.packingRecipes.issueMaterial(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setIssueMaterialError(extractErrorMessage(err, 'Failed to issue material'));
             throw err;
@@ -618,7 +622,7 @@ export const usePackingRecipeDetail = (id) => {
         setUpdateMaterialError(null);
         try {
             await productionApi.packingRecipes.updateIssuedMaterial(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateMaterialError(extractErrorMessage(err, 'Failed to update issued material'));
             throw err;
@@ -632,7 +636,7 @@ export const usePackingRecipeDetail = (id) => {
         setUpdateDescriptionError(null);
         try {
             await productionApi.packingRecipes.updateDescription(id, { description });
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setUpdateDescriptionError(extractErrorMessage(err, 'Failed to update description'));
             throw err;
@@ -646,7 +650,7 @@ export const usePackingRecipeDetail = (id) => {
         setFinishError(null);
         try {
             await productionApi.packingRecipes.finish(id, { shelf_allocations: shelfAllocations });
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setFinishError(extractErrorMessage(err, 'Failed to finish recipe'));
             throw err;
@@ -660,7 +664,7 @@ export const usePackingRecipeDetail = (id) => {
         setSetTimeErrorState(null);
         try {
             await productionApi.packingRecipes.setTime(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
             throw err;
@@ -674,7 +678,7 @@ export const usePackingRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.packingRecipes.addLabor(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
             throw err;
@@ -688,7 +692,7 @@ export const usePackingRecipeDetail = (id) => {
         setAddLaborError(null);
         try {
             await productionApi.packingRecipes.removeLabor(id, employeeId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
             throw err;
@@ -702,7 +706,7 @@ export const usePackingRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.packingRecipes.addMachine(id, payload);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
             throw err;
@@ -716,7 +720,7 @@ export const usePackingRecipeDetail = (id) => {
         setAddMachineError(null);
         try {
             await productionApi.packingRecipes.removeMachine(id, machineId);
-            await fetchRecipe();
+            await fetchRecipe({ background: true });
         } catch (err) {
             setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
             throw err;

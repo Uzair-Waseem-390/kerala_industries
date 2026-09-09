@@ -7,6 +7,7 @@ Portable rules for a React + Vite + Tailwind app — reuse across projects with 
 - **Mobile responsive is a hard requirement**: design/verify mobile-first, not "doesn't break on desktop." Use the central breakpoint scale. Tables need a real narrow-screen treatment (stacked cards/scroll affordance), not overflow. Touch-sized targets. Actually check a mobile viewport before calling a page done.
 - **API clients**: object literal namespaced by sub-resource, routed through one shared `api` wrapper — never raw axios/fetch in a component. Identical-shape resources → factory function, not copy-paste.
 - **Hooks**: `usePaginatedList` shape `{data, meta, loading, initialLoading, error, filters, setFilters, page, setPage, refetch}`. Mutation hooks: `mutating` + try/catch/finally + `refetch()`.
+- **A mutation's refetch must never re-trigger the page-level loading flag** — pass a `background`/silent option so only the initial mount shows the full-page spinner; the mutation's own `mutating` flag already covers its feedback.
 - **Permissions**: route guard = auth only; role checks inline per page. Nav-hide AND page-level redirect both required.
 - **Page skeleton**: role check → data hook → loading spinner → header → error alert w/ retry → filters → table/empty state → pagination → modal.
 - **Forms**: controlled state via `useState`; one validation-ownership shape per app (form-owned or page-owned, not both); always `toast.error(extractErrorMessage(...))`.
