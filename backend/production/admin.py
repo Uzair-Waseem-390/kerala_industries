@@ -3,8 +3,9 @@ from django.contrib import admin
 from .models import (
     CuttingBreakdownItem, CuttingIssuedMaterial, CuttingMaterialConsumption, FgProduct,
     PackingIssuedMaterial, PackingIssuedPiece, PackingMaterialConsumption, PackingOutputItem,
-    PackingPieceConsumption, Recipe, RecipeBreakdownItem, RecipeIssuedMaterial,
-    RecipeMaterialConsumption, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
+    PackingPieceConsumption, Recipe, RecipeBreakdownItem, RecipeIssuedMaterial, RecipeLabor,
+    RecipeMachine, RecipeMaterialConsumption, RewoundCoreBinding, RewoundCoreLengthMm,
+    RewoundCoreYard, WipProduct,
 )
 
 
@@ -80,8 +81,22 @@ class RecipeIssuedMaterialInline(admin.TabularInline):
 class RecipeBreakdownItemInline(admin.TabularInline):
     model    = RecipeBreakdownItem
     extra    = 0
-    readonly_fields = ("wip_product", "quantity", "remaining_quantity", "unit_cost_snapshot")
+    readonly_fields = ("wip_product", "quantity", "remaining_quantity", "unit_cost_snapshot", "full_unit_cost_snapshot")
     can_delete = False
+
+
+class RecipeLaborInline(admin.TabularInline):
+    model      = RecipeLabor
+    extra      = 0
+    readonly_fields = ("employee", "rate_per_hour_snapshot", "created_at")
+    can_delete = True
+
+
+class RecipeMachineInline(admin.TabularInline):
+    model      = RecipeMachine
+    extra      = 0
+    readonly_fields = ("machine", "rate_per_hour_snapshot", "created_at")
+    can_delete = True
 
 
 class CuttingIssuedMaterialInline(admin.TabularInline):
@@ -95,7 +110,7 @@ class CuttingBreakdownItemInline(admin.TabularInline):
     model      = CuttingBreakdownItem
     extra      = 0
     readonly_fields = ("wip_product", "length_mm", "quantity", "remaining_quantity",
-                        "unit_cost_before_waste", "unit_cost_snapshot")
+                        "unit_cost_before_waste", "unit_cost_snapshot", "full_unit_cost_snapshot")
     can_delete = False
 
 
@@ -116,25 +131,28 @@ class PackingIssuedMaterialInline(admin.TabularInline):
 class PackingOutputItemInline(admin.TabularInline):
     model      = PackingOutputItem
     extra      = 0
-    readonly_fields = ("fg_product", "quantity", "remaining_quantity", "unit_cost_snapshot")
+    readonly_fields = ("fg_product", "quantity", "remaining_quantity", "unit_cost_snapshot", "full_unit_cost_snapshot")
     can_delete = False
 
 
 @admin.register(Recipe)
 class RecipeAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
-    list_display        = ["recipe_number", "name", "recipe_type", "status", "cost_per_unit", "waste_length_mm", "created_at"]
+    list_display        = ["recipe_number", "name", "recipe_type", "status", "cost_per_unit", "full_cost_per_unit", "waste_length_mm", "created_at"]
     list_filter         = ["is_deleted", "recipe_type", "status"]
     search_fields       = ["recipe_number", "name"]
     readonly_fields     = AuditAdminMixin.readonly_fields + (
-        "recipe_number", "cost_per_unit", "waste_length_mm", "waste_cost", "finished_by", "finished_at",
+        "recipe_number", "cost_per_unit", "full_cost_per_unit", "waste_length_mm", "waste_cost",
+        "finished_by", "finished_at",
     )
     # Rewinding, Cutting, and Packing inlines are all registered here since
     # Recipe is the shared header — only one set is ever populated per row,
-    # per recipe_type, so the others simply show empty.
+    # per recipe_type, so the others simply show empty. Labor/Machine
+    # inlines apply to every recipe_type (shared DL+FOH mechanism).
     inlines             = [
         RecipeIssuedMaterialInline, RecipeBreakdownItemInline,
         CuttingIssuedMaterialInline, CuttingBreakdownItemInline,
         PackingIssuedPieceInline, PackingIssuedMaterialInline, PackingOutputItemInline,
+        RecipeLaborInline, RecipeMachineInline,
     ]
 
 

@@ -8,6 +8,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from inventory.models import FgInventory, FgInventoryStatsFlow, FgShelfStock, WipInventoryStatsFlow
+from manufacturing_costs.models import Machine
+from manufacturing_costs.services import create_employee, create_machine
 from purchases.models import Family, Shelf, Supplier
 from purchases.services import (
     confirm_purchase_order, create_core_length, create_core_purchase,
@@ -19,10 +21,11 @@ from users.models import User
 from .models import CuttingBreakdownItem, FgProduct, PackingIssuedMaterial, PackingIssuedPiece, Recipe, WipProduct
 from .selectors import get_packing_recipe_by_id
 from .services import (
-    add_breakdown_item, add_cutting_breakdown_item, create_cutting_recipe, create_packing_recipe,
-    create_recipe, finish_cutting_recipe, finish_packing_recipe, finish_recipe,
-    issue_cutting_material, issue_material, issue_packing_material, issue_packing_piece,
-    update_packing_issued_material, update_packing_issued_piece, update_recipe_description,
+    add_breakdown_item, add_cutting_breakdown_item, add_recipe_labor, add_recipe_machine,
+    create_cutting_recipe, create_packing_recipe, create_recipe, finish_cutting_recipe,
+    finish_packing_recipe, finish_recipe, issue_cutting_material, issue_material,
+    issue_packing_material, issue_packing_piece, set_recipe_time, update_packing_issued_material,
+    update_packing_issued_piece, update_recipe_description,
 )
 from .views import PackingRecipeListCreateView, PackingRecipeRetrieveView
 
@@ -53,6 +56,26 @@ class PackingRecipeTestBase(TestCase):
         self.admin = make_admin()
         self.shelf = Shelf.objects.create(name="Shelf A")
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
+
+        # --- Manufacturing Costs: one employee + one machine per category,
+        # required by validate_manufacturing_resources at every recipe
+        # creation from here on. ---
+        self.employee = create_employee(
+            name="Test Worker", monthly_salary=Decimal("30000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=26, user=self.admin,
+        )
+        self.rewinding_machine = create_machine(
+            name="Test Rewinder", category=Machine.Category.REWINDING, monthly_repair_cost=Decimal("5000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=26, user=self.admin,
+        )
+        self.cutting_machine = create_machine(
+            name="Test Cutter", category=Machine.Category.CUTTING, monthly_repair_cost=Decimal("3000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=26, user=self.admin,
+        )
+        self.packing_machine = create_machine(
+            name="Test Packer", category=Machine.Category.PACKING, monthly_repair_cost=Decimal("2000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=26, user=self.admin,
+        )
 
         # --- RM purchases: Jumbo, Cores, Packing Material ---
         core_length = create_core_length(value="1", user=self.admin)  # 1 inch -> 25.4mm
@@ -107,6 +130,7 @@ class PackingRecipeTestBase(TestCase):
             user=self.admin,
         )
         update_recipe_description(recipe_id=rewinding.id, description="Rewinding smoke", user=self.admin)
+        self._staff_recipe(rewinding.id, self.rewinding_machine)
         finish_recipe(recipe_id=rewinding.id, user=self.admin)
 
         self.whole_core = WipProduct.objects.get(stage=WipProduct.Stage.REWINDING)
@@ -124,10 +148,17 @@ class PackingRecipeTestBase(TestCase):
             user=self.admin,
         )
         update_recipe_description(recipe_id=cutting.id, description="Cutting smoke", user=self.admin)
+        self._staff_recipe(cutting.id, self.cutting_machine)
         finish_cutting_recipe(recipe_id=cutting.id, user=self.admin)
 
         self.piece = WipProduct.objects.get(stage=WipProduct.Stage.CUTTING)
         self.piece_batch = CuttingBreakdownItem.objects.get(wip_product=self.piece)
+
+    def _staff_recipe(self, recipe_id, machine):
+        """Assigns time + this fixture's employee + a matching-category machine — required before any finish_*_recipe call."""
+        set_recipe_time(recipe_id=recipe_id, hours=1, minutes=0, user=self.admin)
+        add_recipe_labor(recipe_id=recipe_id, employee_id=self.employee.id, user=self.admin)
+        add_recipe_machine(recipe_id=recipe_id, machine_id=machine.id, user=self.admin)
 
 
 class PackingHappyPathTests(PackingRecipeTestBase):
@@ -143,6 +174,7 @@ class PackingHappyPathTests(PackingRecipeTestBase):
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("0.4")}], user=self.admin,
         )
         update_recipe_description(recipe_id=recipe.id, description="Packing smoke", user=self.admin)
+        self._staff_recipe(recipe.id, self.packing_machine)
 
         finished = finish_packing_recipe(
             recipe_id=recipe.id,
@@ -157,7 +189,7 @@ class PackingHappyPathTests(PackingRecipeTestBase):
         self.assertEqual(fg_product.name, self.piece.name)
         self.assertEqual(output.quantity, Decimal("4"))
 
-        piece_unit_cost = self.piece_batch.unit_cost_snapshot
+        piece_unit_cost = self.piece_batch.full_unit_cost_snapshot
         packing_cost_per_piece = (Decimal("0.4") * Decimal("100")) / Decimal("4")  # 0.4kg @ 100/kg / 4 pieces
         expected_fg_cost = (piece_unit_cost + packing_cost_per_piece).quantize(Decimal("0.0001"))
         self.assertEqual(output.unit_cost_snapshot, expected_fg_cost)
@@ -193,6 +225,15 @@ class PackingHappyPathTests(PackingRecipeTestBase):
         """
         from django.utils import timezone as tz
 
+        # Pin the first batch's full cost to the exact value this test's
+        # divergence math below is written against — full_unit_cost_snapshot
+        # otherwise includes this fixture's real (employee+machine-rate-
+        # dependent) DL+FOH pool share, which is a moving target unrelated
+        # to what this test is actually checking (rounding-order, not the
+        # DL+FOH calculation itself — that's covered elsewhere).
+        self.piece_batch.full_unit_cost_snapshot = Decimal("317.3090")
+        self.piece_batch.save(update_fields=["full_unit_cost_snapshot"])
+
         second_cutting_recipe = Recipe.objects.create(
             recipe_number="CUT-TEST-0002", recipe_type=Recipe.RecipeType.CUTTING,
             name="Second batch", status=Recipe.Status.FINISHED, finished_at=tz.now(),
@@ -201,7 +242,8 @@ class PackingHappyPathTests(PackingRecipeTestBase):
         CuttingBreakdownItem.objects.create(
             recipe=second_cutting_recipe, wip_product=self.piece,
             length_mm=self.piece_batch.length_mm, quantity=Decimal("2"), remaining_quantity=Decimal("2"),
-            unit_cost_snapshot=Decimal("100.0000"), created_by=self.admin, updated_by=self.admin,
+            unit_cost_snapshot=Decimal("100.0000"), full_unit_cost_snapshot=Decimal("100.0000"),
+            created_by=self.admin, updated_by=self.admin,
         )
         # The FIFO batch alone isn't enough to issue against — WipInventory/
         # WipShelfStock (what issue_packing_piece's shelf-availability check
@@ -227,13 +269,14 @@ class PackingHappyPathTests(PackingRecipeTestBase):
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("1.15")}], user=self.admin,
         )
         update_recipe_description(recipe_id=recipe.id, description="x", user=self.admin)
+        self._staff_recipe(recipe.id, self.packing_machine)
         finished = finish_packing_recipe(
             recipe_id=recipe.id,
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("11")}],
             user=self.admin,
         )
 
-        piece_total_cost = Decimal("10") * self.piece_batch.unit_cost_snapshot + Decimal("1") * Decimal("100.0000")
+        piece_total_cost = Decimal("10") * self.piece_batch.full_unit_cost_snapshot + Decimal("1") * Decimal("100.0000")
         packing_total_cost = Decimal("1.15") * Decimal("100")
         combined_total = piece_total_cost + packing_total_cost
         expected_fg_cost = (combined_total / Decimal("11")).quantize(Decimal("0.0001"))
@@ -262,6 +305,7 @@ class PackingHappyPathTests(PackingRecipeTestBase):
                 shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("0.2")}], user=self.admin,
             )
             update_recipe_description(recipe_id=recipe.id, description="x", user=self.admin)
+            self._staff_recipe(recipe.id, self.packing_machine)
             finish_packing_recipe(
                 recipe_id=recipe.id,
                 shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("2")}],
@@ -408,6 +452,7 @@ class PackingApiViewTests(PackingRecipeTestBase):
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("0.4")}], user=self.admin,
         )
         update_recipe_description(recipe_id=recipe.id, description="x", user=self.admin)
+        self._staff_recipe(recipe.id, self.packing_machine)
         finish_packing_recipe(
             recipe_id=recipe.id,
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("4")}],
@@ -450,6 +495,7 @@ class FgProductCodeTests(PackingRecipeTestBase):
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("0.1")}], user=self.admin,
         )
         update_recipe_description(recipe_id=recipe.id, description="x", user=self.admin)
+        self._staff_recipe(recipe.id, self.packing_machine)
         finished = finish_packing_recipe(
             recipe_id=recipe.id,
             shelf_allocations=[{"shelf_id": self.shelf.id, "quantity": Decimal("1")}],

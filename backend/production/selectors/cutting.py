@@ -5,7 +5,8 @@ from backend.search import search_q
 
 from ..models import (
     CuttingBreakdownItem, CuttingBreakdownItemShelfAllocation, CuttingIssuedMaterial,
-    CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, WipProduct,
+    CuttingMaterialConsumption, CuttingMaterialShelfDraw, Recipe, RecipeLabor, RecipeMachine,
+    WipProduct,
 )
 from ..utils import WIP_PRODUCT_SELECT_RELATED
 
@@ -94,6 +95,8 @@ def _cutting_recipe_qs():
                 ),
             ),
         ),
+        Prefetch("labor_entries", queryset=RecipeLabor.objects.select_related("employee")),
+        Prefetch("machine_entries", queryset=RecipeMachine.objects.select_related("machine")),
     )
 
 

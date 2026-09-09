@@ -16,6 +16,9 @@ from .packing import (
     create_packing_recipe, finish_packing_recipe, issue_packing_material, issue_packing_piece,
     update_packing_issued_material, update_packing_issued_piece,
 )
+from ._shared import (
+    add_recipe_labor, add_recipe_machine, remove_recipe_labor, remove_recipe_machine, set_recipe_time,
+)
 
 __all__ = [
     "add_breakdown_item", "create_recipe", "finish_recipe", "issue_material",
@@ -24,4 +27,5 @@ __all__ = [
     "issue_cutting_material", "update_cutting_issued_material",
     "create_packing_recipe", "finish_packing_recipe", "issue_packing_material",
     "issue_packing_piece", "update_packing_issued_material", "update_packing_issued_piece",
+    "add_recipe_labor", "add_recipe_machine", "remove_recipe_labor", "remove_recipe_machine", "set_recipe_time",
 ]

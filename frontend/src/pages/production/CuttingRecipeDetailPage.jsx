@@ -15,6 +15,7 @@ import InlineAlert from '../../components/ui/InlineAlert';
 import EmptyState from '../../components/ui/EmptyState';
 import ShelfAllocationEditor from '../../components/shared/ShelfAllocationEditor';
 import RecipeStatusBadge from '../../components/production/RecipeStatusBadge';
+import RecipeLaborMachineSection from '../../components/production/RecipeLaborMachineSection';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 
@@ -384,6 +385,11 @@ const CuttingRecipeDetailPage = () => {
         addBreakdownItem,
         updateDescription, updatingDescription,
         finish, finishing,
+        setTime, settingTime,
+        addLabor, addingLabor,
+        removeLabor, removingLaborId,
+        addMachine, addingMachine,
+        removeMachine, removingMachineId,
     } = useCuttingRecipeDetail(id);
 
     const [confirmFinishOpen, setConfirmFinishOpen] = useState(false);
@@ -420,6 +426,9 @@ const CuttingRecipeDetailPage = () => {
     const issuedMaterial = recipe.cutting_issued_material || null;
     const breakdownItems = recipe.cutting_breakdown_items || [];
     const hasDescription = !!recipe.description?.trim();
+    const hasTime = (recipe.time_hours || 0) > 0 || (recipe.time_minutes || 0) > 0;
+    const hasLabor = (recipe.labor_entries || []).length > 0;
+    const hasMachine = (recipe.machine_entries || []).length > 0;
 
     const startEditDescription = () => {
         setDescriptionDraft(recipe.description || '');
@@ -466,6 +475,11 @@ const CuttingRecipeDetailPage = () => {
                                 Cost / unit: {parseFloat(recipe.cost_per_unit).toFixed(2)}
                             </span>
                         )}
+                        {isFinished && recipe.full_cost_per_unit != null && (
+                            <span className="text-sm font-semibold text-accent-700">
+                                Full Cost / Unit: {parseFloat(recipe.full_cost_per_unit).toFixed(2)}
+                            </span>
+                        )}
                     </div>
                 </div>
                 {!isFinished && (
@@ -473,7 +487,7 @@ const CuttingRecipeDetailPage = () => {
                         <Button
                             variant="success"
                             icon={CheckCircle2}
-                            disabled={breakdownItems.length === 0 || !hasDescription}
+                            disabled={breakdownItems.length === 0 || !hasDescription || !hasTime || !hasLabor || !hasMachine}
                             onClick={() => setConfirmFinishOpen(true)}
                         >
                             Finish Recipe
@@ -483,6 +497,15 @@ const CuttingRecipeDetailPage = () => {
                         )}
                         {hasDescription && breakdownItems.length === 0 && (
                             <p className="text-xs text-error-600">Add at least one breakdown item before finishing.</p>
+                        )}
+                        {!hasTime && (
+                            <p className="text-xs text-error-600">Time taken (hours/minutes) must be entered before finishing this recipe.</p>
+                        )}
+                        {!hasLabor && (
+                            <p className="text-xs text-error-600">At least one employee must be assigned before finishing this recipe.</p>
+                        )}
+                        {!hasMachine && (
+                            <p className="text-xs text-error-600">At least one machine must be assigned before finishing this recipe.</p>
                         )}
                     </div>
                 )}
@@ -576,6 +599,19 @@ const CuttingRecipeDetailPage = () => {
                 onUpdate={updateIssuedMaterial}
             />
 
+            <div>
+                <h2 className="text-xl font-semibold text-neutral-900 mb-3">Time &amp; Cost Inputs</h2>
+                <RecipeLaborMachineSection
+                    recipe={recipe}
+                    disabled={isFinished}
+                    onSetTime={setTime} settingTime={settingTime}
+                    onAddLabor={addLabor} addingLabor={addingLabor}
+                    onRemoveLabor={removeLabor} removingLaborId={removingLaborId}
+                    onAddMachine={addMachine} addingMachine={addingMachine}
+                    onRemoveMachine={removeMachine} removingMachineId={removingMachineId}
+                />
+            </div>
+
             <Card className="p-6" hover={false}>
                 <h3 className="font-semibold text-neutral-900 mb-3 flex items-center gap-2">
                     <Layers className="w-4 h-4" /> Breakdown Items
@@ -600,7 +636,8 @@ const CuttingRecipeDetailPage = () => {
                                     {isFinished && (
                                         <>
                                             <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Before Waste</th>
-                                            <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Final</th>
+                                            <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">After Waste</th>
+                                            <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Full Cost</th>
                                         </>
                                     )}
                                 </tr>
@@ -624,6 +661,9 @@ const CuttingRecipeDetailPage = () => {
                                                 </td>
                                                 <td className="px-3 py-2 text-sm text-right font-medium">
                                                     {item.unit_cost_snapshot != null ? parseFloat(item.unit_cost_snapshot).toFixed(2) : '—'}
+                                                </td>
+                                                <td className="px-3 py-2 text-sm text-right font-medium">
+                                                    {item.full_unit_cost_snapshot != null ? parseFloat(item.full_unit_cost_snapshot).toFixed(2) : '—'}
                                                 </td>
                                             </>
                                         )}

@@ -6,7 +6,7 @@ from backend.search import search_q
 from ..models import (
     CuttingBreakdownItem, FgProduct, PackingIssuedMaterial, PackingIssuedPiece, PackingMaterialConsumption,
     PackingMaterialShelfDraw, PackingOutputItem, PackingOutputShelfAllocation, PackingPieceConsumption,
-    PackingPieceShelfDraw, Recipe, WipProduct,
+    PackingPieceShelfDraw, Recipe, RecipeLabor, RecipeMachine, WipProduct,
 )
 from ..utils import FG_PRODUCT_SELECT_RELATED, WIP_PRODUCT_SELECT_RELATED
 
@@ -105,6 +105,8 @@ def _packing_recipe_qs():
                 ),
             ),
         ),
+        Prefetch("labor_entries", queryset=RecipeLabor.objects.select_related("employee")),
+        Prefetch("machine_entries", queryset=RecipeMachine.objects.select_related("machine")),
     )
 
 

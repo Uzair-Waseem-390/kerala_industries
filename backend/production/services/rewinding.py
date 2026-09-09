@@ -23,8 +23,9 @@ from ..models import (
 from ..selectors import get_issued_material
 from ..utils import compute_wip_variant_key, inches_to_mm
 from ._shared import (
-    _fmt, draw_fifo, get_locked_recipe, next_wip_product_code, normalize_shelf_allocations,
-    require_under_processing, return_fifo,
+    _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
+    next_wip_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
+    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -70,6 +71,7 @@ def create_recipe(*, name: str, description: str = "", recipe_type: str = Recipe
     from rest_framework.exceptions import ValidationError
     if not name or not name.strip():
         raise ValidationError({"name": "Name is required."})
+    validate_manufacturing_resources(category=recipe_type)
 
     return Recipe.objects.create(
         recipe_number=_next_recipe_number(),
@@ -380,6 +382,8 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
     # calc reflects state as of this lock, not an earlier snapshot.)
     if not breakdown_items:
         raise ValidationError({"breakdown_items": "At least one breakdown item is required to finish this recipe."})
+    labor, machines = get_recipe_labor_and_machines(recipe)
+    validate_labor_and_machines(recipe, labor=labor, machines=machines)
 
     total_cost = Decimal("0")
     for issued in recipe.issued_materials.all():
@@ -408,12 +412,26 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
         (remaining_cost / last_item.quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         if last_item.quantity > 0 else Decimal("0")
     )
-    RecipeBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_snapshot"])
+
+    # DL+FOH pool spread flat across the same output items, on top of the
+    # material cost just computed above — gives each item its Full
+    # Manufacturing Cost. See services/_shared.py's module docstring.
+    pool = compute_labor_overhead_pool(recipe, labor=labor, machines=machines)
+    shares = spread_pool_flat(breakdown_items, pool)
+    for item in breakdown_items:
+        item.full_unit_cost_snapshot = (item.unit_cost_snapshot + shares[item]).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    RecipeBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_snapshot", "full_unit_cost_snapshot"])
 
     recipe.status = Recipe.Status.FINISHED
     recipe.cost_per_unit = cost_per_unit
+    recipe.full_cost_per_unit = (
+        ((total_cost + pool) / total_output_quantity).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+        if total_output_quantity > 0 else Decimal("0")
+    )
     recipe.finished_by = user
     recipe.finished_at = timezone.now()
     recipe.updated_by = user
-    recipe.save(update_fields=["status", "cost_per_unit", "finished_by", "finished_at", "updated_by", "updated_at"])
+    recipe.save(update_fields=[
+        "status", "cost_per_unit", "full_cost_per_unit", "finished_by", "finished_at", "updated_by", "updated_at",
+    ])
     return recipe

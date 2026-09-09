@@ -10,9 +10,9 @@ from .models import (
     CuttingMaterialConsumption, CuttingMaterialShelfDraw, FgProduct, PackingIssuedMaterial,
     PackingIssuedPiece, PackingMaterialConsumption, PackingMaterialShelfDraw, PackingOutputItem,
     PackingOutputShelfAllocation, PackingPieceConsumption, PackingPieceShelfDraw, Recipe,
-    RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
-    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
-    RewoundCoreYard, WipProduct,
+    RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial, RecipeLabor,
+    RecipeMachine, RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding,
+    RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
 )
 
 
@@ -146,6 +146,44 @@ class RecipeBreakdownItemShelfAllocationReadSerializer(serializers.ModelSerializ
         read_only_fields = fields
 
 
+# ---------------------------------------------------------------------------
+# Recipe Labor / Machine — shared across all 3 recipe types (Recipe itself
+# is one shared model). See production/services/_shared.py for the
+# add/remove/set-time service functions and the DL+FOH pool calculation.
+# ---------------------------------------------------------------------------
+
+class RecipeLaborReadSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source="employee.name", read_only=True)
+
+    class Meta:
+        model  = RecipeLabor
+        fields = ["id", "employee", "employee_name", "rate_per_hour_snapshot", "created_at"]
+        read_only_fields = fields
+
+
+class RecipeMachineReadSerializer(serializers.ModelSerializer):
+    machine_name     = serializers.CharField(source="machine.name", read_only=True)
+    machine_category = serializers.CharField(source="machine.category", read_only=True)
+
+    class Meta:
+        model  = RecipeMachine
+        fields = ["id", "machine", "machine_name", "machine_category", "rate_per_hour_snapshot", "created_at"]
+        read_only_fields = fields
+
+
+class SetRecipeTimeSerializer(serializers.Serializer):
+    time_hours   = serializers.IntegerField(min_value=0, default=0)
+    time_minutes = serializers.IntegerField(min_value=0, max_value=59, default=0)
+
+
+class AddRecipeLaborSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+
+
+class AddRecipeMachineSerializer(serializers.Serializer):
+    machine_id = serializers.IntegerField()
+
+
 class RecipeBreakdownItemReadSerializer(serializers.ModelSerializer):
     wip_product       = WipProductReadSerializer(read_only=True)
     shelf_allocations = RecipeBreakdownItemShelfAllocationReadSerializer(many=True, read_only=True)
@@ -153,21 +191,24 @@ class RecipeBreakdownItemReadSerializer(serializers.ModelSerializer):
     class Meta:
         model  = RecipeBreakdownItem
         fields = ["id", "wip_product", "quantity", "remaining_quantity", "unit_cost_snapshot",
-                  "shelf_allocations", "created_at"]
+                  "full_unit_cost_snapshot", "shelf_allocations", "created_at"]
         read_only_fields = fields
 
 
 class RecipeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
     issued_materials = RecipeIssuedMaterialReadSerializer(many=True, read_only=True)
     breakdown_items  = RecipeBreakdownItemReadSerializer(many=True, read_only=True)
+    labor_entries    = RecipeLaborReadSerializer(many=True, read_only=True)
+    machine_entries  = RecipeMachineReadSerializer(many=True, read_only=True)
     finished_by      = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model  = Recipe
         fields = [
             "id", "recipe_number", "recipe_type", "name", "description", "status",
-            "cost_per_unit", "finished_by", "finished_at",
-            "issued_materials", "breakdown_items",
+            "cost_per_unit", "full_cost_per_unit", "time_hours", "time_minutes",
+            "finished_by", "finished_at",
+            "issued_materials", "breakdown_items", "labor_entries", "machine_entries",
             "created_by", "updated_by", "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -285,22 +326,29 @@ class CuttingBreakdownItemReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = CuttingBreakdownItem
+        # unit_cost_snapshot is labeled "After Waste" in the UI (unchanged
+        # value — material cost only); full_unit_cost_snapshot adds this
+        # recipe's DL+FOH share on top ("Full Cost").
         fields = ["id", "wip_product", "length_mm", "quantity", "remaining_quantity",
-                  "unit_cost_before_waste", "unit_cost_snapshot", "shelf_allocations", "created_at"]
+                  "unit_cost_before_waste", "unit_cost_snapshot", "full_unit_cost_snapshot",
+                  "shelf_allocations", "created_at"]
         read_only_fields = fields
 
 
 class CuttingRecipeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
     cutting_issued_material  = CuttingIssuedMaterialReadSerializer(read_only=True)
     cutting_breakdown_items  = CuttingBreakdownItemReadSerializer(many=True, read_only=True)
+    labor_entries            = RecipeLaborReadSerializer(many=True, read_only=True)
+    machine_entries          = RecipeMachineReadSerializer(many=True, read_only=True)
     finished_by              = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model  = Recipe
         fields = [
             "id", "recipe_number", "recipe_type", "name", "description", "status",
-            "cost_per_unit", "waste_length_mm", "waste_cost", "finished_by", "finished_at",
-            "cutting_issued_material", "cutting_breakdown_items",
+            "cost_per_unit", "full_cost_per_unit", "time_hours", "time_minutes",
+            "waste_length_mm", "waste_cost", "finished_by", "finished_at",
+            "cutting_issued_material", "cutting_breakdown_items", "labor_entries", "machine_entries",
             "created_by", "updated_by", "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -465,8 +513,12 @@ class PackingOutputItemReadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = PackingOutputItem
+        # unit_cost_snapshot is labeled "Material Cost" in the UI (unchanged
+        # value — piece cost + packing material cost); full_unit_cost_snapshot
+        # adds this recipe's DL+FOH share on top ("Full Cost" — the FG
+        # unit's full manufacturing cost, the basis for COGS at sale time).
         fields = ["id", "fg_product", "quantity", "remaining_quantity", "unit_cost_snapshot",
-                  "shelf_allocations", "created_at"]
+                  "full_unit_cost_snapshot", "shelf_allocations", "created_at"]
         read_only_fields = fields
 
 
@@ -474,14 +526,18 @@ class PackingRecipeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
     packing_issued_piece    = PackingIssuedPieceReadSerializer(read_only=True)
     packing_issued_material = PackingIssuedMaterialReadSerializer(read_only=True)
     packing_output_item     = PackingOutputItemReadSerializer(read_only=True)
+    labor_entries           = RecipeLaborReadSerializer(many=True, read_only=True)
+    machine_entries         = RecipeMachineReadSerializer(many=True, read_only=True)
     finished_by             = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model  = Recipe
         fields = [
             "id", "recipe_number", "recipe_type", "name", "description", "status",
-            "cost_per_unit", "finished_by", "finished_at",
+            "cost_per_unit", "full_cost_per_unit", "time_hours", "time_minutes",
+            "finished_by", "finished_at",
             "packing_issued_piece", "packing_issued_material", "packing_output_item",
+            "labor_entries", "machine_entries",
             "created_by", "updated_by", "created_at", "updated_at",
         ]
         read_only_fields = fields

@@ -37,6 +37,17 @@ export const productionApi = {
         // Description is optional at creation, editable any time the recipe
         // is still under_processing, and required before finish.
         updateDescription: (id, data) => api.patch(`/production/recipes/${id}/description/`, data),
+        // Time taken + Direct Labor/Factory Overhead assignment — all
+        // required before finish (server-enforced) so the DL+FOH cost pool
+        // can be spread into full_cost_per_unit alongside the material-only
+        // cost_per_unit that already existed.
+        setTime: (id, data) => api.patch(`/production/recipes/${id}/time/`, data),
+        addLabor: (id, data) => api.post(`/production/recipes/${id}/labor/`, data),
+        removeLabor: (id, employeeId) => api.delete(`/production/recipes/${id}/labor/${employeeId}/`),
+        // Backend rejects with 400 if the machine's category doesn't match
+        // this recipe's own recipe_type.
+        addMachine: (id, data) => api.post(`/production/recipes/${id}/machines/`, data),
+        removeMachine: (id, machineId) => api.delete(`/production/recipes/${id}/machines/${machineId}/`),
     },
 
     // RM variants already purchased for a given kind ("jumbo" | "cores" |
@@ -73,6 +84,13 @@ export const productionApi = {
         // pieces of that length (quantity), plus put-away shelf_allocations.
         addBreakdownItem: (id, data) => api.post(`/production/cutting-recipes/${id}/breakdown-items/`, data),
         finish: (id) => api.post(`/production/cutting-recipes/${id}/finish/`),
+        // Time taken + Direct Labor/Factory Overhead assignment — same
+        // shape as Rewinding's own recipes.setTime/addLabor/addMachine.
+        setTime: (id, data) => api.patch(`/production/cutting-recipes/${id}/time/`, data),
+        addLabor: (id, data) => api.post(`/production/cutting-recipes/${id}/labor/`, data),
+        removeLabor: (id, employeeId) => api.delete(`/production/cutting-recipes/${id}/labor/${employeeId}/`),
+        addMachine: (id, data) => api.post(`/production/cutting-recipes/${id}/machines/`, data),
+        removeMachine: (id, machineId) => api.delete(`/production/cutting-recipes/${id}/machines/${machineId}/`),
     },
 
     // Whole Rewound Cores (not already-cut pieces) available to issue into
@@ -152,6 +170,13 @@ export const productionApi = {
         // sized to the issued piece's quantity, and is where the newly
         // produced Finished Goods output gets put away.
         finish: (id, data) => api.post(`/production/packing-recipes/${id}/finish/`, data),
+        // Time taken + Direct Labor/Factory Overhead assignment — same
+        // shape as Rewinding's own recipes.setTime/addLabor/addMachine.
+        setTime: (id, data) => api.patch(`/production/packing-recipes/${id}/time/`, data),
+        addLabor: (id, data) => api.post(`/production/packing-recipes/${id}/labor/`, data),
+        removeLabor: (id, employeeId) => api.delete(`/production/packing-recipes/${id}/labor/${employeeId}/`),
+        addMachine: (id, data) => api.post(`/production/packing-recipes/${id}/machines/`, data),
+        removeMachine: (id, machineId) => api.delete(`/production/packing-recipes/${id}/machines/${machineId}/`),
     },
 
     // Cut Pieces (WIP, stage=cutting) issuable into a Packing recipe — the

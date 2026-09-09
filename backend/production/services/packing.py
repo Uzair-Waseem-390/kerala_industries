@@ -24,8 +24,9 @@ from ..models import (
 from ..selectors import get_available_cutting_batches_for_fifo, get_packing_issued_material, get_packing_issued_piece
 from ..utils import compute_fg_variant_key
 from ._shared import (
-    _fmt, draw_fifo, get_locked_recipe, next_fg_product_code, normalize_shelf_allocations,
-    require_under_processing, return_fifo,
+    _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
+    next_fg_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
+    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -39,6 +40,7 @@ def create_packing_recipe(*, name: str, description: str = "", user) -> Recipe:
     from rest_framework.exceptions import ValidationError
     if not name or not name.strip():
         raise ValidationError({"name": "Name is required."})
+    validate_manufacturing_resources(category=Recipe.RecipeType.PACKING)
 
     return Recipe.objects.create(
         recipe_number=_next_packing_recipe_number(),
@@ -70,8 +72,13 @@ def _validate_packing_material(product) -> None:
 
 
 def _piece_unit_cost_fn(batch) -> Decimal:
-    """A Cutting batch's cost is already exact — frozen once at finish_cutting_recipe. No re-derivation needed."""
-    return batch.unit_cost_snapshot
+    """
+    A Cutting batch's cost is already exact — frozen once at
+    finish_cutting_recipe. Uses full_unit_cost_snapshot (material + DL +
+    FOH), not unit_cost_snapshot (material only, "After Waste") — Packing's
+    material cost must include everything absorbed into the piece upstream.
+    """
+    return batch.full_unit_cost_snapshot
 
 
 def _packing_material_unit_cost_fn(batch) -> Decimal:
@@ -358,6 +365,8 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
         issued_material = get_packing_issued_material(recipe_id=recipe_id)
     except Http404:
         raise ValidationError({"issued_material": "Packing material must be issued before finishing this recipe."})
+    labor, machines = get_recipe_labor_and_machines(recipe)
+    validate_labor_and_machines(recipe, labor=labor, machines=machines)
 
     piece_product = issued_piece.wip_product
     total_pieces = issued_piece.quantity
@@ -385,6 +394,14 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
         (total_cost / total_pieces).quantize(precision, rounding=ROUND_HALF_UP)
         if total_pieces > 0 else Decimal("0")
     )
+
+    # DL+FOH pool spread across this recipe's single output row — with only
+    # one row, dividing pool directly by total_pieces IS the residual-on-
+    # last-item rule (see finish_packing_recipe's own docstring above on why
+    # a one-row output uses one division, not the multi-row helper).
+    pool = compute_labor_overhead_pool(recipe, labor=labor, machines=machines)
+    pool_per_piece = (pool / total_pieces).quantize(precision, rounding=ROUND_HALF_UP) if total_pieces > 0 else Decimal("0")
+    full_fg_unit_cost = (fg_unit_cost + pool_per_piece).quantize(precision, rounding=ROUND_HALF_UP)
 
     variant_key = compute_fg_variant_key(
         binding_id=piece_product.binding_id, yard_id=piece_product.yard_id, length_mm_id=piece_product.length_mm_id,
@@ -421,7 +438,8 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
 
     output = PackingOutputItem.objects.create(
         recipe=recipe, fg_product=fg_product, quantity=total_pieces, remaining_quantity=total_pieces,
-        unit_cost_snapshot=fg_unit_cost, created_by=user, updated_by=user,
+        unit_cost_snapshot=fg_unit_cost, full_unit_cost_snapshot=full_fg_unit_cost,
+        created_by=user, updated_by=user,
     )
 
     sync_fg_inventory(product=fg_product, quantity_delta=total_pieces, user=user)
@@ -438,8 +456,11 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
 
     recipe.status = Recipe.Status.FINISHED
     recipe.cost_per_unit = fg_unit_cost
+    recipe.full_cost_per_unit = full_fg_unit_cost
     recipe.finished_by = user
     recipe.finished_at = timezone.now()
     recipe.updated_by = user
-    recipe.save(update_fields=["status", "cost_per_unit", "finished_by", "finished_at", "updated_by", "updated_at"])
+    recipe.save(update_fields=[
+        "status", "cost_per_unit", "full_cost_per_unit", "finished_by", "finished_at", "updated_by", "updated_at",
+    ])
     return recipe

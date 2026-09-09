@@ -18,8 +18,9 @@ from ..models import (
 from ..selectors import get_available_wip_batches_for_fifo, get_cutting_issued_material
 from ..utils import compute_wip_variant_key
 from ._shared import (
-    _fmt, draw_fifo, get_locked_recipe, next_wip_product_code, normalize_shelf_allocations,
-    require_under_processing, return_fifo,
+    _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
+    next_wip_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
+    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -33,6 +34,7 @@ def create_cutting_recipe(*, name: str, description: str = "", user) -> Recipe:
     from rest_framework.exceptions import ValidationError
     if not name or not name.strip():
         raise ValidationError({"name": "Name is required."})
+    validate_manufacturing_resources(category=Recipe.RecipeType.CUTTING)
 
     return Recipe.objects.create(
         recipe_number=_next_cutting_recipe_number(),
@@ -60,10 +62,13 @@ def _validate_core_is_issuable(product: WipProduct) -> None:
 def _core_unit_cost_fn(batch: RecipeBreakdownItem) -> Decimal:
     """
     A WIP batch's cost is already exact — frozen once at finish_recipe
-    (Rewinding). No re-derivation needed (unlike RM batches, where unit_cost
-    is total_price/quantity computed on the fly).
+    (Rewinding). Uses full_unit_cost_snapshot (material + DL + FOH), not
+    unit_cost_snapshot (material only) — Cutting's material cost must
+    include everything absorbed into the batch upstream. No re-derivation
+    needed (unlike RM batches, where unit_cost is total_price/quantity
+    computed on the fly).
     """
-    return batch.unit_cost_snapshot
+    return batch.full_unit_cost_snapshot
 
 
 @transaction.atomic
@@ -295,6 +300,8 @@ def finish_cutting_recipe(*, recipe_id: int, user) -> Recipe:
     breakdown_items = list(recipe.cutting_breakdown_items.all())
     if not breakdown_items:
         raise ValidationError({"breakdown_items": "At least one breakdown item is required to finish this recipe."})
+    labor, machines = get_recipe_labor_and_machines(recipe)
+    validate_labor_and_machines(recipe, labor=labor, machines=machines)
 
     issued = get_cutting_issued_material(recipe_id=recipe_id)
 
@@ -346,17 +353,30 @@ def finish_cutting_recipe(*, recipe_id: int, user) -> Recipe:
         if last_item.quantity > 0 else Decimal("0")
     )
 
-    CuttingBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_before_waste", "unit_cost_snapshot"])
+    # DL+FOH pool spread flat across the same output items, on top of the
+    # after-waste material cost just computed above.
+    pool = compute_labor_overhead_pool(recipe, labor=labor, machines=machines)
+    shares = spread_pool_flat(breakdown_items, pool)
+    for item in breakdown_items:
+        item.full_unit_cost_snapshot = (item.unit_cost_snapshot + shares[item]).quantize(precision, rounding=ROUND_HALF_UP)
+
+    CuttingBreakdownItem.objects.bulk_update(
+        breakdown_items, ["unit_cost_before_waste", "unit_cost_snapshot", "full_unit_cost_snapshot"],
+    )
 
     recipe.status = Recipe.Status.FINISHED
     recipe.cost_per_unit = (total_cost / total_output_pieces).quantize(precision, rounding=ROUND_HALF_UP) if total_output_pieces > 0 else Decimal("0")
+    recipe.full_cost_per_unit = (
+        ((total_cost + pool) / total_output_pieces).quantize(precision, rounding=ROUND_HALF_UP)
+        if total_output_pieces > 0 else Decimal("0")
+    )
     recipe.waste_length_mm = waste_length_mm
     recipe.waste_cost = waste_cost.quantize(precision, rounding=ROUND_HALF_UP)
     recipe.finished_by = user
     recipe.finished_at = timezone.now()
     recipe.updated_by = user
     recipe.save(update_fields=[
-        "status", "cost_per_unit", "waste_length_mm", "waste_cost",
+        "status", "cost_per_unit", "full_cost_per_unit", "waste_length_mm", "waste_cost",
         "finished_by", "finished_at", "updated_by", "updated_at",
     ])
     return recipe

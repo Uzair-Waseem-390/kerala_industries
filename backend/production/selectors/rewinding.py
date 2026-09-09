@@ -5,8 +5,8 @@ from backend.search import search_q
 
 from ..models import (
     Recipe, RecipeBreakdownItem, RecipeBreakdownItemShelfAllocation, RecipeIssuedMaterial,
-    RecipeMaterialConsumption, RecipeMaterialShelfDraw, RewoundCoreBinding, RewoundCoreLengthMm,
-    RewoundCoreYard, WipProduct,
+    RecipeLabor, RecipeMachine, RecipeMaterialConsumption, RecipeMaterialShelfDraw,
+    RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard, WipProduct,
 )
 from ..utils import WIP_PRODUCT_SELECT_RELATED
 
@@ -97,6 +97,8 @@ def _recipe_qs():
                 ),
             ),
         ),
+        Prefetch("labor_entries", queryset=RecipeLabor.objects.select_related("employee")),
+        Prefetch("machine_entries", queryset=RecipeMachine.objects.select_related("machine")),
     )
 
 

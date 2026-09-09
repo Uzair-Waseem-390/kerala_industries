@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .models import Recipe
 from .permissions import IsAdminOrSuperuser
 from .selectors import (
     get_all_cutting_recipes, get_all_fg_inventory, get_all_packing_recipes, get_all_recipes,
@@ -14,22 +15,25 @@ from .selectors import (
     get_wip_shelf_stock_rows,
 )
 from .serializers import (
-    AddBreakdownItemSerializer, AddCuttingBreakdownItemSerializer, CandidateShelfSerializer,
-    CreateCuttingRecipeSerializer, CreatePackingRecipeSerializer, CuttingRecipeReadSerializer,
+    AddBreakdownItemSerializer, AddCuttingBreakdownItemSerializer, AddRecipeLaborSerializer,
+    AddRecipeMachineSerializer, CandidateShelfSerializer, CreateCuttingRecipeSerializer,
+    CreatePackingRecipeSerializer, CuttingRecipeReadSerializer,
     FgInventoryReadSerializer, FgShelfStockReadSerializer, FinishPackingRecipeSerializer,
     IssuableCuttingPieceSerializer, IssuableProductSerializer, IssuableWipCoreSerializer,
     IssueCuttingMaterialSerializer, IssueMaterialSerializer, IssuePackingMaterialSerializer,
     IssuePackingPieceSerializer, PackingRecipeReadSerializer, RecipeCreateSerializer,
     RecipeReadSerializer, RewoundCoreBindingReadSerializer, RewoundCoreLengthMmReadSerializer,
-    RewoundCoreYardReadSerializer, UpdateIssuedMaterialSerializer, UpdateRecipeDescriptionSerializer,
-    WipInventoryReadSerializer, WipProductReadSerializer, WipShelfStockReadSerializer,
+    RewoundCoreYardReadSerializer, SetRecipeTimeSerializer, UpdateIssuedMaterialSerializer,
+    UpdateRecipeDescriptionSerializer, WipInventoryReadSerializer, WipProductReadSerializer,
+    WipShelfStockReadSerializer,
 )
 from .services import (
-    add_breakdown_item, add_cutting_breakdown_item, create_cutting_recipe, create_packing_recipe,
-    create_recipe, finish_cutting_recipe, finish_packing_recipe, finish_recipe,
-    issue_cutting_material, issue_material, issue_packing_material, issue_packing_piece,
-    update_cutting_issued_material, update_issued_material, update_packing_issued_material,
-    update_packing_issued_piece, update_recipe_description,
+    add_breakdown_item, add_cutting_breakdown_item, add_recipe_labor, add_recipe_machine,
+    create_cutting_recipe, create_packing_recipe, create_recipe, finish_cutting_recipe,
+    finish_packing_recipe, finish_recipe, issue_cutting_material, issue_material,
+    issue_packing_material, issue_packing_piece, remove_recipe_labor, remove_recipe_machine,
+    set_recipe_time, update_cutting_issued_material, update_issued_material,
+    update_packing_issued_material, update_packing_issued_piece, update_recipe_description,
 )
 
 
@@ -533,3 +537,76 @@ class FinishPackingRecipeView(APIView):
             recipe_id=pk, shelf_allocations=serializer.validated_data["shelf_allocations"], user=request.user,
         )
         return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Recipe Labor / Machine / Time — shared across all 3 recipe types (Recipe
+# is one shared model/table). Registered under all three URL prefixes
+# (recipes/, cutting-recipes/, packing-recipes/) pointing at these same
+# views; each response is shaped by the recipe's own actual recipe_type,
+# not by which prefix was used to reach it.
+# ---------------------------------------------------------------------------
+
+_RECIPE_DETAIL_BY_TYPE = {
+    Recipe.RecipeType.REWINDING: (get_recipe_by_id, RecipeReadSerializer),
+    Recipe.RecipeType.CUTTING:   (get_cutting_recipe_by_id, CuttingRecipeReadSerializer),
+    Recipe.RecipeType.PACKING:   (get_packing_recipe_by_id, PackingRecipeReadSerializer),
+}
+
+
+def _recipe_detail_response(pk):
+    recipe_type = Recipe.objects.only("recipe_type").get(pk=pk).recipe_type
+    getter, serializer_cls = _RECIPE_DETAIL_BY_TYPE[recipe_type]
+    return Response(serializer_cls(getter(pk)).data, status=status.HTTP_200_OK)
+
+
+class SetRecipeTimeView(APIView):
+    """PATCH /production/<recipes|cutting-recipes|packing-recipes>/<pk>/time/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = SetRecipeTimeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        set_recipe_time(recipe_id=pk, hours=d["time_hours"], minutes=d["time_minutes"], user=request.user)
+        return _recipe_detail_response(pk)
+
+
+class RecipeLaborListCreateView(APIView):
+    """POST /production/<...>/<pk>/labor/ — add an employee to the recipe."""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        serializer = AddRecipeLaborSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        add_recipe_labor(recipe_id=pk, employee_id=serializer.validated_data["employee_id"], user=request.user)
+        return _recipe_detail_response(pk)
+
+
+class RecipeLaborDeleteView(APIView):
+    """DELETE /production/<...>/<pk>/labor/<employee_id>/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def delete(self, request, pk, employee_id):
+        remove_recipe_labor(recipe_id=pk, employee_id=employee_id, user=request.user)
+        return _recipe_detail_response(pk)
+
+
+class RecipeMachineListCreateView(APIView):
+    """POST /production/<...>/<pk>/machines/ — add a machine to the recipe."""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request, pk):
+        serializer = AddRecipeMachineSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        add_recipe_machine(recipe_id=pk, machine_id=serializer.validated_data["machine_id"], user=request.user)
+        return _recipe_detail_response(pk)
+
+
+class RecipeMachineDeleteView(APIView):
+    """DELETE /production/<...>/<pk>/machines/<machine_id>/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def delete(self, request, pk, machine_id):
+        remove_recipe_machine(recipe_id=pk, machine_id=machine_id, user=request.user)
+        return _recipe_detail_response(pk)

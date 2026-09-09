@@ -200,9 +200,23 @@ class Recipe(AuditMixin):
     description   = models.TextField(blank=True, default="")
     status        = models.CharField(max_length=20, choices=Status.choices, default=Status.UNDER_PROCESSING, db_index=True)
     # Blended per-unit cost across the whole recipe's output — computed and
-    # frozen once, at finish_recipe (see production.services). Null while
-    # under_processing.
+    # frozen once, at finish_recipe (see production.services). Material cost
+    # only (no Direct Labor / Factory Overhead) — see full_cost_per_unit
+    # below for the cost incl. DL+FOH. Null while under_processing.
     cost_per_unit = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, editable=False)
+    # cost_per_unit + this recipe's own DL+FOH pool spread flat across the
+    # output — the "Full Manufacturing Cost" (material + labor + overhead),
+    # NOT the same thing as COGS (COGS is only recognized when a unit is
+    # actually sold — see docs/cogs-gross-profit-engine-notes.md). This is
+    # the cost basis that flows into the next production stage / FG
+    # inventory. Frozen once, at finish. Null while under_processing.
+    full_cost_per_unit = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True, editable=False)
+    # Hours + minutes this batch took — entered by the user before finishing
+    # (see validate_labor_and_machines in services/_shared.py). Both default
+    # 0; at least one must be non-zero to finish. Combined as
+    # time_hours + time_minutes/60 for the DL/FOH pool calculation.
+    time_hours   = models.PositiveIntegerField(default=0)
+    time_minutes = models.PositiveIntegerField(default=0)
     # Cutting only — total issued length not converted into output pieces
     # (waste_length_mm) and that length's cost, both frozen at
     # finish_cutting_recipe. Null for Rewinding recipes and while
@@ -226,6 +240,50 @@ class Recipe(AuditMixin):
 
     def __str__(self):
         return f"{self.recipe_number} — {self.name}"
+
+
+class RecipeLabor(models.Model):
+    """
+    One employee assigned to a recipe's batch. rate_per_hour_snapshot is
+    locked at the moment the employee is added — mirrors this project's
+    "snapshot at lock-in" rule, since manufacturing_costs.Employee.rate_per_hour
+    can change later and this recipe's cost must not silently drift with it.
+    """
+    recipe                = models.ForeignKey(Recipe, on_delete=models.CASCADE, related_name="labor_entries")
+    employee               = models.ForeignKey("manufacturing_costs.Employee", on_delete=models.PROTECT, related_name="recipe_labor_entries")
+    rate_per_hour_snapshot = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at              = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Recipe Labor"
+        verbose_name_plural = "Recipe Labor"
+        unique_together     = [("recipe", "employee")]
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.employee.name}"
+
+
+class RecipeMachine(models.Model):
+    """
+    One machine assigned to a recipe's batch — restricted at the service
+    layer to machines whose category matches the recipe's own recipe_type.
+    rate_per_hour_snapshot is locked at the moment the machine is added,
+    same reasoning as RecipeLabor.
+    """
+    recipe                 = models.ForeignKey(Recipe, on_delete=models.CASCADE, related_name="machine_entries")
+    machine                 = models.ForeignKey("manufacturing_costs.Machine", on_delete=models.PROTECT, related_name="recipe_machine_entries")
+    rate_per_hour_snapshot  = models.DecimalField(max_digits=14, decimal_places=4)
+    created_at               = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = "Recipe Machine"
+        verbose_name_plural = "Recipe Machines"
+        unique_together     = [("recipe", "machine")]
+        ordering            = ["created_at"]
+
+    def __str__(self):
+        return f"{self.recipe.recipe_number} — {self.machine.name}"
 
 
 class RecipeIssuedMaterial(models.Model):
@@ -318,6 +376,11 @@ class RecipeBreakdownItem(AuditMixin):
     quantity           = models.DecimalField(max_digits=14, decimal_places=4)
     remaining_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    # unit_cost_snapshot + this recipe's DL+FOH pool share — the Full
+    # Manufacturing Cost. This is what flows into Cutting as its material
+    # cost (see production.services.cutting._core_unit_cost_fn), not
+    # unit_cost_snapshot. Frozen at finish_recipe alongside it.
+    full_unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
     class Meta:
         verbose_name        = "Recipe Breakdown Item"
@@ -435,6 +498,12 @@ class CuttingBreakdownItem(AuditMixin):
     remaining_quantity      = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     unit_cost_before_waste  = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
     unit_cost_snapshot      = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    # unit_cost_snapshot (labeled "After Waste" in the UI) + this recipe's
+    # DL+FOH pool share — the Full Manufacturing Cost. This is what flows
+    # into Packing as the issued piece's material cost (see
+    # production.services.packing._piece_unit_cost_fn), not
+    # unit_cost_snapshot. Frozen at finish_cutting_recipe alongside it.
+    full_unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
     class Meta:
         verbose_name        = "Cutting Breakdown Item"
@@ -600,6 +669,12 @@ class PackingOutputItem(AuditMixin):
     quantity           = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     remaining_quantity = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    # unit_cost_snapshot (labeled "Material Cost" in the UI — piece cost +
+    # packing material cost) + this recipe's DL+FOH pool share — the Full
+    # Manufacturing Cost of the FG unit. This is the cost basis that becomes
+    # COGS when the unit is later sold (see docs/cogs-gross-profit-engine-notes.md).
+    # Frozen at finish_packing_recipe alongside it.
+    full_unit_cost_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
 
     class Meta:
         verbose_name        = "Packing Output Item"

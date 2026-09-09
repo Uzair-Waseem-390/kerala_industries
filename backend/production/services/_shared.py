@@ -4,11 +4,11 @@ allocation shape-validation, decimal display formatting, and FIFO
 draw/return. Kept here instead of duplicated per stage (see the 2026-09
 discussion on not repeating purchases/billing's file-growth mistake).
 """
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from purchases.services import _validate_shelf_ids_exist, next_reference
 
-from ..models import Recipe
+from ..models import Recipe, RecipeLabor, RecipeMachine
 
 
 def next_wip_product_code() -> str:
@@ -151,3 +151,182 @@ def return_fifo(*, issued_material, quantity: Decimal, batch_model, batch_field:
         else:
             consumption.quantity -= give_back
             consumption.save(update_fields=["quantity"])
+
+
+# ---------------------------------------------------------------------------
+# Manufacturing cost integration (Direct Labor / Factory Overhead) — shared
+# across all three recipe types since Recipe itself is one shared model.
+# See docs/cogs-gross-profit-engine-notes.md for the accounting reasoning:
+# this computes the "Full Manufacturing Cost" (material + DL + FOH), which
+# is NOT the same thing as COGS — COGS is only recognized when a unit is
+# actually sold.
+# ---------------------------------------------------------------------------
+
+def validate_manufacturing_resources(*, category: str) -> None:
+    """
+    Called at recipe CREATION time (not finish). A recipe can't productively
+    be started at all if there's no employee in the system, or no machine of
+    the matching category — matches Recipe.RecipeType's own values
+    (rewinding/cutting/packing) 1:1 against manufacturing_costs.Machine.category.
+    """
+    from rest_framework.exceptions import ValidationError
+    from manufacturing_costs.models import Employee, Machine
+
+    if not Employee.objects.filter(is_deleted=False).exists():
+        raise ValidationError({
+            "employee": "No employee has been added yet. Add at least one employee in Manufacturing Costs before starting a recipe."
+        })
+    if not Machine.objects.filter(category=category, is_deleted=False).exists():
+        label = category.title()
+        raise ValidationError({
+            "machine": f"No {label} machine has been added. Add a {label} machine in Manufacturing Costs before starting this recipe."
+        })
+
+
+def validate_labor_and_machines(recipe: Recipe, *, labor: list = None, machines: list = None) -> None:
+    """
+    Called at FINISH time. Blocks finishing until time is entered and at
+    least one employee + one machine are assigned — these three feed the
+    DL+FOH pool calculation (compute_labor_overhead_pool below).
+
+    Accepts already-materialized `labor`/`machines` lists so a caller that
+    also needs compute_labor_overhead_pool right after doesn't pay for two
+    separate queries per relation (.exists() here + .all() there) — pass
+    get_recipe_labor_and_machines(recipe)'s result through both calls.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if recipe.time_hours == 0 and recipe.time_minutes == 0:
+        raise ValidationError({"time": "Time taken (hours/minutes) must be entered before finishing this recipe."})
+    if labor is None:
+        labor = list(recipe.labor_entries.all())
+    if machines is None:
+        machines = list(recipe.machine_entries.all())
+    if not labor:
+        raise ValidationError({"labor": "At least one employee must be assigned before finishing this recipe."})
+    if not machines:
+        raise ValidationError({"machines": "At least one machine must be assigned before finishing this recipe."})
+
+
+def get_recipe_labor_and_machines(recipe: Recipe) -> tuple[list, list]:
+    """One query per relation, reused by validate_labor_and_machines + compute_labor_overhead_pool."""
+    return list(recipe.labor_entries.all()), list(recipe.machine_entries.all())
+
+
+def set_recipe_time(*, recipe_id: int, hours: int, minutes: int, user) -> Recipe:
+    from rest_framework.exceptions import ValidationError
+
+    if hours < 0 or minutes < 0:
+        raise ValidationError({"time": "Hours and minutes cannot be negative."})
+    if minutes > 59:
+        raise ValidationError({"time_minutes": "Minutes must be between 0 and 59."})
+
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    recipe.time_hours = hours
+    recipe.time_minutes = minutes
+    recipe.updated_by = user
+    recipe.save(update_fields=["time_hours", "time_minutes", "updated_by", "updated_at"])
+    return recipe
+
+
+def add_recipe_labor(*, recipe_id: int, employee_id: int, user) -> RecipeLabor:
+    from django.db import IntegrityError, transaction
+    from django.shortcuts import get_object_or_404
+    from rest_framework.exceptions import ValidationError
+    from manufacturing_costs.models import Employee
+
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    employee = get_object_or_404(Employee.objects.filter(is_deleted=False), pk=employee_id)
+
+    try:
+        with transaction.atomic():
+            return RecipeLabor.objects.create(
+                recipe=recipe, employee=employee, rate_per_hour_snapshot=employee.rate_per_hour,
+            )
+    except IntegrityError:
+        raise ValidationError({"employee_id": f"'{employee.name}' is already assigned to this recipe."})
+
+
+def remove_recipe_labor(*, recipe_id: int, employee_id: int, user) -> None:
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    RecipeLabor.objects.filter(recipe=recipe, employee_id=employee_id).delete()
+
+
+def add_recipe_machine(*, recipe_id: int, machine_id: int, user) -> RecipeMachine:
+    from django.db import IntegrityError, transaction
+    from django.shortcuts import get_object_or_404
+    from rest_framework.exceptions import ValidationError
+    from manufacturing_costs.models import Machine
+
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    machine = get_object_or_404(Machine.objects.filter(is_deleted=False), pk=machine_id)
+
+    if machine.category != recipe.recipe_type:
+        raise ValidationError({
+            "machine_id": f"'{machine.name}' is a {machine.get_category_display()} machine — it can't be assigned to a {recipe.get_recipe_type_display()} recipe."
+        })
+
+    try:
+        with transaction.atomic():
+            return RecipeMachine.objects.create(
+                recipe=recipe, machine=machine, rate_per_hour_snapshot=machine.rate_per_hour,
+            )
+    except IntegrityError:
+        raise ValidationError({"machine_id": f"'{machine.name}' is already assigned to this recipe."})
+
+
+def remove_recipe_machine(*, recipe_id: int, machine_id: int, user) -> None:
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    RecipeMachine.objects.filter(recipe=recipe, machine_id=machine_id).delete()
+
+
+def compute_labor_overhead_pool(recipe: Recipe, *, labor: list = None, machines: list = None) -> Decimal:
+    """
+    DL pool  = Σ(employee rate/hour) × total_hours
+    FOH pool = Σ(machine rate/hour)  × total_hours
+    total_hours = time_hours + time_minutes/60. Every selected employee and
+    machine is assumed to have worked the recipe's full duration (per the
+    2026-09 design — no per-employee/per-machine hours split).
+
+    Accepts already-materialized `labor`/`machines` lists — see
+    validate_labor_and_machines's docstring; callers should fetch once via
+    get_recipe_labor_and_machines(recipe) and pass the same lists to both.
+    """
+    if labor is None:
+        labor = list(recipe.labor_entries.all())
+    if machines is None:
+        machines = list(recipe.machine_entries.all())
+    total_hours = Decimal(recipe.time_hours) + (Decimal(recipe.time_minutes) / Decimal(60))
+    labor_rate_total = sum((e.rate_per_hour_snapshot for e in labor), Decimal("0"))
+    machine_rate_total = sum((m.rate_per_hour_snapshot for m in machines), Decimal("0"))
+    return (labor_rate_total + machine_rate_total) * total_hours
+
+
+def spread_pool_flat(items: list, pool: Decimal, precision: Decimal = Decimal("0.0001")) -> dict:
+    """
+    Spreads `pool` flat (evenly per unit, not weighted) across `items`
+    (each must have a `.quantity`), residual-on-last-item so
+    Σ(item.quantity × share) == pool exactly — same pattern as
+    finish_cutting_recipe's waste_cost spread. Returns {item: share}.
+    """
+    total_qty = sum((item.quantity for item in items), Decimal("0"))
+    if total_qty <= 0:
+        return {item: Decimal("0") for item in items}
+
+    share = (pool / total_qty).quantize(precision, rounding=ROUND_HALF_UP)
+    shares = {}
+    remaining = pool
+    for item in items[:-1]:
+        shares[item] = share
+        remaining -= item.quantity * share
+    last_item = items[-1]
+    shares[last_item] = (
+        (remaining / last_item.quantity).quantize(precision, rounding=ROUND_HALF_UP)
+        if last_item.quantity > 0 else Decimal("0")
+    )
+    return shares

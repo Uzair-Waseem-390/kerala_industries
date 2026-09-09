@@ -14,6 +14,7 @@ import Modal from '../../components/ui/Modal';
 import InlineAlert from '../../components/ui/InlineAlert';
 import ShelfAllocationEditor from '../../components/shared/ShelfAllocationEditor';
 import RecipeStatusBadge from '../../components/production/RecipeStatusBadge';
+import RecipeLaborMachineSection from '../../components/production/RecipeLaborMachineSection';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 
@@ -618,6 +619,11 @@ const PackingRecipeDetailPage = () => {
         issueMaterial, updateIssuedMaterial,
         updateDescription, updatingDescription,
         finish, finishing,
+        setTime, settingTime,
+        addLabor, addingLabor,
+        removeLabor, removingLaborId,
+        addMachine, addingMachine,
+        removeMachine, removingMachineId,
     } = usePackingRecipeDetail(id);
 
     const [showFinishModal, setShowFinishModal] = useState(false);
@@ -654,7 +660,10 @@ const PackingRecipeDetailPage = () => {
     const issuedMaterial = recipe.packing_issued_material || null;
     const outputItem = recipe.packing_output_item || null;
     const hasDescription = !!recipe.description?.trim();
-    const canFinish = !!issuedPiece && !!issuedMaterial && hasDescription;
+    const hasTime = (recipe.time_hours || 0) > 0 || (recipe.time_minutes || 0) > 0;
+    const hasLabor = (recipe.labor_entries || []).length > 0;
+    const hasMachine = (recipe.machine_entries || []).length > 0;
+    const canFinish = !!issuedPiece && !!issuedMaterial && hasDescription && hasTime && hasLabor && hasMachine;
 
     const startEditDescription = () => {
         setDescriptionDraft(recipe.description || '');
@@ -693,6 +702,11 @@ const PackingRecipeDetailPage = () => {
                                 Cost / unit: {parseFloat(recipe.cost_per_unit).toFixed(2)}
                             </span>
                         )}
+                        {isFinished && recipe.full_cost_per_unit != null && (
+                            <span className="text-sm font-semibold text-accent-700">
+                                Full Cost / Unit: {parseFloat(recipe.full_cost_per_unit).toFixed(2)}
+                            </span>
+                        )}
                     </div>
                 </div>
                 {!isFinished && (
@@ -713,6 +727,15 @@ const PackingRecipeDetailPage = () => {
                         )}
                         {hasDescription && issuedPiece && !issuedMaterial && (
                             <p className="text-xs text-error-600">Issue packing material before finishing.</p>
+                        )}
+                        {!hasTime && (
+                            <p className="text-xs text-error-600">Time taken (hours/minutes) must be entered before finishing this recipe.</p>
+                        )}
+                        {!hasLabor && (
+                            <p className="text-xs text-error-600">At least one employee must be assigned before finishing this recipe.</p>
+                        )}
+                        {!hasMachine && (
+                            <p className="text-xs text-error-600">At least one machine must be assigned before finishing this recipe.</p>
                         )}
                     </div>
                 )}
@@ -792,6 +815,19 @@ const PackingRecipeDetailPage = () => {
                 />
             </div>
 
+            <div>
+                <h2 className="text-xl font-semibold text-neutral-900 mb-3">Time &amp; Cost Inputs</h2>
+                <RecipeLaborMachineSection
+                    recipe={recipe}
+                    disabled={isFinished}
+                    onSetTime={setTime} settingTime={settingTime}
+                    onAddLabor={addLabor} addingLabor={addingLabor}
+                    onRemoveLabor={removeLabor} removingLaborId={removingLaborId}
+                    onAddMachine={addMachine} addingMachine={addingMachine}
+                    onRemoveMachine={removeMachine} removingMachineId={removingMachineId}
+                />
+            </div>
+
             {outputItem && (
                 <Card className="p-6" hover={false}>
                     <h3 className="font-semibold text-neutral-900 mb-3 flex items-center gap-2">
@@ -811,11 +847,19 @@ const PackingRecipeDetailPage = () => {
                             <p className="font-medium">{outputItem.remaining_quantity}</p>
                         </div>
                         <div>
-                            <p className="text-sm text-neutral-500">Unit Cost</p>
+                            <p className="text-sm text-neutral-500">Material Cost</p>
                             <p className="font-medium">
                                 {outputItem.unit_cost_snapshot != null ? parseFloat(outputItem.unit_cost_snapshot).toFixed(2) : '—'}
                             </p>
                         </div>
+                        {isFinished && (
+                            <div>
+                                <p className="text-sm text-neutral-500">Full Cost</p>
+                                <p className="font-medium">
+                                    {outputItem.full_unit_cost_snapshot != null ? parseFloat(outputItem.full_unit_cost_snapshot).toFixed(2) : '—'}
+                                </p>
+                            </div>
+                        )}
                         <div className="sm:col-span-2">
                             <p className="text-sm text-neutral-500 mb-1">Put away on</p>
                             <p className="text-sm text-neutral-700">

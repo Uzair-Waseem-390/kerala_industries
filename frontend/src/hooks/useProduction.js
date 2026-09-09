@@ -59,6 +59,17 @@ export const useRecipeDetail = (id) => {
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
 
+    const [settingTime, setSettingTime] = useState(false);
+    const [setTimeError, setSetTimeErrorState] = useState(null);
+
+    const [addingLabor, setAddingLabor] = useState(false);
+    const [addLaborError, setAddLaborError] = useState(null);
+    const [removingLaborId, setRemovingLaborId] = useState(null);
+
+    const [addingMachine, setAddingMachine] = useState(false);
+    const [addMachineError, setAddMachineError] = useState(null);
+    const [removingMachineId, setRemovingMachineId] = useState(null);
+
     const fetchRecipe = useCallback(async () => {
         if (!id) return;
         setLoading(true);
@@ -150,6 +161,76 @@ export const useRecipeDetail = (id) => {
         }
     };
 
+    const setTime = async (payload) => {
+        setSettingTime(true);
+        setSetTimeErrorState(null);
+        try {
+            await productionApi.recipes.setTime(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
+            throw err;
+        } finally {
+            setSettingTime(false);
+        }
+    };
+
+    const addLabor = async (payload) => {
+        setAddingLabor(true);
+        setAddLaborError(null);
+        try {
+            await productionApi.recipes.addLabor(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
+            throw err;
+        } finally {
+            setAddingLabor(false);
+        }
+    };
+
+    const removeLabor = async (employeeId) => {
+        setRemovingLaborId(employeeId);
+        setAddLaborError(null);
+        try {
+            await productionApi.recipes.removeLabor(id, employeeId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
+            throw err;
+        } finally {
+            setRemovingLaborId(null);
+        }
+    };
+
+    const addMachine = async (payload) => {
+        setAddingMachine(true);
+        setAddMachineError(null);
+        try {
+            await productionApi.recipes.addMachine(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
+            throw err;
+        } finally {
+            setAddingMachine(false);
+        }
+    };
+
+    const removeMachine = async (machineId) => {
+        setRemovingMachineId(machineId);
+        setAddMachineError(null);
+        try {
+            await productionApi.recipes.removeMachine(id, machineId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
+            throw err;
+        } finally {
+            setRemovingMachineId(null);
+        }
+    };
+
     return {
         recipe, loading, error, refetch: fetchRecipe,
         issueMaterial, issuing, issueError,
@@ -157,6 +238,11 @@ export const useRecipeDetail = (id) => {
         addBreakdownItem, addingBreakdown, addBreakdownError,
         updateDescription, updatingDescription, updateDescriptionError,
         finish, finishing, finishError,
+        setTime, settingTime, setTimeError,
+        addLabor, addingLabor, addLaborError,
+        removeLabor, removingLaborId,
+        addMachine, addingMachine, addMachineError,
+        removeMachine, removingMachineId,
     };
 };
 
@@ -213,6 +299,17 @@ export const useCuttingRecipeDetail = (id) => {
 
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
+
+    const [settingTime, setSettingTime] = useState(false);
+    const [setTimeError, setSetTimeErrorState] = useState(null);
+
+    const [addingLabor, setAddingLabor] = useState(false);
+    const [addLaborError, setAddLaborError] = useState(null);
+    const [removingLaborId, setRemovingLaborId] = useState(null);
+
+    const [addingMachine, setAddingMachine] = useState(false);
+    const [addMachineError, setAddMachineError] = useState(null);
+    const [removingMachineId, setRemovingMachineId] = useState(null);
 
     const fetchRecipe = useCallback(async () => {
         if (!id) return;
@@ -302,6 +399,76 @@ export const useCuttingRecipeDetail = (id) => {
         }
     };
 
+    const setTime = async (payload) => {
+        setSettingTime(true);
+        setSetTimeErrorState(null);
+        try {
+            await productionApi.cuttingRecipes.setTime(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
+            throw err;
+        } finally {
+            setSettingTime(false);
+        }
+    };
+
+    const addLabor = async (payload) => {
+        setAddingLabor(true);
+        setAddLaborError(null);
+        try {
+            await productionApi.cuttingRecipes.addLabor(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
+            throw err;
+        } finally {
+            setAddingLabor(false);
+        }
+    };
+
+    const removeLabor = async (employeeId) => {
+        setRemovingLaborId(employeeId);
+        setAddLaborError(null);
+        try {
+            await productionApi.cuttingRecipes.removeLabor(id, employeeId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
+            throw err;
+        } finally {
+            setRemovingLaborId(null);
+        }
+    };
+
+    const addMachine = async (payload) => {
+        setAddingMachine(true);
+        setAddMachineError(null);
+        try {
+            await productionApi.cuttingRecipes.addMachine(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
+            throw err;
+        } finally {
+            setAddingMachine(false);
+        }
+    };
+
+    const removeMachine = async (machineId) => {
+        setRemovingMachineId(machineId);
+        setAddMachineError(null);
+        try {
+            await productionApi.cuttingRecipes.removeMachine(id, machineId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
+            throw err;
+        } finally {
+            setRemovingMachineId(null);
+        }
+    };
+
     return {
         recipe, loading, error, refetch: fetchRecipe,
         issueMaterial, issuing, issueError,
@@ -309,6 +476,11 @@ export const useCuttingRecipeDetail = (id) => {
         addBreakdownItem, addingBreakdown, addBreakdownError,
         updateDescription, updatingDescription, updateDescriptionError,
         finish, finishing, finishError,
+        setTime, settingTime, setTimeError,
+        addLabor, addingLabor, addLaborError,
+        removeLabor, removingLaborId,
+        addMachine, addingMachine, addMachineError,
+        removeMachine, removingMachineId,
     };
 };
 
@@ -369,6 +541,17 @@ export const usePackingRecipeDetail = (id) => {
 
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
+
+    const [settingTime, setSettingTime] = useState(false);
+    const [setTimeError, setSetTimeErrorState] = useState(null);
+
+    const [addingLabor, setAddingLabor] = useState(false);
+    const [addLaborError, setAddLaborError] = useState(null);
+    const [removingLaborId, setRemovingLaborId] = useState(null);
+
+    const [addingMachine, setAddingMachine] = useState(false);
+    const [addMachineError, setAddMachineError] = useState(null);
+    const [removingMachineId, setRemovingMachineId] = useState(null);
 
     const fetchRecipe = useCallback(async () => {
         if (!id) return;
@@ -472,6 +655,76 @@ export const usePackingRecipeDetail = (id) => {
         }
     };
 
+    const setTime = async (payload) => {
+        setSettingTime(true);
+        setSetTimeErrorState(null);
+        try {
+            await productionApi.packingRecipes.setTime(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setSetTimeErrorState(extractErrorMessage(err, 'Failed to save time'));
+            throw err;
+        } finally {
+            setSettingTime(false);
+        }
+    };
+
+    const addLabor = async (payload) => {
+        setAddingLabor(true);
+        setAddLaborError(null);
+        try {
+            await productionApi.packingRecipes.addLabor(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to add employee'));
+            throw err;
+        } finally {
+            setAddingLabor(false);
+        }
+    };
+
+    const removeLabor = async (employeeId) => {
+        setRemovingLaborId(employeeId);
+        setAddLaborError(null);
+        try {
+            await productionApi.packingRecipes.removeLabor(id, employeeId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddLaborError(extractErrorMessage(err, 'Failed to remove employee'));
+            throw err;
+        } finally {
+            setRemovingLaborId(null);
+        }
+    };
+
+    const addMachine = async (payload) => {
+        setAddingMachine(true);
+        setAddMachineError(null);
+        try {
+            await productionApi.packingRecipes.addMachine(id, payload);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to add machine'));
+            throw err;
+        } finally {
+            setAddingMachine(false);
+        }
+    };
+
+    const removeMachine = async (machineId) => {
+        setRemovingMachineId(machineId);
+        setAddMachineError(null);
+        try {
+            await productionApi.packingRecipes.removeMachine(id, machineId);
+            await fetchRecipe();
+        } catch (err) {
+            setAddMachineError(extractErrorMessage(err, 'Failed to remove machine'));
+            throw err;
+        } finally {
+            setRemovingMachineId(null);
+        }
+    };
+
     return {
         recipe, loading, error, refetch: fetchRecipe,
         issuePiece, issuingPiece, issuePieceError,
@@ -480,6 +733,11 @@ export const usePackingRecipeDetail = (id) => {
         updateIssuedMaterial, updatingMaterial, updateMaterialError,
         updateDescription, updatingDescription, updateDescriptionError,
         finish, finishing, finishError,
+        setTime, settingTime, setTimeError,
+        addLabor, addingLabor, addLaborError,
+        removeLabor, removingLaborId,
+        addMachine, addingMachine, addMachineError,
+        removeMachine, removingMachineId,
     };
 };
 
