@@ -276,6 +276,8 @@ const MonthlyProfitDetailPage = () => {
                     <DeductionRow label="Lost Inventory" value={mp.lost_inventory} />
                     <AdditionRow label="Found Inventory" value={mp.found_inventory} />
                     <DeductionRow label="Depreciation" value={mp.depreciation} />
+                    <DeductionRow label="Direct Labor Paid" value={mp.direct_labor_paid} hint="Employee wage payments this month." />
+                    <DeductionRow label="Factory Overhead Paid" value={mp.factory_overhead_paid} hint="Machine repair, rent, and electricity payments this month." />
                     <div className="flex items-center justify-between py-2">
                         <p className="text-sm text-neutral-700">Disposal Gain / Loss</p>
                         <p className={`text-sm font-medium ${parseFloat(mp.disposal_gain_loss) >= 0 ? 'text-success-600' : 'text-error-600'}`}>

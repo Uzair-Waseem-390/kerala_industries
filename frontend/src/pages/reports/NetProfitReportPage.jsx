@@ -48,6 +48,8 @@ const columns = [
     { key: 'lost_inventory', label: 'Lost Inventory (PKR)', render: fmt },
     { key: 'found_inventory', label: 'Found Inventory (PKR)', render: fmt },
     { key: 'depreciation', label: 'Depreciation (PKR)', render: fmt },
+    { key: 'direct_labor_paid', label: 'Direct Labor (PKR)', render: fmt },
+    { key: 'factory_overhead_paid', label: 'Factory Overhead (PKR)', render: fmt },
     {
         key: 'disposal_gain_loss',
         label: 'Disposal Gain/Loss (PKR)',
