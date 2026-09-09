@@ -121,18 +121,20 @@ const ManufacturingCostsOverviewPage = () => {
                 )}
             </div>
 
-            {/* Payments — real cash already paid out, all-time (CashFlow) and last closed month (this app's own monthly snapshot). */}
+            {/* Payments — real cash already paid out: all-time (CashFlow), this month so far (running total, resets on rollover), and last closed month (this app's own monthly snapshot). */}
             <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-neutral-900">Payments</h2>
                 {loading ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <StatCardSkeleton color="green" />
                         <StatCardSkeleton color="green" />
+                        <StatCardSkeleton color="amber" />
+                        <StatCardSkeleton color="amber" />
                         <StatCardSkeleton color="red" />
                         <StatCardSkeleton color="red" />
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                         <StatCard
                             label="Total DL Paid"
                             value={cashStats?.total_direct_labor_paid}
@@ -147,6 +149,22 @@ const ManufacturingCostsOverviewPage = () => {
                             icon={Wallet}
                             color="green"
                             subtitle="All-time"
+                            onClick={goToPayments}
+                        />
+                        <StatCard
+                            label="This Month DL Paid"
+                            value={stats?.this_month_dl_paid}
+                            icon={HardHat}
+                            color="amber"
+                            subtitle="So far this month"
+                            onClick={goToPayments}
+                        />
+                        <StatCard
+                            label="This Month FOH Paid"
+                            value={stats?.this_month_foh_paid}
+                            icon={Zap}
+                            color="amber"
+                            subtitle="So far this month"
                             onClick={goToPayments}
                         />
                         <StatCard

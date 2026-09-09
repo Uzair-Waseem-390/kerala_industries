@@ -10,7 +10,9 @@ from .models import (
     Employee, FactoryOverheadSetting, Machine, ManufacturingCostsStats, PayableEntity,
     PayableEntityMonthlySnapshot, Payment,
 )
-from .services import catch_up_manufacturing_costs_snapshots, get_or_create_fixed_entity
+from .services import (
+    _ensure_this_month_counters_current, catch_up_manufacturing_costs_snapshots, get_or_create_fixed_entity,
+)
 
 
 def _clean(value):
@@ -171,4 +173,5 @@ def get_payment_by_id(pk: int) -> Payment:
 
 def get_manufacturing_costs_stats() -> ManufacturingCostsStats:
     catch_up_manufacturing_costs_snapshots()
+    _ensure_this_month_counters_current()
     return ManufacturingCostsStats.get_instance()

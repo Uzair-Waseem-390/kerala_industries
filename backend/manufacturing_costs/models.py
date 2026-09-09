@@ -298,6 +298,20 @@ class ManufacturingCostsStats(models.Model):
     catch_up_manufacturing_costs_snapshots (a bounded aggregate over
     PayableEntityMonthlySnapshot rows for the one just-closed period — NOT a
     live scan of Payment history), not touched anywhere else.
+
+    this_month_dl_paid/this_month_foh_paid are a running total of the
+    CURRENT (still-open) calendar month's real payments — incremented/
+    decremented by F() at create_payment/delete_payment, O(1), never a live
+    Sum() over Payment rows. A backdated payment recorded today for a PAST
+    month does NOT touch these (only a payment whose OWN payment_date falls
+    in the current calendar month does) — see
+    services._ensure_this_month_counters_current. this_month_period tracks
+    which YYYY-MM the running totals currently represent; whenever a write
+    or a read notices the real calendar month has rolled over, both
+    counters reset to 0 for the new month (same "tick on read/write, no
+    cron" idiom as every other catch-up in this app). This is exactly the
+    "record now, cost at month-end" real-time figure profits.services reads
+    for its live (not-yet-finalized) current-month net profit.
     """
     total_employees             = models.PositiveIntegerField(default=0)
     total_machines               = models.PositiveIntegerField(default=0)
@@ -305,6 +319,9 @@ class ManufacturingCostsStats(models.Model):
     total_estimated_monthly_foh  = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     last_month_dl_paid           = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     last_month_foh_paid          = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    this_month_dl_paid           = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    this_month_foh_paid          = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    this_month_period            = models.CharField(max_length=7, null=True, blank=True, help_text="YYYY-MM")
     last_updated_at              = models.DateTimeField(auto_now=True)
 
     class Meta:

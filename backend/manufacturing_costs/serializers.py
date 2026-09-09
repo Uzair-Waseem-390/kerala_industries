@@ -189,6 +189,7 @@ class ManufacturingCostsStatsSerializer(serializers.ModelSerializer):
             "total_employees", "total_machines",
             "total_estimated_monthly_dl", "total_estimated_monthly_foh",
             "last_month_dl_paid", "last_month_foh_paid",
+            "this_month_dl_paid", "this_month_foh_paid",
             "last_updated_at",
         ]
         read_only_fields = fields

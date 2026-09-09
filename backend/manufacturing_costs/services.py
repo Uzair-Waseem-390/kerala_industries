@@ -325,6 +325,24 @@ def _movement_type_for(entity: PayableEntity) -> str:
     return "direct_labor_payment" if entity.type == PayableEntity.Type.EMPLOYEE else "factory_overhead_payment"
 
 
+def _ensure_this_month_counters_current() -> str:
+    """
+    Resets this_month_dl_paid/this_month_foh_paid to 0 the moment the real
+    calendar month has rolled past what they currently represent — called at
+    the start of every Payment write AND every stats read, same "tick on
+    read/write, no cron" idiom as this app's other catch-up mechanisms.
+    Returns the current period string so callers don't recompute it twice.
+    """
+    today = timezone.localdate()
+    current_period = f"{today.year:04d}-{today.month:02d}"
+    stats = ManufacturingCostsStats.get_instance()
+    if stats.this_month_period != current_period:
+        ManufacturingCostsStats.objects.filter(pk=1).update(
+            this_month_period=current_period, this_month_dl_paid=0, this_month_foh_paid=0,
+        )
+    return current_period
+
+
 @transaction.atomic
 def create_payment(*, entity_id: int, amount: Decimal, payment_date, note: str = "", method_allocations: list, user) -> Payment:
     from rest_framework.exceptions import ValidationError
@@ -348,6 +366,16 @@ def create_payment(*, entity_id: int, amount: Decimal, payment_date, note: str =
         overall_total_paid=F("overall_total_paid") + amount,
         overall_payment_count=F("overall_payment_count") + 1,
     )
+
+    # Only a payment dated WITHIN the current calendar month feeds the "this
+    # month so far" running total — a backdated entry for a past month must
+    # not distort it (that past month's own figure was already frozen by
+    # catch_up_manufacturing_costs_snapshots).
+    current_period = _ensure_this_month_counters_current()
+    payment_period = f"{payment_date.year:04d}-{payment_date.month:02d}"
+    if payment_period == current_period:
+        field = "this_month_dl_paid" if entity.type == PayableEntity.Type.EMPLOYEE else "this_month_foh_paid"
+        ManufacturingCostsStats.objects.filter(pk=1).update(**{field: F(field) + amount})
 
     if entity.type == PayableEntity.Type.EMPLOYEE:
         sync_direct_labor_payment_made(amount=amount, user=user)
@@ -385,6 +413,12 @@ def delete_payment(*, pk: int, user) -> None:
         overall_total_paid=F("overall_total_paid") - payment.amount,
         overall_payment_count=F("overall_payment_count") - 1,
     )
+
+    current_period = _ensure_this_month_counters_current()
+    payment_period = f"{payment.payment_date.year:04d}-{payment.payment_date.month:02d}"
+    if payment_period == current_period:
+        field = "this_month_dl_paid" if entity.type == PayableEntity.Type.EMPLOYEE else "this_month_foh_paid"
+        ManufacturingCostsStats.objects.filter(pk=1).update(**{field: F(field) - payment.amount})
 
     _soft_delete(payment, user)
 
