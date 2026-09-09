@@ -80,9 +80,9 @@ const MonthlyProfitDetailPage = () => {
         data: currentData, loading: currentLoading, error: currentError, refetch: refetchCurrent,
     } = useCurrentMonthProfit();
 
-    const mp      = isCurrent ? currentData : finalizedData;
+    const mp = isCurrent ? currentData : finalizedData;
     const loading = isCurrent ? currentLoading : finalizedLoading;
-    const error   = isCurrent ? currentError : finalizedError;
+    const error = isCurrent ? currentError : finalizedError;
     const refetch = isCurrent ? refetchCurrent : refetchFinalized;
 
     // settleType tracks WHICH api ('investor' or 'owner') the open modal /
@@ -268,7 +268,7 @@ const MonthlyProfitDetailPage = () => {
 
                 <div className="space-y-0">
                     <DeductionRow label="Expenses Paid" value={mp.expenses_paid} />
-                    <DeductionRow label="Recurring Expenses Paid" value={mp.recurring_expenses_paid} hint="Rent, salaries, utilities, etc." />
+                    <DeductionRow label="Recurring Expenses Paid" value={mp.recurring_expenses_paid} hint="salaries, utilities, etc." />
                     <DeductionRow label="GST Paid" value={mp.gst_paid} />
                     <DeductionRow label="WHT Paid" value={mp.wht_paid} />
                     <DeductionRow label="Lost Cash" value={mp.lost_cash} />
@@ -337,122 +337,122 @@ const MonthlyProfitDetailPage = () => {
                     </div>
                 </Card>
             ) : (
-            <Card className="p-8">
-                <h3 className="text-lg font-semibold text-neutral-900 mb-5">Ownership Split</h3>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-[15px]">
-                        <thead>
-                            <tr className="text-left text-neutral-500 border-b border-neutral-200">
-                                <th className="pb-3 font-medium">Investor</th>
-                                <th className="pb-3 font-medium">Share %</th>
-                                <th className="pb-3 font-medium">Share Amount</th>
-                                <th className="pb-3 font-medium">Settled</th>
-                                <th className="pb-3 font-medium">Remaining</th>
-                                <th className="pb-3 font-medium">Status</th>
-                                <th className="pb-3 font-medium"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {mp.investor_shares.map((share) => (
-                                <Fragment key={share.id}>
-                                    <tr className="border-b border-neutral-100">
-                                        <td className="py-3 text-neutral-900">{share.investor_name_snapshot}</td>
-                                        <td className="py-3 text-neutral-700">{fmt(share.share_percent_snapshot)}%</td>
-                                        <td className="py-3 text-neutral-700">Rs. {fmt(share.share_amount)}</td>
-                                        <td className="py-3 text-neutral-700">Rs. {fmt(share.amount_settled)}</td>
-                                        <td className="py-3 text-neutral-700">Rs. {fmt(share.amount_remaining)}</td>
-                                        <td className="py-3">{statusBadge(share.payment_status)}</td>
-                                        <td className="py-3 text-right">
-                                            {parseFloat(share.amount_remaining) > 0 && (
-                                                <Button size="sm" variant="secondary" onClick={() => openSettle(share, 'investor')}>
-                                                    Settle Share
-                                                </Button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                    {share.payouts.length > 0 && (
-                                        <tr>
-                                            <td colSpan={7} className="pb-4">
-                                                <div className="ml-2 space-y-1.5">
-                                                    {share.payouts.map((p) => (
-                                                        <div key={p.id} className="flex items-center justify-between text-sm bg-neutral-50 rounded-lg px-3 py-2.5">
-                                                            <span className="text-neutral-600">
-                                                                {p.action_type === 'reinvest' ? 'Reinvested' : 'Paid out'}{' '}
-                                                                <strong>Rs. {fmt(p.amount)}</strong> on {new Date(p.payout_date).toLocaleDateString()}
-                                                                {p.action_type === 'payout' && p.allocations?.length > 0 && (
-                                                                    <> — via {formatAllocations(p.allocations)}</>
-                                                                )}
-                                                                {p.note && ` — ${p.note}`}
-                                                            </span>
-                                                            <button
-                                                                onClick={() => openDeleteConfirm(p, 'investor')}
-                                                                className="inline-flex items-center gap-1 text-error-600 hover:text-error-700 font-medium min-h-[44px] px-2"
-                                                            >
-                                                                <Undo2 className="w-3.5 h-3.5" />
-                                                                Reverse
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                <Card className="p-8">
+                    <h3 className="text-lg font-semibold text-neutral-900 mb-5">Ownership Split</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-[15px]">
+                            <thead>
+                                <tr className="text-left text-neutral-500 border-b border-neutral-200">
+                                    <th className="pb-3 font-medium">Investor</th>
+                                    <th className="pb-3 font-medium">Share %</th>
+                                    <th className="pb-3 font-medium">Share Amount</th>
+                                    <th className="pb-3 font-medium">Settled</th>
+                                    <th className="pb-3 font-medium">Remaining</th>
+                                    <th className="pb-3 font-medium">Status</th>
+                                    <th className="pb-3 font-medium"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {mp.investor_shares.map((share) => (
+                                    <Fragment key={share.id}>
+                                        <tr className="border-b border-neutral-100">
+                                            <td className="py-3 text-neutral-900">{share.investor_name_snapshot}</td>
+                                            <td className="py-3 text-neutral-700">{fmt(share.share_percent_snapshot)}%</td>
+                                            <td className="py-3 text-neutral-700">Rs. {fmt(share.share_amount)}</td>
+                                            <td className="py-3 text-neutral-700">Rs. {fmt(share.amount_settled)}</td>
+                                            <td className="py-3 text-neutral-700">Rs. {fmt(share.amount_remaining)}</td>
+                                            <td className="py-3">{statusBadge(share.payment_status)}</td>
+                                            <td className="py-3 text-right">
+                                                {parseFloat(share.amount_remaining) > 0 && (
+                                                    <Button size="sm" variant="secondary" onClick={() => openSettle(share, 'investor')}>
+                                                        Settle Share
+                                                    </Button>
+                                                )}
                                             </td>
                                         </tr>
-                                    )}
-                                </Fragment>
-                            ))}
-                            {mp.owner_share && (
-                                <Fragment>
-                                    <tr className="border-b border-neutral-100 border-t-2 border-t-neutral-200">
-                                        <td className="py-3 font-semibold text-neutral-900">Owner</td>
-                                        <td className="py-3 font-semibold text-neutral-900">{fmt(mp.owner_share_percent)}%</td>
-                                        <td className="py-3 font-semibold text-neutral-900">Rs. {fmt(mp.owner_share.share_amount)}</td>
-                                        <td className="py-3 text-neutral-700">Rs. {fmt(mp.owner_share.amount_settled)}</td>
-                                        <td className="py-3 text-neutral-700">Rs. {fmt(mp.owner_share.amount_remaining)}</td>
-                                        <td className="py-3">{statusBadge(mp.owner_share.payment_status)}</td>
-                                        <td className="py-3 text-right">
-                                            {parseFloat(mp.owner_share.amount_remaining) > 0 && (
-                                                <Button size="sm" variant="secondary" onClick={() => openSettle(mp.owner_share, 'owner')}>
-                                                    Settle Share
-                                                </Button>
-                                            )}
-                                        </td>
-                                    </tr>
-                                    {mp.owner_share.payouts.length > 0 && (
-                                        <tr>
-                                            <td colSpan={7} className="pb-4">
-                                                <div className="ml-2 space-y-1.5">
-                                                    {mp.owner_share.payouts.map((p) => (
-                                                        <div key={p.id} className="flex items-center justify-between text-sm bg-neutral-50 rounded-lg px-3 py-2.5">
-                                                            <span className="text-neutral-600">
-                                                                {p.action_type === 'reinvest' ? 'Reinvested' : 'Paid out'}{' '}
-                                                                <strong>Rs. {fmt(p.amount)}</strong> on {new Date(p.payout_date).toLocaleDateString()}
-                                                                {p.action_type === 'payout' && p.allocations?.length > 0 && (
-                                                                    <> — via {formatAllocations(p.allocations)}</>
-                                                                )}
-                                                                {p.note && ` — ${p.note}`}
-                                                            </span>
-                                                            <button
-                                                                onClick={() => openDeleteConfirm(p, 'owner')}
-                                                                className="inline-flex items-center gap-1 text-error-600 hover:text-error-700 font-medium min-h-[44px] px-2"
-                                                            >
-                                                                <Undo2 className="w-3.5 h-3.5" />
-                                                                Reverse
-                                                            </button>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                                        {share.payouts.length > 0 && (
+                                            <tr>
+                                                <td colSpan={7} className="pb-4">
+                                                    <div className="ml-2 space-y-1.5">
+                                                        {share.payouts.map((p) => (
+                                                            <div key={p.id} className="flex items-center justify-between text-sm bg-neutral-50 rounded-lg px-3 py-2.5">
+                                                                <span className="text-neutral-600">
+                                                                    {p.action_type === 'reinvest' ? 'Reinvested' : 'Paid out'}{' '}
+                                                                    <strong>Rs. {fmt(p.amount)}</strong> on {new Date(p.payout_date).toLocaleDateString()}
+                                                                    {p.action_type === 'payout' && p.allocations?.length > 0 && (
+                                                                        <> — via {formatAllocations(p.allocations)}</>
+                                                                    )}
+                                                                    {p.note && ` — ${p.note}`}
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => openDeleteConfirm(p, 'investor')}
+                                                                    className="inline-flex items-center gap-1 text-error-600 hover:text-error-700 font-medium min-h-[44px] px-2"
+                                                                >
+                                                                    <Undo2 className="w-3.5 h-3.5" />
+                                                                    Reverse
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
+                                ))}
+                                {mp.owner_share && (
+                                    <Fragment>
+                                        <tr className="border-b border-neutral-100 border-t-2 border-t-neutral-200">
+                                            <td className="py-3 font-semibold text-neutral-900">Owner</td>
+                                            <td className="py-3 font-semibold text-neutral-900">{fmt(mp.owner_share_percent)}%</td>
+                                            <td className="py-3 font-semibold text-neutral-900">Rs. {fmt(mp.owner_share.share_amount)}</td>
+                                            <td className="py-3 text-neutral-700">Rs. {fmt(mp.owner_share.amount_settled)}</td>
+                                            <td className="py-3 text-neutral-700">Rs. {fmt(mp.owner_share.amount_remaining)}</td>
+                                            <td className="py-3">{statusBadge(mp.owner_share.payment_status)}</td>
+                                            <td className="py-3 text-right">
+                                                {parseFloat(mp.owner_share.amount_remaining) > 0 && (
+                                                    <Button size="sm" variant="secondary" onClick={() => openSettle(mp.owner_share, 'owner')}>
+                                                        Settle Share
+                                                    </Button>
+                                                )}
                                             </td>
                                         </tr>
-                                    )}
-                                </Fragment>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-                <p className="text-xs text-neutral-400 mt-5">
-                    Share % is frozen as of this month — it won't change even if ownership % changes later.
-                    An unpaid or partial balance isn't a business liability, it's informational tracking only.
-                </p>
-            </Card>
+                                        {mp.owner_share.payouts.length > 0 && (
+                                            <tr>
+                                                <td colSpan={7} className="pb-4">
+                                                    <div className="ml-2 space-y-1.5">
+                                                        {mp.owner_share.payouts.map((p) => (
+                                                            <div key={p.id} className="flex items-center justify-between text-sm bg-neutral-50 rounded-lg px-3 py-2.5">
+                                                                <span className="text-neutral-600">
+                                                                    {p.action_type === 'reinvest' ? 'Reinvested' : 'Paid out'}{' '}
+                                                                    <strong>Rs. {fmt(p.amount)}</strong> on {new Date(p.payout_date).toLocaleDateString()}
+                                                                    {p.action_type === 'payout' && p.allocations?.length > 0 && (
+                                                                        <> — via {formatAllocations(p.allocations)}</>
+                                                                    )}
+                                                                    {p.note && ` — ${p.note}`}
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => openDeleteConfirm(p, 'owner')}
+                                                                    className="inline-flex items-center gap-1 text-error-600 hover:text-error-700 font-medium min-h-[44px] px-2"
+                                                                >
+                                                                    <Undo2 className="w-3.5 h-3.5" />
+                                                                    Reverse
+                                                                </button>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </Fragment>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p className="text-xs text-neutral-400 mt-5">
+                        Share % is frozen as of this month — it won't change even if ownership % changes later.
+                        An unpaid or partial balance isn't a business liability, it's informational tracking only.
+                    </p>
+                </Card>
             )}
 
             {/* Settle modal */}
