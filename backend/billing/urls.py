@@ -28,6 +28,7 @@ from .views import (
     ReturnRetrieveUpdateDestroyView,
     AllReturnsView,
     SavedPDFDeleteView,
+    SellableProductListView,
     SetInvoiceItemShelfAllocationsView,
     SetReturnItemShelfAllocationsView,
 )
@@ -77,6 +78,9 @@ urlpatterns = [
 
     # Delete a saved PDF
     path("pdf/<int:saved_pdf_id>/", SavedPDFDeleteView.as_view(), name="pdf-delete"),
+
+    # Sellable products — the invoice-item picker (FG + RM Cartons-family)
+    path("products/sellable/", SellableProductListView.as_view(), name="sellable-product-list"),
 
     # Shelf allocations — sale line consumption / return line put-away
     path("shelves/candidates/", InvoiceCandidateShelvesView.as_view(), name="invoice-candidate-shelves"),

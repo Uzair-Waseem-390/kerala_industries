@@ -28,6 +28,9 @@ const RateTable = ({
                 <thead>
                     <tr className="border-b border-neutral-200">
                         <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
+                            Type
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
                             Product Code
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">
@@ -50,8 +53,9 @@ const RateTable = ({
                 <tbody className="divide-y divide-neutral-100">
                     {rates.map((item, index) => (
                         <RateRow
-                            key={item.product.id}
+                            key={`${item.productType}-${item.product.id}`}
                             product={item.product}
+                            productType={item.productType}
                             rate={item.rate}
                             isAdmin={isAdmin}
                             onEdit={onEdit}

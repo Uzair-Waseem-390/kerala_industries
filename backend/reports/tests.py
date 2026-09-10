@@ -40,12 +40,22 @@ class ReportsTestBase(TestCase):
         self.shelf = Shelf.objects.create(name="Shelf A")
         self.supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         self.customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
+        # rates/billing now only allow pricing/selling RM products in the
+        # Cartons line (purchases.selectors.is_cartons_product) — every
+        # product these tests price/sell must be a variant of the Cartons
+        # anchor.
+        from purchases.models import CARTONS_PRODUCT_CODE
+        self.cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
 
     def make_stocked_product(self, code="P001", name="Product 1", *, stock=10):
         product = Product.objects.create(
             name=name, code=code, family=Family.objects.get(name="Raw Material"),
+            base_product=self.cartons_anchor,
         )
-        create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
             items=[{"product_id": product.id, "quantity": stock, "unit_price": Decimal("50")}],
@@ -63,7 +73,7 @@ class ReportsTestBase(TestCase):
     def make_confirmed_invoice(self, product, quantity=2, *, confirmed_on=None):
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": quantity}],
+            items=[{"rm_product_id": product.id, "quantity": quantity}],
             user=self.admin,
         )
         for item in invoice.items.all():
@@ -182,8 +192,9 @@ class SearchTests(ReportsTestBase):
 
         product = Product.objects.create(
             name="Max Blue", code="MAX-BLU", family=Family.objects.get(name="Raw Material"),
+            base_product=self.cartons_anchor,
         )
-        create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         sys_supplier = create_supplier(name="Opening Stock", code="SYS-OPENING", user=self.admin)
 
         create_opening_stock(

@@ -48,19 +48,23 @@ class Command(BaseCommand):
         ).values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
             purchase_returned_by_product[row["purchase_item__product_id"]] = row["total"]
 
+        # RM-only (rm_product__isnull=False) — Stock Movement Report is
+        # RM/billing-scoped only; FG sales (billing now sells FG too, see
+        # 2026-09) never feed this report, same precedent as the Lost/Found
+        # block below.
         sold_by_product = dict(
             InvoiceItem.objects.filter(
-                invoice__is_deleted=False, invoice__is_data_entry=False,
-            ).exclude(invoice__status="draft").values("product_id")
-            .annotate(total=Coalesce(Sum("quantity"), zero)).values_list("product_id", "total")
+                invoice__is_deleted=False, invoice__is_data_entry=False, rm_product__isnull=False,
+            ).exclude(invoice__status="draft").values("rm_product_id")
+            .annotate(total=Coalesce(Sum("quantity"), zero)).values_list("rm_product_id", "total")
         )
 
         sale_returned_by_product = {}
         for row in ReturnItem.objects.filter(
             return_record__is_deleted=False, return_record__status="accepted",
-            invoice_item__invoice__is_data_entry=False,
-        ).values("invoice_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
-            sale_returned_by_product[row["invoice_item__product_id"]] = row["total"]
+            invoice_item__invoice__is_data_entry=False, invoice_item__rm_product__isnull=False,
+        ).values("invoice_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+            sale_returned_by_product[row["invoice_item__rm_product_id"]] = row["total"]
 
         # Lost/found — no is_data_entry concept here (LostInventoryRecord has
         # no such flag; every loss/recovery is a real operational event).

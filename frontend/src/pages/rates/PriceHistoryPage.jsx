@@ -1,48 +1,23 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useRateHistory } from '../../hooks/useRates';
-import { useToast } from '../../context/ToastContext';
-import { extractErrorMessage } from '../../utils/errorMessage';
-import { purchasesApi } from '../../services/purchasesApi';
 import PriceHistoryTable from '../../components/rates/PriceHistoryTable';
 import Button from '../../components/ui/Button';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Card from '../../components/ui/Card';
-import Badge from '../../components/ui/Badge';
 import InlineAlert from '../../components/ui/InlineAlert';
 
 const PriceHistoryPage = () => {
-    const { productId } = useParams();
-    const navigate = useNavigate();
-    const { toast } = useToast();
-    const { data, loading, error, refetch } = useRateHistory(productId);
-    const [product, setProduct] = useState(null);
-    const [productLoading, setProductLoading] = useState(true);
+    const { productType, productId } = useParams();
+    const { data, loading, error, refetch } = useRateHistory(productType, productId);
 
-    useEffect(() => {
-        fetchProduct();
-    }, [productId]);
-
-    const fetchProduct = async () => {
-        setProductLoading(true);
-        try {
-            // Get product details from products API
-            const productsRes = await purchasesApi.products.getAll({ page_size: 500 });
-            const products = productsRes?.results ?? productsRes ?? [];
-            const found = products.find(p => p.id === parseInt(productId));
-            setProduct(found);
-        } catch (error) {
-            console.error('Failed to fetch product:', error);
-            toast.error(extractErrorMessage(error, 'Failed to load product details'));
-        } finally {
-            setProductLoading(false);
-        }
-    };
-
+    // Product name/code come straight off the history rows themselves
+    // (ProductRateHistorySerializer already includes them on every row) —
+    // no separate product-detail fetch needed, and this works identically
+    // for FG products, which have no dedicated detail-by-id endpoint.
+    const product = data.length > 0 ? { name: data[0].product_name, code: data[0].product_code } : null;
     const currentPrice = data.length > 0 ? parseFloat(data[0].selling_price) : null;
 
-    if (productLoading || loading) {
+    if (loading) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
                 <LoadingSpinner size="lg" />

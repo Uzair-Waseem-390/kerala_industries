@@ -804,29 +804,34 @@ def _stock_movement_totals_by_product(
     for row in purchase_returned_qs.values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["purchase_item__product_id"], "total_purchase_returned", row["total"])
 
+    # RM-only (rm_product__isnull=False) — Stock Movement Report is RM/
+    # billing-scoped only; billing now also sells FG (2026-09), so FG
+    # InvoiceItem rows (rm_product is null on those) must be explicitly
+    # excluded here, not just renamed, or they'd silently bucket under a
+    # None product key.
     from billing.models import InvoiceItem, ReturnItem
     sold_qs = InvoiceItem.objects.filter(
-        invoice__is_deleted=False, invoice__is_data_entry=False,
+        invoice__is_deleted=False, invoice__is_data_entry=False, rm_product__isnull=False,
     ).exclude(invoice__status="draft")
     if product_ids is not None:
-        sold_qs = sold_qs.filter(product_id__in=product_ids)
+        sold_qs = sold_qs.filter(rm_product_id__in=product_ids)
     sold_qs = _stock_movement_date_filter(
         sold_qs, field="invoice__confirmed_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in sold_qs.values("product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
-        _add(row["product_id"], "total_sold", row["total"])
+    for row in sold_qs.values("rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add(row["rm_product_id"], "total_sold", row["total"])
 
     sale_returned_qs = ReturnItem.objects.filter(
         return_record__is_deleted=False, return_record__status="accepted",
-        invoice_item__invoice__is_data_entry=False,
+        invoice_item__invoice__is_data_entry=False, invoice_item__rm_product__isnull=False,
     )
     if product_ids is not None:
-        sale_returned_qs = sale_returned_qs.filter(invoice_item__product_id__in=product_ids)
+        sale_returned_qs = sale_returned_qs.filter(invoice_item__rm_product_id__in=product_ids)
     sale_returned_qs = _stock_movement_date_filter(
         sale_returned_qs, field="return_record__accepted_at", date=date, date_from=date_from, date_to=date_to,
     )
-    for row in sale_returned_qs.values("invoice_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
-        _add(row["invoice_item__product_id"], "total_sale_returned", row["total"])
+    for row in sale_returned_qs.values("invoice_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add(row["invoice_item__rm_product_id"], "total_sale_returned", row["total"])
 
     # RM-only (type=raw_material) — Stock Movement Report is RM/billing-
     # scoped only; WIP/FG losses never feed it (see purchases.services.

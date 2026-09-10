@@ -253,6 +253,36 @@ def get_product_by_code(code: str) -> Product:
     )
 
 
+def is_cartons_product(product: Product) -> bool:
+    """
+    True for the Cartons anchor row itself or any of its variants — the one
+    RM line `billing`/`rates` still sell directly (2026-09), never
+    transformed into WIP/FG. Used to restrict which RM products a NEW
+    invoice line / rate can reference; existing historical data on any
+    other RM product is untouched by this check.
+    """
+    from .models import CARTONS_PRODUCT_CODE
+    if product.code == CARTONS_PRODUCT_CODE:
+        return True
+    return product.base_product_id is not None and product.base_product.code == CARTONS_PRODUCT_CODE
+
+
+def get_sellable_cartons_products(*, search: str = None) -> "QuerySet":
+    """Cartons-family RM variants with live stock — one half of billing's/rates' sellable-product list (the other half is FG)."""
+    from django.db.models import F
+
+    from .models import CARTONS_PRODUCT_CODE
+
+    qs = (
+        Product.objects.select_related(*_PRODUCT_RELATED)
+        .filter(is_deleted=False, base_product__code=CARTONS_PRODUCT_CODE)
+        .annotate(available_quantity=F("inventory__quantity"))
+    )
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "name", "code"))
+    return qs
+
+
 # ---------------------------------------------------------------------------
 # PurchaseOrder
 # ---------------------------------------------------------------------------

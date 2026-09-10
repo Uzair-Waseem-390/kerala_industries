@@ -51,10 +51,20 @@ class ProfitsTestBase(TestCase):
         supplier = create_supplier(name="Ali Traders", code="ALI", user=self.admin)
         customer = create_customer(name="Big Mart", code="BM", address="Main St", user=self.admin)
 
+        # rates/billing now only allow pricing/selling RM products in the
+        # Cartons line (purchases.selectors.is_cartons_product) — the
+        # product these tests price/sell must be a variant of the Cartons
+        # anchor.
+        from purchases.models import CARTONS_PRODUCT_CODE
+        cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
         product = Product.objects.create(
             name="Product 1", code="P001", family=Family.objects.get(name="Raw Material"),
+            base_product=cartons_anchor,
         )
-        create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         order = create_purchase_order(
             supplier_id=supplier.id,
             items=[{"product_id": product.id, "quantity": 10, "unit_price": Decimal("50")}],
@@ -70,7 +80,7 @@ class ProfitsTestBase(TestCase):
 
         invoice = create_invoice(
             customer_id=customer.id,
-            items=[{"product_id": product.id, "quantity": 4}],
+            items=[{"rm_product_id": product.id, "quantity": 4}],
             user=self.admin,
         )
         for item in invoice.items.all():

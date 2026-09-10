@@ -54,8 +54,8 @@ def _invoice_qs():
     #  - customer's audit users + credit_score (CustomerReadSerializer
     #    nests the full customer, including credit_score/credit_tier —
     #    without this JOIN, every row fired its own query for it: N+1)
-    #  - items with product (name/code) and product__rate, which the draft
-    #    preview reads per item (was a query per item before)
+    #  - items with rm_product/fg_product (name/code) and their rate, which
+    #    the draft preview reads per item (was a query per item before)
     # Dropped as never-serialized dead weight: items__fifo_layers__purchase
     # (loaded the ENTIRE ever-growing FIFO ledger on every list request),
     # payments, and item category/shelf.
@@ -65,7 +65,9 @@ def _invoice_qs():
     ).prefetch_related(
         Prefetch(
             "items",
-            queryset=InvoiceItem.objects.select_related("product", "product__rate").prefetch_related(
+            queryset=InvoiceItem.objects.select_related(
+                "rm_product", "rm_product__rate", "fg_product", "fg_product__rate",
+            ).prefetch_related(
                 Prefetch(
                     "shelf_allocations",
                     queryset=InvoiceItemShelfAllocation.objects.select_related("shelf"),
@@ -90,7 +92,7 @@ def get_invoice_by_bill_number(bill_number: str) -> Invoice:
 def get_invoice_item_by_id(pk: int) -> InvoiceItem:
     return get_object_or_404(
         InvoiceItem.objects.select_related(
-            "invoice", "product",
+            "invoice", "rm_product", "fg_product",
         ),
         pk=pk,
     )
@@ -98,7 +100,7 @@ def get_invoice_item_by_id(pk: int) -> InvoiceItem:
 
 def get_invoice_item_with_allocations_by_id(pk: int) -> InvoiceItem:
     return get_object_or_404(
-        InvoiceItem.objects.select_related("invoice", "product").prefetch_related(
+        InvoiceItem.objects.select_related("invoice", "rm_product", "fg_product").prefetch_related(
             Prefetch(
                 "shelf_allocations",
                 queryset=InvoiceItemShelfAllocation.objects.select_related("shelf"),
@@ -162,7 +164,7 @@ def get_payment_by_id(pk: int) -> Payment:
 _RETURN_ITEM_PREFETCH = Prefetch(
     "items",
     queryset=ReturnItem.objects.select_related(
-        "invoice_item__product", "invoice_item__invoice",
+        "invoice_item__rm_product", "invoice_item__fg_product", "invoice_item__invoice",
     ).prefetch_related(
         Prefetch(
             "shelf_allocations",
@@ -229,7 +231,7 @@ def get_return_by_id(pk: int) -> Return:
 def get_return_item_by_id(pk: int) -> ReturnItem:
     return get_object_or_404(
         ReturnItem.objects.select_related(
-            "return_record", "invoice_item__product",
+            "return_record", "invoice_item__rm_product", "invoice_item__fg_product",
         ).prefetch_related(
             Prefetch(
                 "shelf_allocations",
@@ -255,6 +257,38 @@ def get_available_purchase_batches(product_id: int, *, for_update: bool = False)
     """
     from purchases.selectors import get_available_purchase_items_for_fifo
     return get_available_purchase_items_for_fifo(product_id, for_update=for_update)
+
+
+# ---------------------------------------------------------------------------
+# Sellable products (invoice-item picker) — FG products with live stock,
+# plus RM Cartons-family variants with live stock (2026-09; see
+# purchases.selectors.is_cartons_product). Every other RM product is no
+# longer offered for a NEW invoice line.
+# ---------------------------------------------------------------------------
+
+def get_sellable_fg_products(*, search: str = None) -> QuerySet:
+    """FG products with live stock > 0, for the invoice-item picker."""
+    from django.db.models import F
+
+    from backend.search import search_q
+    from production.models import FgProduct
+
+    qs = (
+        FgProduct.objects.select_related("binding", "yard", "length_mm", "inventory")
+        .filter(is_deleted=False)
+        .annotate(available_quantity=F("inventory__quantity"))
+        .filter(available_quantity__gt=0)
+    )
+    if _clean(search):
+        qs = qs.filter(search_q(_clean(search), "name", "code"))
+    return qs
+
+
+def get_sellable_cartons_products(*, search: str = None) -> QuerySet:
+    """RM Cartons-family variants with live stock > 0 — the other half of the invoice-item picker."""
+    from purchases.selectors import get_sellable_cartons_products as _get_sellable_cartons_products
+    qs = _get_sellable_cartons_products(search=search)
+    return qs.filter(available_quantity__gt=0)
 
 
 # ---------------------------------------------------------------------------

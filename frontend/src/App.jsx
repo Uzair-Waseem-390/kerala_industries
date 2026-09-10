@@ -482,7 +482,7 @@ const AppContent = () => {
           </ProtectedRoute>
         } />
 
-        <Route path="/rates/history/:productId" element={
+        <Route path="/rates/history/:productType/:productId" element={
           <ProtectedRoute>
             <Layout>
               <PriceHistoryPage />

@@ -37,6 +37,7 @@ const RatesPage = () => {
     // Modal state
     const [showModal, setShowModal] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
+    const [selectedProductType, setSelectedProductType] = useState(null);
     const [selectedRate, setSelectedRate] = useState(null);
     const [formLoading, setFormLoading] = useState(false);
 
@@ -48,14 +49,15 @@ const RatesPage = () => {
         setFilters({});
     };
 
-    const handleEdit = (product, rate) => {
+    const handleEdit = (product, rate, productType) => {
         setSelectedProduct(product);
+        setSelectedProductType(productType);
         setSelectedRate(rate || null);
         setShowModal(true);
     };
 
-    const handleViewHistory = (product) => {
-        navigate(`/rates/history/${product.id}`);
+    const handleViewHistory = (product, productType) => {
+        navigate(`/rates/history/${productType}/${product.id}`);
     };
 
     const handleSubmit = async (formData) => {
@@ -69,13 +71,16 @@ const RatesPage = () => {
                 });
             } else {
                 await create({
-                    product_id: selectedProduct.id,
+                    ...(selectedProductType === 'fg'
+                        ? { fg_product_id: selectedProduct.id }
+                        : { rm_product_id: selectedProduct.id }),
                     selling_price: formData.selling_price,
                     note: formData.note,
                 });
             }
             setShowModal(false);
             setSelectedProduct(null);
+            setSelectedProductType(null);
             setSelectedRate(null);
             toast.success(selectedRate ? 'Price updated successfully' : 'Price set successfully');
         } catch (error) {
@@ -153,6 +158,7 @@ const RatesPage = () => {
                 onClose={() => {
                     setShowModal(false);
                     setSelectedProduct(null);
+                    setSelectedProductType(null);
                     setSelectedRate(null);
                 }}
                 onSubmit={handleSubmit}

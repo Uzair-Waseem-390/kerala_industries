@@ -18,13 +18,17 @@ const UnpricedProductsPage = () => {
     const navigate = useNavigate();
 
     const {
-        data: products, meta, page, setPage, loading,
+        data: items, meta, page, setPage, loading,
         filters, setFilters, refetch,
     } = useUnpricedProducts();
-    const data = products.map(product => ({ product, rate: null }));
+    // Each item is {id, type, name, code, product} — `type` is 'rm' or
+    // 'fg', `product` is the nested full product detail (2026-09, FG
+    // selling — the unpriced queue now covers both product types).
+    const data = items.map(item => ({ product: item.product, productType: item.type, rate: null }));
 
     const [showModal, setShowModal] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
+    const [selectedProductType, setSelectedProductType] = useState(null);
     const [formLoading, setFormLoading] = useState(false);
 
     const handleSearch = (value) => {
@@ -35,26 +39,30 @@ const UnpricedProductsPage = () => {
         setFilters({});
     };
 
-    const handleEdit = (product) => {
+    const handleEdit = (product, rate, productType) => {
         setSelectedProduct(product);
+        setSelectedProductType(productType);
         setShowModal(true);
     };
 
-    const handleViewHistory = (product) => {
-        navigate(`/rates/history/${product.id}`);
+    const handleViewHistory = (product, productType) => {
+        navigate(`/rates/history/${productType}/${product.id}`);
     };
 
     const handleSubmit = async (formData) => {
         setFormLoading(true);
         try {
             await ratesApi.create({
-                product_id: selectedProduct.id,
+                ...(selectedProductType === 'fg'
+                    ? { fg_product_id: selectedProduct.id }
+                    : { rm_product_id: selectedProduct.id }),
                 selling_price: formData.selling_price,
                 note: formData.note,
             });
             await refetch();
             setShowModal(false);
             setSelectedProduct(null);
+            setSelectedProductType(null);
             toast.success('Price set successfully');
         } catch (error) {
             console.error('Failed to save rate:', error);
@@ -122,6 +130,7 @@ const UnpricedProductsPage = () => {
                 onClose={() => {
                     setShowModal(false);
                     setSelectedProduct(null);
+                    setSelectedProductType(null);
                 }}
                 onSubmit={handleSubmit}
                 product={selectedProduct}

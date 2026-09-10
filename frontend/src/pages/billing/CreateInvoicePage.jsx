@@ -65,7 +65,11 @@ const CreateInvoicePage = () => {
 
     // Products come from the rate list, not the Purchases app — normal users
     // have no Purchases access, but rates are viewable by everyone, and every
-    // rate already carries its product + selling price.
+    // rate already carries its product + selling price. Rates now covers
+    // only Finished Goods + RM Cartons-family variants (2026-09, FG
+    // selling), so this picker automatically inherits that same scoping —
+    // product_type ('fg' or 'rm') travels with each option so the submit
+    // payload can send the right *_product_id key.
     const searchProducts = async (query) => {
         const res = await ratesApi.getAll({ search: query, page_size: 25 });
         const results = res?.results ?? res ?? [];
@@ -75,6 +79,7 @@ const CreateInvoicePage = () => {
                 value: rate.product.id,
                 label: `${rate.product.code} - ${rate.product.name} (${rate.selling_price ?? 'No price'})`,
                 sellingPrice: rate.selling_price || 0,
+                productType: rate.product_type,
             }));
     };
 
@@ -83,7 +88,7 @@ const CreateInvoicePage = () => {
             ...prev,
             items: [
                 ...prev.items,
-                { product_id: '', quantity: 1, discount: 0, gst: 0, wht: 0, selling_price: 0, _key: `${Date.now()}-${prev.items.length}` }
+                { product_id: '', product_type: '', quantity: 1, discount: 0, gst: 0, wht: 0, selling_price: 0, _key: `${Date.now()}-${prev.items.length}` }
             ]
         }));
     };
@@ -205,7 +210,9 @@ const CreateInvoicePage = () => {
                 ...(isAdvance ? { method_allocations: methodAllocations } : {}),
                 payment_due_date: formData.payment_due_date || undefined,
                 items: formData.items.map(item => ({
-                    product_id: parseInt(item.product_id),
+                    ...(item.product_type === 'rm'
+                        ? { rm_product_id: parseInt(item.product_id) }
+                        : { fg_product_id: parseInt(item.product_id) }),
                     quantity: parseInt(item.quantity) || 0,
                     discount: parseFloat(item.discount) || 0,
                     gst: parseFloat(item.gst) || 0,

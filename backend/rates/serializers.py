@@ -1,7 +1,5 @@
 from rest_framework import serializers
 
-from purchases.serializers import ProductReadSerializer
-
 from .models import ProductRate, ProductRateHistory
 
 
@@ -24,21 +22,35 @@ class ProductRateHistorySerializer(serializers.ModelSerializer):
 
 
 # ---------------------------------------------------------------------------
-# ProductRate read serializer
+# ProductRate read serializer — `product` is either an RM (Cartons-family)
+# or FG product; picked at serialize time since ProductRate.product is a
+# Python property over two nullable FKs, not a single relation a nested
+# ModelSerializer field can point at directly.
 # ---------------------------------------------------------------------------
 
 class ProductRateReadSerializer(serializers.ModelSerializer):
-    product = ProductReadSerializer(read_only=True)
-    updated_by = serializers.StringRelatedField(read_only=True)
-    created_by = serializers.StringRelatedField(read_only=True)
+    product      = serializers.SerializerMethodField()
+    product_type = serializers.SerializerMethodField()
+    updated_by   = serializers.StringRelatedField(read_only=True)
+    created_by   = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model = ProductRate
         fields = [
-            "id", "product", "selling_price",
+            "id", "product", "product_type", "selling_price",
             "created_by", "updated_by", "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+    def get_product_type(self, obj):
+        return "fg" if obj.fg_product_id else "rm"
+
+    def get_product(self, obj):
+        if obj.fg_product_id:
+            from production.serializers import FgProductReadSerializer
+            return FgProductReadSerializer(obj.fg_product).data
+        from purchases.serializers import ProductReadSerializer
+        return ProductReadSerializer(obj.rm_product).data
 
 
 # ---------------------------------------------------------------------------
@@ -67,14 +79,24 @@ class ProductRateBaseWriteSerializer(serializers.Serializer):
 
 
 class ProductRateCreateSerializer(ProductRateBaseWriteSerializer):
-    """Used for POST — requires product_id."""
-    product_id = serializers.IntegerField()
+    """Used for POST — requires exactly one of rm_product_id/fg_product_id."""
+    rm_product_id = serializers.IntegerField(required=False, allow_null=True)
+    fg_product_id = serializers.IntegerField(required=False, allow_null=True)
 
-    def validate_product_id(self, value):
-        from purchases.models import Product
-        if not Product.objects.filter(pk=value, is_deleted=False).exists():
-            raise serializers.ValidationError("Product not found or has been deleted.")
-        return value
+    def validate(self, attrs):
+        rm_id = attrs.get("rm_product_id")
+        fg_id = attrs.get("fg_product_id")
+        if bool(rm_id) == bool(fg_id):
+            raise serializers.ValidationError({"product": "Exactly one of rm_product_id or fg_product_id is required."})
+        if rm_id:
+            from purchases.models import Product
+            if not Product.objects.filter(pk=rm_id, is_deleted=False).exists():
+                raise serializers.ValidationError({"rm_product_id": "Product not found or has been deleted."})
+        if fg_id:
+            from production.models import FgProduct
+            if not FgProduct.objects.filter(pk=fg_id, is_deleted=False).exists():
+                raise serializers.ValidationError({"fg_product_id": "Product not found or has been deleted."})
+        return attrs
 
 
 class ProductRateUpdateSerializer(ProductRateBaseWriteSerializer):

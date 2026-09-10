@@ -131,7 +131,7 @@ const InvoiceDetailPage = () => {
         if (invoiceData?.status === 'draft' && invoiceData.items?.length) {
             const entries = await Promise.all(invoiceData.items.map(async (item) => {
                 try {
-                    const candidates = await billingApi.shelves.getCandidates(item.product);
+                    const candidates = await billingApi.shelves.getCandidates(item.product_id, '', item.product_type);
                     return [item.id, candidates?.results ?? candidates ?? []];
                 } catch (err) {
                     console.error(`Failed to fetch candidate shelves for item ${item.id}:`, err);
@@ -244,7 +244,7 @@ const InvoiceDetailPage = () => {
             if (remaining <= 0) return;
             try {
                 const excludeShelfIds = state.allocations.map((a) => a.shelf_id).filter(Boolean);
-                const data = await billingApi.shelves.autoAllocate(item.product, remaining, excludeShelfIds);
+                const data = await billingApi.shelves.autoAllocate(item.product_id, remaining, excludeShelfIds, item.product_type);
                 const newRows = (data?.allocations || []).map((a) => ({
                     shelf_id: a.shelf_id, quantity: a.quantity, shelf_name: a.shelf_name || '',
                 }));
@@ -814,7 +814,8 @@ const InvoiceDetailPage = () => {
                                             requiredQuantity={item.quantity}
                                             mode="consumption"
                                             disabled={bulkSaving || bulkAutoAllocating}
-                                            productId={item.product}
+                                            productId={item.product_id}
+                                            productType={item.product_type}
                                             autoAllocateApi={billingApi.shelves.autoAllocate}
                                         />
                                         {state.error && (

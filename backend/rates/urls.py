@@ -17,6 +17,6 @@ urlpatterns = [
     # Single rate — retrieve + update price
     path("<int:pk>/", ProductRateRetrieveUpdateView.as_view(), name="rate-detail"),
 
-    # Full price history for a product
-    path("history/<int:product_id>/", ProductRateHistoryView.as_view(), name="rate-history"),
+    # Full price history for a product — product_type is "rm" or "fg"
+    path("history/<str:product_type>/<int:product_id>/", ProductRateHistoryView.as_view(), name="rate-history"),
 ]

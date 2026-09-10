@@ -6,7 +6,7 @@ from .models import ProductRate, ProductRateHistory, UnpricedProduct
 @admin.register(ProductRate)
 class ProductRateAdmin(admin.ModelAdmin):
     list_display = ["product", "selling_price", "updated_by", "updated_at", "created_at"]
-    search_fields = ["product__name", "product__code"]
+    search_fields = ["rm_product__name", "rm_product__code", "fg_product__name", "fg_product__code"]
     readonly_fields = ["created_by", "updated_by", "created_at", "updated_at"]
 
     def save_model(self, request, obj, form, change):
@@ -23,8 +23,8 @@ class ProductRateAdmin(admin.ModelAdmin):
 @admin.register(UnpricedProduct)
 class UnpricedProductAdmin(admin.ModelAdmin):
     list_display = ["product", "created_at"]
-    search_fields = ["product__name", "product__code"]
-    readonly_fields = ["product", "created_at"]
+    search_fields = ["rm_product__name", "rm_product__code", "fg_product__name", "fg_product__code"]
+    readonly_fields = ["rm_product", "fg_product", "created_at"]
 
     def has_add_permission(self, request):
         # Kept in sync by services only — never manually created/edited.
@@ -37,9 +37,9 @@ class UnpricedProductAdmin(admin.ModelAdmin):
 @admin.register(ProductRateHistory)
 class ProductRateHistoryAdmin(admin.ModelAdmin):
     list_display = ["product", "selling_price", "changed_by", "changed_at", "note"]
-    search_fields = ["product__name", "product__code"]
+    search_fields = ["rm_product__name", "rm_product__code", "fg_product__name", "fg_product__code"]
     list_filter = ["changed_at"]
-    readonly_fields = ["product", "selling_price", "changed_by", "changed_at", "note"]
+    readonly_fields = ["rm_product", "fg_product", "selling_price", "changed_by", "changed_at", "note"]
 
     def has_add_permission(self, request):
         # History is append-only via services — never manually created

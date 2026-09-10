@@ -11,7 +11,11 @@ export const useRates = (initialFilters = {}) => {
         filters, setFilters, page, setPage, refetch,
     } = usePaginatedList(ratesApi.getAll, initialFilters);
 
-    const data = rates.map(rate => ({ product: rate.product, rate }));
+    // product_type ('rm' or 'fg') travels alongside each rate — needed to
+    // build the right history URL / edit payload for whichever product type
+    // this row actually is (2026-09, FG selling — rates now covers
+    // Finished Goods + RM Cartons-family variants only).
+    const data = rates.map(rate => ({ product: rate.product, productType: rate.product_type, rate }));
 
     const [mutating, setMutating] = useState(false);
     const [mutationError, setMutationError] = useState(null);
@@ -71,17 +75,17 @@ export const useUnpricedProducts = (initialFilters = {}) => {
     return { data, meta, page, setPage, loading, error, filters, setFilters, refetch };
 };
 
-export const useRateHistory = (productId) => {
+export const useRateHistory = (productType, productId) => {
     const [data, setData] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
     const fetchHistory = useCallback(async () => {
-        if (!productId) return;
+        if (!productId || !productType) return;
         setLoading(true);
         setError(null);
         try {
-            const result = await ratesApi.getHistory(productId, { page_size: 500 });
+            const result = await ratesApi.getHistory(productType, productId, { page_size: 500 });
             setData(result?.results ?? result ?? []);
         } catch (err) {
             setError(err.message || 'Failed to fetch history');
@@ -89,7 +93,7 @@ export const useRateHistory = (productId) => {
         } finally {
             setLoading(false);
         }
-    }, [productId]);
+    }, [productType, productId]);
 
     useEffect(() => {
         fetchHistory();

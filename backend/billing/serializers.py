@@ -36,6 +36,7 @@ def _build_draft_preview(invoice: Invoice) -> dict | None:
         return None
 
     from purchases.models import PurchaseItem
+    from production.models import PackingOutputItem
 
     preview_items     = []
     total_subtotal    = Decimal("0")
@@ -44,23 +45,28 @@ def _build_draft_preview(invoice: Invoice) -> dict | None:
     has_missing_stock = False
 
     items = list(invoice.items.all())
+    rm_item_ids = [item.rm_product_id for item in items if not item.is_fg]
+    fg_item_ids = [item.fg_product_id for item in items if item.is_fg]
 
-    # One batches query for the whole invoice instead of one per line item,
-    # grouped per product in Python. Same filter and created_at ordering as
-    # the old per-item query, so per-product batch order (and therefore the
-    # peeked cost) is identical.
-    batches_by_product = {}
-    all_batches = (
+    # One batches query per product type for the whole invoice instead of
+    # one per line item, grouped per product in Python. Same filter and
+    # created_at/finished_at ordering as the real FIFO walk, so per-product
+    # batch order (and therefore the peeked cost) is identical.
+    batches_by_rm_product = {}
+    for batch in (
         PurchaseItem.objects
-        .filter(
-            product_id__in=[item.product_id for item in items],
-            is_deleted=False,
-            remaining_quantity__gt=0,
-        )
+        .filter(product_id__in=rm_item_ids, is_deleted=False, remaining_quantity__gt=0)
         .order_by("created_at")
-    )
-    for batch in all_batches:
-        batches_by_product.setdefault(batch.product_id, []).append(batch)
+    ):
+        batches_by_rm_product.setdefault(batch.product_id, []).append(batch)
+
+    batches_by_fg_product = {}
+    for batch in (
+        PackingOutputItem.objects
+        .filter(fg_product_id__in=fg_item_ids, is_deleted=False, remaining_quantity__gt=0)
+        .order_by("recipe__finished_at", "pk")
+    ):
+        batches_by_fg_product.setdefault(batch.fg_product_id, []).append(batch)
 
     for item in items:
         product = item.product
@@ -73,7 +79,10 @@ def _build_draft_preview(invoice: Invoice) -> dict | None:
             has_missing_rate = True
 
         # --- FIFO peek: blended cost from oldest batches (read-only) ---
-        batches = batches_by_product.get(product.id, [])
+        if item.is_fg:
+            batches = batches_by_fg_product.get(product.id, [])
+        else:
+            batches = batches_by_rm_product.get(product.id, [])
         available_qty  = sum(b.remaining_quantity for b in batches)
         qty_to_consume = item.quantity
         remaining      = qty_to_consume
@@ -88,12 +97,19 @@ def _build_draft_preview(invoice: Invoice) -> dict | None:
                 if remaining <= 0:
                     break
                 consume = min(batch.remaining_quantity, remaining)
-                # Tax-inclusive unit cost mirrors _run_fifo: total_price / quantity
-                tax_inclusive = (
-                    batch.total_price / batch.quantity
-                    if batch.quantity > 0 else batch.unit_price
-                )
-                total_cost += consume * tax_inclusive
+                if item.is_fg:
+                    # Already the exact, fully-costed manufacturing cost —
+                    # no tax-inclusive recompute needed (unlike RM below).
+                    # Falls back to unit_cost_snapshot for a pre-DL/FOH-era
+                    # batch — see _run_fifo_fg's identical fallback.
+                    unit_cost = batch.full_unit_cost_snapshot if batch.full_unit_cost_snapshot is not None else batch.unit_cost_snapshot
+                else:
+                    # Tax-inclusive unit cost mirrors _run_fifo_rm: total_price / quantity
+                    unit_cost = (
+                        batch.total_price / batch.quantity
+                        if batch.quantity > 0 else batch.unit_price
+                    )
+                total_cost += consume * unit_cost
                 remaining  -= consume
             cogs_per_unit = (
                 total_cost / Decimal(str(qty_to_consume))
@@ -208,10 +224,12 @@ class CandidateShelfSerializer(serializers.Serializer):
 class AutoAllocateShelvesRequestSerializer(serializers.Serializer):
     """
     Body for POST /billing/shelves/auto-allocate/ — thin pass-through to
-    purchases.selectors.compute_auto_shelf_allocation, same pattern as
-    CandidateShelfSerializer above (own copy, same shared backend function).
+    purchases.selectors.compute_auto_shelf_allocation (RM) or
+    inventory.selectors.compute_auto_fg_shelf_allocation (FG), picked by
+    product_type ("rm" or "fg", default "rm" for backward compatibility).
     """
     product_id        = serializers.IntegerField()
+    product_type       = serializers.ChoiceField(choices=["rm", "fg"], default="rm", required=False)
     quantity          = serializers.IntegerField(min_value=1)
     exclude_shelf_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
 
@@ -269,6 +287,11 @@ class ReturnItemShelfAllocationReadSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class InvoiceItemReadSerializer(serializers.ModelSerializer):
+    # `product` (fg_product or rm_product) is a Python property, not a real
+    # field — ModelSerializer can't auto-generate a field for it, so it's
+    # replaced by explicit product_id/product_type (2026-09, FG selling).
+    product_id          = serializers.SerializerMethodField()
+    product_type        = serializers.SerializerMethodField()
     product_name        = serializers.CharField(source="product.name", read_only=True)
     product_code        = serializers.CharField(source="product.code", read_only=True)
     returnable_quantity = serializers.IntegerField(read_only=True)
@@ -278,7 +301,7 @@ class InvoiceItemReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = InvoiceItem
         fields = [
-            "id", "product", "product_name", "product_code",
+            "id", "product_id", "product_type", "product_name", "product_code",
             "quantity", "returned_quantity", "returnable_quantity",
             "allocated_quantity", "shelf_allocations",
             # User-supplied per line
@@ -289,6 +312,12 @@ class InvoiceItemReadSerializer(serializers.ModelSerializer):
             "line_total", "line_cogs", "line_profit",
         ]
         read_only_fields = fields
+
+    def get_product_id(self, obj):
+        return obj.fg_product_id or obj.rm_product_id
+
+    def get_product_type(self, obj):
+        return "fg" if obj.is_fg else "rm"
 
     # Cost/margin fields are admin-and-superuser-only — a normal user
     # legitimately needs selling_price/line_total to work an invoice, but
@@ -306,12 +335,25 @@ class InvoiceItemReadSerializer(serializers.ModelSerializer):
 
 
 class InvoiceItemWriteSerializer(serializers.Serializer):
-    """Used inside invoice create/update — not a standalone endpoint."""
-    product_id = serializers.IntegerField()
+    """
+    Used inside invoice create/update — not a standalone endpoint. Exactly
+    one of rm_product_id/fg_product_id is required (2026-09, FG selling) —
+    service-layer validation (_resolve_item_product) is the authoritative
+    check, this is just early feedback.
+    """
+    rm_product_id = serializers.IntegerField(required=False, allow_null=True)
+    fg_product_id = serializers.IntegerField(required=False, allow_null=True)
     quantity   = serializers.IntegerField(min_value=1)
     discount   = serializers.DecimalField(max_digits=10, decimal_places=4, default=0, required=False)
     gst        = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
     wht        = serializers.DecimalField(max_digits=5, decimal_places=2, default=0, required=False)
+
+    def validate(self, attrs):
+        rm_id = attrs.get("rm_product_id")
+        fg_id = attrs.get("fg_product_id")
+        if bool(rm_id) == bool(fg_id):
+            raise serializers.ValidationError({"product": "Exactly one of rm_product_id or fg_product_id is required."})
+        return attrs
 
     def validate_gst(self, value):
         if value < 0 or value > 100:

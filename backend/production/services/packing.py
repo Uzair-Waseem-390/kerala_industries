@@ -419,6 +419,11 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
                     type=ProductRegistryEntry.Type.FINISHED_GOODS, fg_product=fg_product,
                     name=fg_product.name, code=fg_product.code, category="Finished Goods",
                 )
+                # New FG product needs a selling price before it can be
+                # invoiced — same queue purchases.services.create_product()
+                # feeds for a new RM product (2026-09, FG selling).
+                from rates.services import add_to_unpriced_queue
+                add_to_unpriced_queue(fg_product)
         except IntegrityError:
             # Lost a create race against a concurrent identical Packing
             # finish — OR the row occupying variant_key is soft-deleted.

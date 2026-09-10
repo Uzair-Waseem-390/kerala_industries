@@ -35,33 +35,42 @@ class RatesTestBase(TestCase):
         self.factory = APIRequestFactory()
         self.admin = make_admin()
         self.shelf = Shelf.objects.create(name="Shelf A")
+        # rates now only allows pricing RM products in the Cartons line (see
+        # purchases.selectors.is_cartons_product) — every product these
+        # tests price must be a variant of the Cartons anchor.
+        from purchases.models import CARTONS_PRODUCT_CODE
+        self.cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
 
     def make_product(self, code="P001", name="Product 1"):
         return Product.objects.create(
             name=name, code=code, family=Family.objects.get(name="Raw Material"),
+            base_product=self.cartons_anchor,
         )
 
 
 class RateServiceTests(RatesTestBase):
     def test_create_rate_logs_initial_history(self):
         product = self.make_product()
-        rate = create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        rate = create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         self.assertEqual(rate.selling_price, Decimal("100"))
-        self.assertEqual(ProductRateHistory.objects.filter(product=product).count(), 1)
+        self.assertEqual(ProductRateHistory.objects.filter(rm_product=product).count(), 1)
 
     def test_update_rate_appends_history(self):
         product = self.make_product()
-        rate = create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        rate = create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         update_rate(pk=rate.pk, selling_price=Decimal("150"), user=self.admin)
         rate.refresh_from_db()
         self.assertEqual(rate.selling_price, Decimal("150"))
-        self.assertEqual(ProductRateHistory.objects.filter(product=product).count(), 2)
+        self.assertEqual(ProductRateHistory.objects.filter(rm_product=product).count(), 2)
 
     def test_update_rolls_back_price_if_history_write_fails(self):
         # Billing snapshots prices FROM history — a price change without its
         # history row must be impossible.
         product = self.make_product()
-        rate = create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        rate = create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
 
         with patch("rates.services._log_rate_history", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
@@ -69,20 +78,20 @@ class RateServiceTests(RatesTestBase):
 
         rate.refresh_from_db()
         self.assertEqual(rate.selling_price, Decimal("100"))
-        self.assertEqual(ProductRateHistory.objects.filter(product=product).count(), 1)
+        self.assertEqual(ProductRateHistory.objects.filter(rm_product=product).count(), 1)
 
     def test_create_rolls_back_rate_if_history_write_fails(self):
         product = self.make_product()
         with patch("rates.services._log_rate_history", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
-                create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
-        self.assertFalse(ProductRate.objects.filter(product=product).exists())
+                create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        self.assertFalse(ProductRate.objects.filter(rm_product=product).exists())
 
 
 class RateCreateEndpointTests(RatesTestBase):
     def post_rate(self, product, user, price="100.00"):
         request = self.factory.post(
-            "/rates/", {"product_id": product.id, "selling_price": price}, format="json",
+            "/rates/", {"rm_product_id": product.id, "selling_price": price}, format="json",
         )
         force_authenticate(request, user=user)
         return ProductRateListCreateView.as_view()(request)
@@ -96,7 +105,7 @@ class RateCreateEndpointTests(RatesTestBase):
         # Bypass the exists() pre-check to simulate two concurrent creates —
         # the OneToOne constraint fires and must surface as a clean 400.
         product = self.make_product()
-        create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
 
         with patch(
             "rates.services.ProductRate.objects.filter",
@@ -124,12 +133,12 @@ class RateListQueryCountTests(RatesTestBase):
 
     def test_rate_list_query_count_is_flat(self):
         p1 = self.make_product("P001")
-        create_rate(product_id=p1.id, selling_price=Decimal("100"), user=self.admin)
+        create_rate(rm_product_id=p1.id, selling_price=Decimal("100"), user=self.admin)
         baseline = self.count_queries()
 
         for i in range(4):
             p = self.make_product(f"P10{i}", f"Product 10{i}")
-            create_rate(product_id=p.id, selling_price=Decimal("100"), user=self.admin)
+            create_rate(rm_product_id=p.id, selling_price=Decimal("100"), user=self.admin)
         grown = self.count_queries()
         self.assertEqual(baseline, grown)
 
@@ -137,10 +146,10 @@ class RateListQueryCountTests(RatesTestBase):
 class PriceAtDateTests(RatesTestBase):
     def test_returns_price_effective_at_each_point_in_time(self):
         product = self.make_product()
-        rate = create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        rate = create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
 
         # Backdate the initial entry so there's a clear gap between changes.
-        first_entry = ProductRateHistory.objects.get(product=product)
+        first_entry = ProductRateHistory.objects.get(rm_product=product)
         ten_days_ago = timezone.now() - timedelta(days=10)
         ProductRateHistory.objects.filter(pk=first_entry.pk).update(changed_at=ten_days_ago)
 
@@ -150,20 +159,20 @@ class PriceAtDateTests(RatesTestBase):
         between    = timezone.now() - timedelta(days=5)
         now        = timezone.now()
 
-        self.assertIsNone(get_price_at_date(product.id, before_any))
-        self.assertEqual(get_price_at_date(product.id, between).selling_price, Decimal("100"))
-        self.assertEqual(get_price_at_date(product.id, now).selling_price, Decimal("150"))
+        self.assertIsNone(get_price_at_date(rm_product_id=product.id, at=before_any))
+        self.assertEqual(get_price_at_date(rm_product_id=product.id, at=between).selling_price, Decimal("100"))
+        self.assertEqual(get_price_at_date(rm_product_id=product.id, at=now).selling_price, Decimal("150"))
 
 
 class RateHistoryEndpointTests(RatesTestBase):
     def test_history_is_newest_first_with_product_info(self):
         product = self.make_product()
-        rate = create_rate(product_id=product.id, selling_price=Decimal("100"), user=self.admin)
+        rate = create_rate(rm_product_id=product.id, selling_price=Decimal("100"), user=self.admin)
         update_rate(pk=rate.pk, selling_price=Decimal("150"), user=self.admin)
 
         request = self.factory.get(f"/rates/history/{product.id}/")
         force_authenticate(request, user=make_normal_user())
-        response = ProductRateHistoryView.as_view()(request, product_id=product.id)
+        response = ProductRateHistoryView.as_view()(request, product_type="rm", product_id=product.id)
 
         self.assertEqual(response.status_code, 200)
         prices = [r["selling_price"] for r in response.data["results"]]

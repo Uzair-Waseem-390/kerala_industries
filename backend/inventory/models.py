@@ -327,6 +327,8 @@ class FgShelfStockMovement(models.Model):
         PACKING_OUTPUT_PUTAWAY = "packing_output_putaway", "Packing Output Put-Away"
         LOST_CONSUMPTION       = "lost_consumption",       "Lost Inventory Consumption"
         LOST_FOUND_PUTAWAY     = "lost_found_putaway",     "Lost Inventory Found Put-Away"
+        SALE_CONSUMPTION       = "sale_consumption",       "Sale Consumption"
+        INVOICE_RETURN_PUTAWAY = "invoice_return_putaway", "Invoice Return Put-Away"
 
     shelf      = models.ForeignKey("purchases.Shelf", on_delete=models.PROTECT, related_name="fg_movements")
     product    = models.ForeignKey("production.FgProduct", on_delete=models.PROTECT, related_name="shelf_movements")

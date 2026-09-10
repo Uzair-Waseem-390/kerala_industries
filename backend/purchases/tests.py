@@ -539,11 +539,21 @@ class PurchaseReturnRemainingQuantityTests(PurchasesTestBase):
         # invoice — mirrors how stock actually leaves in production.
         from billing.services import confirm_invoice, create_customer, create_invoice, set_invoice_item_shelf_allocations
         from rates.services import create_rate
-        create_rate(product_id=product.id, selling_price=Decimal("150"), user=self.admin)
+        # rates/billing only allow pricing/selling RM products in the
+        # Cartons line (purchases.selectors.is_cartons_product) — make this
+        # product a variant of the Cartons anchor so it's sellable here.
+        from purchases.models import CARTONS_PRODUCT_CODE
+        cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
+        product.base_product = cartons_anchor
+        product.save(update_fields=["base_product"])
+        create_rate(rm_product_id=product.id, selling_price=Decimal("150"), user=self.admin)
         customer = create_customer(name="Cust A", code="CUSTA", address="x", user=self.admin)
         invoice = create_invoice(
             customer_id=customer.id,
-            items=[{"product_id": product.id, "quantity": 8}],
+            items=[{"rm_product_id": product.id, "quantity": 8}],
             user=self.admin,
         )
         for inv_item in invoice.items.all():

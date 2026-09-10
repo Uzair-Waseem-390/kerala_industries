@@ -62,8 +62,8 @@ class InvoiceAdmin(AuditAdminMixin, SoftDeleteAdminMixin, admin.ModelAdmin):
 
 @admin.register(FIFOLedger)
 class FIFOLedgerAdmin(admin.ModelAdmin):
-    list_display = ["invoice_item", "purchase", "quantity", "unit_cost", "created_at"]
-    readonly_fields = ["invoice_item", "purchase", "quantity", "unit_cost", "created_at"]
+    list_display = ["invoice_item", "purchase", "fg_batch", "quantity", "unit_cost", "created_at"]
+    readonly_fields = ["invoice_item", "purchase", "fg_batch", "quantity", "unit_cost", "created_at"]
     list_filter = ["created_at"]
 
     def has_add_permission(self, request):

@@ -316,6 +316,35 @@ def get_candidate_shelves_for_fg_product(fg_product_id: int, *, search: str = No
     ).order_by("name")
 
 
+def compute_auto_fg_shelf_allocation(*, fg_product_id: int, quantity: int, exclude_shelf_ids: list = None) -> dict:
+    """
+    FG-equivalent of purchases.selectors.compute_auto_shelf_allocation —
+    same greedy largest-quantity-first algorithm, against FgShelfStock
+    instead of ShelfStock. Used by billing's invoice-item shelf
+    auto-allocate for FG lines. See that function's docstring for the full
+    reasoning (advisory only, no select_for_update()).
+    """
+    exclude_shelf_ids = set(exclude_shelf_ids or [])
+    rows = (
+        FgShelfStock.objects
+        .select_related("shelf")
+        .filter(product_id=fg_product_id, quantity__gt=0, shelf__is_deleted=False)
+        .exclude(shelf_id__in=exclude_shelf_ids)
+        .order_by("-quantity", "shelf__name")
+    )
+
+    remaining = quantity
+    allocations = []
+    for row in rows:
+        if remaining <= 0:
+            break
+        take = min(row.quantity, remaining)
+        allocations.append({"shelf_id": row.shelf_id, "shelf_name": row.shelf.name, "quantity": take})
+        remaining -= take
+
+    return {"allocations": allocations, "shortfall": max(remaining, 0)}
+
+
 def get_candidate_shelves_for_wip_product(wip_product_id: int, *, search: str = None):
     """
     WIP-equivalent of purchases.selectors.get_candidate_shelves_for_product

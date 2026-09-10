@@ -166,11 +166,27 @@ class InvoiceItem(models.Model):
     Selling price is snapshotted from rate list at confirmation time.
     COGS (blended FIFO cost) is snapshotted at confirmation time.
     Both are immutable after confirmation.
+
+    rm_product/fg_product (exactly one set, enforced below) replaced the
+    single `product` FK (2026-09) — billing now sells Finished Goods (via
+    their own FIFO cost layer, `production.PackingOutputItem`) as the normal
+    path, plus RM Cartons-family variants specifically (the one RM line the
+    client still sells directly, never transformed into WIP/FG). Every other
+    RM product is no longer selectable for a NEW invoice line — see
+    services.py's validation — but existing historical rows (any RM product,
+    pre-dating this change) stay exactly as they are; nothing here rewrites
+    or drops old data. `product` below is a convenience property, not a
+    field — both `purchases.Product` and `production.FgProduct` expose a
+    `.rate` reverse accessor (same `related_name`), so price-lookup code
+    that reads `item.product.rate` needs no branching at all.
     """
 
     invoice       = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="items")
-    product       = models.ForeignKey(
-        "purchases.Product", on_delete=models.PROTECT, related_name="invoice_items",
+    rm_product    = models.ForeignKey(
+        "purchases.Product", on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_items",
+    )
+    fg_product    = models.ForeignKey(
+        "production.FgProduct", on_delete=models.PROTECT, null=True, blank=True, related_name="invoice_items",
     )
     quantity      = models.PositiveIntegerField()
 
@@ -202,10 +218,53 @@ class InvoiceItem(models.Model):
     class Meta:
         verbose_name = "Invoice Item"
         verbose_name_plural = "Invoice Items"
-        unique_together = [("invoice", "product")]   # one line per product per bill
+        constraints = [
+            models.CheckConstraint(
+                name="invoiceitem_exactly_one_product",
+                condition=(
+                    (models.Q(rm_product__isnull=False) & models.Q(fg_product__isnull=True)) |
+                    (models.Q(rm_product__isnull=True) & models.Q(fg_product__isnull=False))
+                ),
+            ),
+            # One line per product per bill — was a plain unique_together on
+            # `product`; split into two partial constraints since NULLs on a
+            # nullable FK are never considered equal by a plain composite
+            # unique, so a bare unique_together across both FK columns
+            # wouldn't actually catch a duplicate rm_product (or fg_product).
+            models.UniqueConstraint(
+                fields=["invoice", "rm_product"], condition=models.Q(rm_product__isnull=False),
+                name="uniq_invoiceitem_invoice_rm_product",
+            ),
+            models.UniqueConstraint(
+                fields=["invoice", "fg_product"], condition=models.Q(fg_product__isnull=False),
+                name="uniq_invoiceitem_invoice_fg_product",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.invoice.bill_number} — {self.product.name}"
+
+    @property
+    def product(self):
+        """Whichever of rm_product/fg_product is set — exactly one always is."""
+        return self.fg_product or self.rm_product
+
+    @property
+    def is_fg(self) -> bool:
+        return self.fg_product_id is not None
+
+    @property
+    def sort_key(self):
+        """
+        Deterministic lock-ordering key for confirm_invoice/accept_return —
+        was `product_id` (a single FK) before rm_product/fg_product split.
+        Doesn't need to be globally unique across types, only stable and
+        consistent for the same set of items every time (two concurrent
+        confirms touching overlapping products must always lock in the same
+        order to avoid a deadlock) — an RM id and an FG id happening to
+        share a number is harmless here.
+        """
+        return (self.is_fg, self.fg_product_id or self.rm_product_id)
 
     @property
     def returnable_quantity(self):
@@ -249,17 +308,22 @@ class InvoiceItemShelfAllocation(models.Model):
 
 class FIFOLedger(models.Model):
     """
-    Append-only record of which purchase batch supplied which invoice item.
+    Append-only record of which batch supplied which invoice item — either
+    an RM `purchases.PurchaseItem` batch, or (2026-09) an FG
+    `production.PackingOutputItem` batch (exactly one set, enforced below).
     Created at confirmation time. Never edited or deleted.
     On return: a reverse entry is created (quantity negative) and
-    remaining_quantity is restored on the purchase batch.
+    remaining_quantity is restored on the batch.
     """
 
     invoice_item = models.ForeignKey(
         InvoiceItem, on_delete=models.PROTECT, related_name="fifo_layers",
     )
     purchase     = models.ForeignKey(
-        "purchases.PurchaseItem", on_delete=models.PROTECT, related_name="fifo_consumed",
+        "purchases.PurchaseItem", on_delete=models.PROTECT, null=True, blank=True, related_name="fifo_consumed",
+    )
+    fg_batch     = models.ForeignKey(
+        "production.PackingOutputItem", on_delete=models.PROTECT, null=True, blank=True, related_name="fifo_consumed",
     )
     quantity     = models.IntegerField(
         help_text="Positive = consumed. Negative = returned."
@@ -271,8 +335,19 @@ class FIFOLedger(models.Model):
         verbose_name = "FIFO Ledger"
         verbose_name_plural = "FIFO Ledger Entries"
         ordering = ["created_at"]
+        constraints = [
+            models.CheckConstraint(
+                name="fifoledger_exactly_one_batch",
+                condition=(
+                    (models.Q(purchase__isnull=False) & models.Q(fg_batch__isnull=True)) |
+                    (models.Q(purchase__isnull=True) & models.Q(fg_batch__isnull=False))
+                ),
+            ),
+        ]
 
     def __str__(self):
+        if self.fg_batch_id:
+            return f"{self.invoice_item} ← FG Batch#{self.fg_batch_id} × {self.quantity}"
         return f"{self.invoice_item} ← Purchase#{self.purchase_id} × {self.quantity}"
 
 

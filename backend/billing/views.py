@@ -843,43 +843,84 @@ class AllInvoicePaymentsView(AllocationsListMixin, generics.ListAPIView):
 
 class InvoiceCandidateShelvesView(generics.ListAPIView):
     """
-    GET /billing/shelves/candidates/?product_id=<id>
+    GET /billing/shelves/candidates/?product_id=<id>&product_type=rm|fg
     Shelves currently holding stock of the given product — the dropdown
     source for picking which shelf(s) a draft sale line is fulfilled from.
+    product_type defaults to "rm" (unchanged for existing callers).
     """
     permission_classes = [IsAuthenticated]
     serializer_class = CandidateShelfSerializer
 
     def get_queryset(self):
-        from purchases.selectors import get_candidate_shelves_for_product
-
         product_id = self.request.query_params.get("product_id")
         if not product_id:
             from rest_framework.exceptions import ValidationError
             raise ValidationError({"product_id": "This query parameter is required."})
-        return get_candidate_shelves_for_product(
-            int(product_id), search=self.request.query_params.get("search"),
-        )
+        search = self.request.query_params.get("search")
+
+        if self.request.query_params.get("product_type") == "fg":
+            from inventory.selectors import get_candidate_shelves_for_fg_product
+            return get_candidate_shelves_for_fg_product(int(product_id), search=search)
+
+        from purchases.selectors import get_candidate_shelves_for_product
+        return get_candidate_shelves_for_product(int(product_id), search=search)
 
 
 class InvoiceAutoAllocateShelvesView(APIView):
     """
     POST /billing/shelves/auto-allocate/
-    Thin pass-through to purchases.selectors.compute_auto_shelf_allocation —
-    same shared implementation as the purchases app's own
-    /purchases/shelves/auto-allocate/, just namespaced under /billing/ so
-    the invoice-items frontend never has to reach into another app's URLs
+    Thin pass-through to purchases.selectors.compute_auto_shelf_allocation
+    (RM) or inventory.selectors.compute_auto_fg_shelf_allocation (FG),
+    picked by product_type — same shared implementations as the purchases/
+    inventory apps' own selectors, just namespaced under /billing/ so the
+    invoice-items frontend never has to reach into another app's URLs
     (mirrors InvoiceCandidateShelvesView above).
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        from purchases.selectors import compute_auto_shelf_allocation
-
         req = AutoAllocateShelvesRequestSerializer(data=request.data)
         req.is_valid(raise_exception=True)
-        result = compute_auto_shelf_allocation(**req.validated_data)
+        d = req.validated_data
+        product_type = d.pop("product_type")
+
+        if product_type == "fg":
+            from inventory.selectors import compute_auto_fg_shelf_allocation
+            result = compute_auto_fg_shelf_allocation(
+                fg_product_id=d["product_id"], quantity=d["quantity"], exclude_shelf_ids=d["exclude_shelf_ids"],
+            )
+        else:
+            from purchases.selectors import compute_auto_shelf_allocation
+            result = compute_auto_shelf_allocation(**d)
         return Response(AutoAllocateShelvesResponseSerializer(result).data)
+
+
+class SellableProductListView(generics.ListAPIView):
+    """
+    GET /billing/products/sellable/?product_type=fg|rm&search=...
+    Everything a NEW invoice line can reference (2026-09): FG products
+    (product_type=fg, default) or RM Cartons-family variants
+    (product_type=rm) — the only RM line still sold directly. Each list is
+    restricted to products with live stock > 0. Mirrors
+    production.views.IssuableProductListView's "one endpoint, a `kind`-style
+    param picks the sub-type" shape.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.request.query_params.get("product_type") == "rm":
+            from purchases.serializers import ProductReadSerializer
+            return ProductReadSerializer
+        from production.serializers import FgProductReadSerializer
+        return FgProductReadSerializer
+
+    def get_queryset(self):
+        search = self.request.query_params.get("search")
+        if self.request.query_params.get("product_type") == "rm":
+            from .selectors import get_sellable_cartons_products
+            return get_sellable_cartons_products(search=search)
+        from .selectors import get_sellable_fg_products
+        return get_sellable_fg_products(search=search)
 
 
 class SetInvoiceItemShelfAllocationsView(APIView):

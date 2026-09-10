@@ -26,7 +26,12 @@ import { extractErrorMessage } from '../../utils/errorMessage';
  * onSearchShelves(query): async (query) => [{ value, label, name?, available_quantity? }] — putaway mode only.
  * requiredQuantity: the number `value`'s quantities must sum to exactly.
  * productId: consumption mode only, needed to call `autoAllocateApi`.
- * autoAllocateApi: consumption mode only — async (productId, quantity, excludeShelfIds) =>
+ * productType: optional, consumption mode only — passed through to
+ *        `autoAllocateApi` as its 4th argument (e.g. 'rm'/'fg' for billing's
+ *        FG-selling support, 2026-09). Omit for callers whose
+ *        `autoAllocateApi` doesn't take a product type — an extra undefined
+ *        argument is harmless.
+ * autoAllocateApi: consumption mode only — async (productId, quantity, excludeShelfIds, productType?) =>
  *        { allocations: [{ shelf_id, shelf_name, quantity }], shortfall } — parent-injected
  *        network call (same precedent as `onSearchShelves`), one of
  *        `purchasesApi.shelves.autoAllocate` / `billingApi.shelves.autoAllocate` depending on
@@ -41,6 +46,7 @@ const ShelfAllocationEditor = ({
     mode = 'putaway',
     disabled = false,
     productId,
+    productType,
     autoAllocateApi,
 }) => {
     const { toast } = useToast();
@@ -72,7 +78,7 @@ const ShelfAllocationEditor = ({
         setAutoAllocateShortfall(0);
         try {
             const excludeShelfIds = allocations.map((a) => a.shelf_id).filter(Boolean);
-            const data = await autoAllocateApi(productId, remaining, excludeShelfIds);
+            const data = await autoAllocateApi(productId, remaining, excludeShelfIds, productType);
             const newRows = (data?.allocations || []).map((a) => ({
                 shelf_id: a.shelf_id,
                 quantity: a.quantity,

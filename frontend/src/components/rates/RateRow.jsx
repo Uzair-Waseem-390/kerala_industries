@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
 import PropTypes from 'prop-types';
 import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 import NoRateBadge from './NoRateBadge';
 
 const RateRow = ({
     product,
+    productType,
     rate,
     isAdmin,
     onEdit,
@@ -23,6 +25,11 @@ const RateRow = ({
             className={`hover:bg-neutral-50 transition-colors ${isRecentlyUpdated ? 'bg-amber-50/30' : ''
                 }`}
         >
+            <td className="px-4 py-3 text-sm">
+                <Badge variant={productType === 'fg' ? 'success' : 'info'}>
+                    {productType === 'fg' ? 'Finished Good' : 'Cartons'}
+                </Badge>
+            </td>
             <td className="px-4 py-3 text-sm font-medium text-neutral-900">
                 {product.code}
             </td>
@@ -50,7 +57,7 @@ const RateRow = ({
                         <Button
                             size="sm"
                             variant={hasRate ? 'secondary' : 'primary'}
-                            onClick={() => onEdit(product, rate)}
+                            onClick={() => onEdit(product, rate, productType)}
                         >
                             {hasRate ? 'Edit Price' : 'Set Price'}
                         </Button>
@@ -58,7 +65,7 @@ const RateRow = ({
                     <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => onViewHistory(product)}
+                        onClick={() => onViewHistory(product, productType)}
                     >
                         History
                     </Button>
@@ -70,6 +77,7 @@ const RateRow = ({
 
 RateRow.propTypes = {
     product: PropTypes.object.isRequired,
+    productType: PropTypes.oneOf(['rm', 'fg']).isRequired,
     rate: PropTypes.object,
     isAdmin: PropTypes.bool.isRequired,
     onEdit: PropTypes.func.isRequired,

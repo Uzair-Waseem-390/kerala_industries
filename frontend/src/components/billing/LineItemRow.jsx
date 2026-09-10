@@ -54,6 +54,7 @@ const LineItemRow = ({
                         selectedLabel={item.product_label}
                         onChange={(value, option) => {
                             onUpdate(index, 'product_id', parseInt(value));
+                            onUpdate(index, 'product_type', option?.productType ?? 'fg');
                             onUpdate(index, 'product_label', option?.label ?? '');
                             onUpdate(index, 'selling_price', option?.sellingPrice ?? 0);
                         }}

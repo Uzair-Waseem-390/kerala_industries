@@ -133,10 +133,62 @@ def _generate_return_reference() -> str:
     return next_reference(counter_key="BILL-RTN", prefix_label="RTN", model=Return, field="reference_number")
 
 
+def _is_fg(product) -> bool:
+    from production.models import FgProduct
+    return isinstance(product, FgProduct)
+
+
+def _resolve_item_product(item: dict):
+    """
+    Resolves one items[] dict's product reference — exactly one of
+    rm_product_id/fg_product_id — into the real product instance, and
+    validates it's actually sellable (_validate_sellable_product below).
+    Shared by create_invoice/update_invoice_items.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    rm_id = item.get("rm_product_id")
+    fg_id = item.get("fg_product_id")
+    if bool(rm_id) == bool(fg_id):
+        raise ValidationError({"items": "Each item needs exactly one of rm_product_id or fg_product_id."})
+
+    if fg_id:
+        from production.selectors import get_fg_product_by_id
+        product = get_fg_product_by_id(fg_id)
+    else:
+        from purchases.selectors import get_product_by_id
+        product = get_product_by_id(rm_id)
+
+    _validate_sellable_product(product)
+    return product
+
+
+def _validate_sellable_product(product) -> None:
+    """
+    New invoice lines may only reference an FG product, or an RM product
+    that's a Cartons-family variant (2026-09 — see
+    purchases.selectors.is_cartons_product). Any other RM product can no
+    longer be added to a NEW invoice — historical invoice lines on any
+    other RM product are untouched, this only gates new writes.
+    """
+    from rest_framework.exceptions import ValidationError
+    from purchases.selectors import is_cartons_product
+
+    if _is_fg(product):
+        return
+    if not is_cartons_product(product):
+        raise ValidationError({
+            "product": f"'{product.name}' can't be sold — only Finished Goods and Cartons are sellable.",
+        })
+
+
 def _get_current_selling_price(product) -> Decimal:
     """
     Fetches the current selling price from the rate list.
     Raises ValidationError if no rate is set for this product.
+    Works unchanged for either product type — both purchases.Product and
+    production.FgProduct expose `.rate` (rates.ProductRate's reverse
+    accessor, same related_name on both FKs).
     """
     from rest_framework.exceptions import ValidationError
     try:
@@ -158,19 +210,26 @@ def _validate_stock(product, requested_qty: int, exclude_invoice_id: int = None)
     Raises ValidationError with a clear message if stock is insufficient.
     """
     from rest_framework.exceptions import ValidationError
-    from inventory.models import Inventory
 
-    # O(1) read off the Inventory singleton — kept in exact 1:1 sync with
-    # sum(PurchaseItem.remaining_quantity) for this product by sync_inventory,
-    # which fires in the same transaction as every batch consumption/reversal
-    # (purchase confirm, invoice confirm, returns, lost/found). Deliberately
+    # O(1) read off the Inventory/FgInventory singleton — kept in exact 1:1
+    # sync with its own FIFO batch source (PurchaseItem/PackingOutputItem)
+    # by sync_inventory/sync_fg_inventory, which fire in the same
+    # transaction as every batch consumption/reversal. Deliberately
     # unlocked — this also runs on draft create/edit, which must never take
     # stock locks. The locked walk in _run_fifo has its own ran-out guard for
-    # the confirm race. No row yet (never purchased) => 0, same as before.
-    available = (
-        Inventory.objects.filter(product_id=product.id)
-        .values_list("quantity", flat=True).first() or 0
-    )
+    # the confirm race. No row yet (never produced/purchased) => 0.
+    if _is_fg(product):
+        from inventory.models import FgInventory
+        available = (
+            FgInventory.objects.filter(product_id=product.id)
+            .values_list("quantity", flat=True).first() or 0
+        )
+    else:
+        from inventory.models import Inventory
+        available = (
+            Inventory.objects.filter(product_id=product.id)
+            .values_list("quantity", flat=True).first() or 0
+        )
 
     if available < requested_qty:
         raise ValidationError({
@@ -182,10 +241,17 @@ def _validate_stock(product, requested_qty: int, exclude_invoice_id: int = None)
 
 
 def _run_fifo(*, invoice_item: InvoiceItem, quantity: int, user) -> Decimal:
+    """Dispatches to the RM or FG FIFO walk based on which product type this line sells."""
+    if invoice_item.is_fg:
+        return _run_fifo_fg(invoice_item=invoice_item, quantity=quantity)
+    return _run_fifo_rm(invoice_item=invoice_item, quantity=quantity)
+
+
+def _run_fifo_rm(*, invoice_item: InvoiceItem, quantity: int) -> Decimal:
     """
-    Consumes stock from purchase batches in FIFO order for a given product.
-    Creates FIFOLedger entries for each batch consumed.
-    Returns the blended COGS per unit for storage on the invoice item.
+    Consumes stock from purchase batches in FIFO order for a given RM
+    product. Creates FIFOLedger entries for each batch consumed. Returns
+    the blended COGS per unit for storage on the invoice item.
 
     This is the heart of FIFO. It:
     1. Iterates purchase batches oldest-first
@@ -194,7 +260,7 @@ def _run_fifo(*, invoice_item: InvoiceItem, quantity: int, user) -> Decimal:
     4. Decrements remaining_quantity on the purchase batch
     5. Returns blended cost = total_cost / total_qty
     """
-    product = invoice_item.product
+    product = invoice_item.rm_product
     remaining_to_consume = quantity
     total_cost = Decimal("0")
     # for_update: this decrements remaining_quantity — batch rows are locked
@@ -239,23 +305,79 @@ def _run_fifo(*, invoice_item: InvoiceItem, quantity: int, user) -> Decimal:
     return blended_cogs_per_unit
 
 
+def _run_fifo_fg(*, invoice_item: InvoiceItem, quantity: int) -> Decimal:
+    """
+    FG-equivalent of _run_fifo_rm — consumes production.PackingOutputItem
+    batches in FIFO order via the existing get_available_fg_batches_for_fifo
+    selector (built during the Lost Inventory work, unused by billing until
+    now). Simpler than the RM path: full_unit_cost_snapshot is already the
+    exact, fully-costed manufacturing cost (material + DL + FOH) — no
+    tax-inclusive recompute needed.
+
+    Falls back to unit_cost_snapshot (material-only) for a batch finished
+    before this session's DL/FOH feature existed — full_unit_cost_snapshot
+    is null on any such row (confirmed against real dev data). This slightly
+    understates COGS for that one batch's units rather than blocking the
+    sale of already-produced stock outright — flagged as a real, disclosed
+    tradeoff, not a silent one.
+    """
+    from rest_framework.exceptions import ValidationError
+    from production.selectors.packing import get_available_fg_batches_for_fifo
+
+    product = invoice_item.fg_product
+    remaining_to_consume = quantity
+    total_cost = Decimal("0")
+    batches = get_available_fg_batches_for_fifo(product.id, for_update=True)
+
+    for batch in batches:
+        if remaining_to_consume <= 0:
+            break
+
+        consume = min(batch.remaining_quantity, remaining_to_consume)
+        unit_cost = batch.full_unit_cost_snapshot if batch.full_unit_cost_snapshot is not None else batch.unit_cost_snapshot
+        cost_for_layer = consume * unit_cost
+
+        FIFOLedger.objects.create(
+            invoice_item=invoice_item,
+            fg_batch=batch,
+            quantity=consume,
+            unit_cost=unit_cost,
+        )
+
+        batch.remaining_quantity -= consume
+        batch.save(update_fields=["remaining_quantity"])
+
+        total_cost += cost_for_layer
+        remaining_to_consume -= consume
+
+    if remaining_to_consume > 0:
+        raise ValidationError({
+            "stock": f"Stock ran out mid-confirmation for '{product.name}'. Please refresh and try again."
+        })
+
+    return total_cost / Decimal(str(quantity))
+
+
 def _reverse_fifo(*, invoice_item: InvoiceItem, return_quantity: int) -> None:
     """
     Reverses FIFO consumption for a return — restores remaining_quantity
-    on purchase batches in reverse FIFO order (LIFO reversal = FIFO restore).
+    on batches in reverse FIFO order (LIFO reversal = FIFO restore).
     Creates negative FIFOLedger entries for audit completeness.
-    Also increments the inventory directly.
+    Also increments the inventory directly. Branches by product type; the
+    batch-restoration shape is otherwise identical for RM/FG.
     """
-    product = invoice_item.product
+    invoice_item_product = invoice_item.product
+    is_fg = invoice_item.is_fg
+    batch_field = "fg_batch" if is_fg else "purchase"
     remaining_to_restore = return_quantity
 
     # Reverse in newest-first order so the most recently consumed batch
-    # is restored first (correct FIFO reversal).
-    # select_related("purchase"): each layer's batch was previously lazy-
-    # loaded one query at a time. select_for_update: the joined batch rows'
-    # remaining_quantity is read-then-written, so they must be locked
-    # against concurrent FIFO consumers. Inside accept_return's transaction.
-    layers = FIFOLedger.objects.select_related("purchase").select_for_update().filter(
+    # is restored first (correct FIFO reversal). select_related: each
+    # layer's batch was previously lazy-loaded one query at a time.
+    # select_for_update: the joined batch rows' remaining_quantity is
+    # read-then-written, so they must be locked against concurrent FIFO
+    # consumers. Inside accept_return's transaction.
+    layers = FIFOLedger.objects.select_related(batch_field).select_for_update().filter(
         invoice_item=invoice_item,
         quantity__gt=0,          # only original consumption entries
     ).order_by("-created_at")
@@ -265,17 +387,18 @@ def _reverse_fifo(*, invoice_item: InvoiceItem, return_quantity: int) -> None:
             break
 
         restore = min(layer.quantity, remaining_to_restore)
+        batch = getattr(layer, batch_field)
 
-        # Restore remaining_quantity on the purchase batch
-        layer.purchase.remaining_quantity += restore
-        layer.purchase.save(update_fields=["remaining_quantity"])
+        # Restore remaining_quantity on the batch
+        batch.remaining_quantity += restore
+        batch.save(update_fields=["remaining_quantity"])
 
         # Append a negative ledger entry for audit trail
         FIFOLedger.objects.create(
             invoice_item=invoice_item,
-            purchase=layer.purchase,
             quantity=-restore,
             unit_cost=layer.unit_cost,
+            **{batch_field: batch},
         )
 
         remaining_to_restore -= restore
@@ -283,8 +406,12 @@ def _reverse_fifo(*, invoice_item: InvoiceItem, return_quantity: int) -> None:
     # Increment inventory — through the shared writer so the inventory
     # stats counters stay in sync (user=None: this path never recorded
     # last_updated_by, and the writer preserves that).
-    from inventory.services import sync_inventory
-    sync_inventory(product=product, quantity_delta=return_quantity, user=None)
+    if is_fg:
+        from inventory.services import sync_fg_inventory
+        sync_fg_inventory(product=invoice_item_product, quantity_delta=return_quantity, user=None)
+    else:
+        from inventory.services import sync_inventory
+        sync_inventory(product=invoice_item_product, quantity_delta=return_quantity, user=None)
 
 
 def _recalculate_invoice_totals(invoice: Invoice) -> None:
@@ -398,7 +525,6 @@ def create_invoice(
     payment_due_date defaults to today + DEFAULT_DUE_DATE_DAYS when omitted,
     and is carried through unchanged at confirmation.
     """
-    from purchases.selectors import get_product_by_id
     from rest_framework.exceptions import ValidationError
 
     get_customer_by_id(customer_id)  # validate customer exists
@@ -420,10 +546,11 @@ def create_invoice(
     validated_items = []
     seen_products = set()
     for item in items:
-        product = get_product_by_id(item["product_id"])
-        if product.id in seen_products:
+        product = _resolve_item_product(item)
+        key = ("fg", product.id) if _is_fg(product) else ("rm", product.id)
+        if key in seen_products:
             raise ValidationError({"items": f"Duplicate product '{product.name}' in items."})
-        seen_products.add(product.id)
+        seen_products.add(key)
         _get_current_selling_price(product)      # raises if no rate
         _validate_stock(product, item["quantity"])
         validated_items.append((
@@ -480,7 +607,8 @@ def create_invoice(
     for product, quantity, discount, gst, wht in validated_items:
         InvoiceItem.objects.create(
             invoice=invoice,
-            product=product,
+            fg_product=product if _is_fg(product) else None,
+            rm_product=product if not _is_fg(product) else None,
             quantity=quantity,
             discount=discount,
             gst=gst,
@@ -507,7 +635,6 @@ def update_invoice_items(
     only a CONFIRMED invoice's due date affects a customer's score (see
     update_invoice_due_date for that path).
     """
-    from purchases.selectors import get_product_by_id
     from rest_framework.exceptions import ValidationError
 
     invoice = get_invoice_by_id(invoice_id)
@@ -521,10 +648,11 @@ def update_invoice_items(
     validated_items = []
     seen_products = set()
     for item in items:
-        product = get_product_by_id(item["product_id"])
-        if product.id in seen_products:
+        product = _resolve_item_product(item)
+        key = ("fg", product.id) if _is_fg(product) else ("rm", product.id)
+        if key in seen_products:
             raise ValidationError({"items": f"Duplicate product '{product.name}' in items."})
-        seen_products.add(product.id)
+        seen_products.add(key)
         _get_current_selling_price(product)
         _validate_stock(product, item["quantity"])
         validated_items.append((
@@ -540,7 +668,8 @@ def update_invoice_items(
     for product, quantity, discount, gst, wht in validated_items:
         InvoiceItem.objects.create(
             invoice=invoice,
-            product=product,
+            fg_product=product if _is_fg(product) else None,
+            rm_product=product if not _is_fg(product) else None,
             quantity=quantity,
             discount=discount,
             gst=gst,
@@ -594,6 +723,7 @@ def set_invoice_item_shelf_allocations(*, invoice_item_id: int, allocations: lis
     """
     from rest_framework.exceptions import ValidationError
     from purchases.services import _validate_shelf_ids_exist, validate_shelf_consumption
+    from inventory.services import validate_fg_shelf_consumption
 
     invoice_item = get_invoice_item_by_id(invoice_item_id)
     if invoice_item.invoice.status != Invoice.Status.DRAFT:
@@ -613,10 +743,14 @@ def set_invoice_item_shelf_allocations(*, invoice_item_id: int, allocations: lis
             )
         })
 
-    validate_shelf_consumption(product=invoice_item.product, allocations=[
+    consumption_allocations = [
         {"shelf": shelves_by_id[shelf_id], "quantity": qty}
         for shelf_id, qty in merged.items() if qty > 0
-    ])
+    ]
+    if invoice_item.is_fg:
+        validate_fg_shelf_consumption(product=invoice_item.product, allocations=consumption_allocations)
+    else:
+        validate_shelf_consumption(product=invoice_item.product, allocations=consumption_allocations)
 
     invoice_item.shelf_allocations.all().delete()
     InvoiceItemShelfAllocation.objects.bulk_create([
@@ -851,6 +985,7 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
         raise ValidationError({"status": "Only draft invoices can be confirmed."})
 
     from purchases.services import validate_allocations_complete, validate_shelf_consumption
+    from inventory.services import validate_fg_shelf_consumption
 
     # Sorted in Python (not .order_by) for two reasons: a deterministic
     # product order means two concurrent confirms lock products in the same
@@ -861,8 +996,9 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
     # (previously validated in prefetch/insertion order, which could
     # deadlock against accept_return's/confirm_purchase_order's/this same
     # function's own sorted lock order under concurrent overlapping
-    # confirms).
-    sorted_items = sorted(invoice.items.all(), key=lambda i: i.product_id)
+    # confirms). sort_key replaces the old plain product_id (InvoiceItem no
+    # longer has a single product FK — see models.py).
+    sorted_items = sorted(invoice.items.all(), key=lambda i: i.sort_key)
 
     # Every sale line must already be fully allocated to shelf(s) it's
     # physically fulfilled from, and each named shelf must currently hold
@@ -873,10 +1009,11 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
             allocated=item.allocated_quantity,
             required=item.quantity,
         )
-        validate_shelf_consumption(
-            product=item.product,
-            allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()],
-        )
+        allocations = [{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()]
+        if item.is_fg:
+            validate_fg_shelf_consumption(product=item.product, allocations=allocations)
+        else:
+            validate_shelf_consumption(product=item.product, allocations=allocations)
 
     for item in sorted_items:
         product = item.product
@@ -919,22 +1056,36 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
 
         # Deduct from inventory (global) and the specific shelf(s) this sale
         # line is fulfilled from — through the shared writers so the
-        # inventory stats counters and shelf ledger stay in sync.
-        from inventory.services import apply_shelf_allocations, sync_inventory
-        from inventory.models import ShelfStockMovement
-        sync_inventory(product=product, quantity_delta=-item.quantity, user=user)
-        apply_shelf_allocations(
-            product=product,
-            allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()],
-            sign=-1, reason=ShelfStockMovement.Reason.SALE_CONSUMPTION,
-            reference=invoice.bill_number, user=user,
-        )
+        # inventory stats counters and shelf ledger stay in sync. Branches
+        # by product type; the Stock Movement Report is explicitly RM/
+        # billing-scoped only (existing precedent — see Lost Inventory's
+        # own generalization), so FG sales don't feed it.
+        allocations = [{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()]
+        if item.is_fg:
+            from inventory.services import apply_fg_shelf_allocations, sync_fg_inventory
+            from inventory.models import FgShelfStockMovement
+            sync_fg_inventory(product=product, quantity_delta=-item.quantity, user=user)
+            apply_fg_shelf_allocations(
+                product=product, allocations=allocations,
+                sign=-1, reason=FgShelfStockMovement.Reason.SALE_CONSUMPTION,
+                reference=invoice.bill_number, user=user,
+            )
+        else:
+            from inventory.services import apply_shelf_allocations, sync_inventory
+            from inventory.models import ShelfStockMovement
+            sync_inventory(product=product, quantity_delta=-item.quantity, user=user)
+            apply_shelf_allocations(
+                product=product, allocations=allocations,
+                sign=-1, reason=ShelfStockMovement.Reason.SALE_CONSUMPTION,
+                reference=invoice.bill_number, user=user,
+            )
 
-        # Stock Movement Report — bootstrap opening-balance invoices aren't
-        # real sales, mirrors every other report's is_data_entry exclusion.
-        if not invoice.is_data_entry:
-            from inventory.services import _adjust_stock_movement
-            _adjust_stock_movement(product_id=item.product_id, sold_delta=item.quantity)
+            # Stock Movement Report — RM-scoped only. Bootstrap opening-
+            # balance invoices aren't real sales, mirrors every other
+            # report's is_data_entry exclusion.
+            if not invoice.is_data_entry:
+                from inventory.services import _adjust_stock_movement
+                _adjust_stock_movement(product_id=item.rm_product_id, sold_delta=item.quantity)
 
     _recalculate_invoice_totals(invoice)
 
@@ -1362,9 +1513,9 @@ def accept_return(*, return_id: int, user) -> Return:
     if return_record.status != Return.Status.PENDING:
         raise ValidationError({"status": "Only pending returns can be accepted."})
 
-    # Sorted by product_id (mirrors confirm_invoice) so two concurrent
+    # Sorted by sort_key (mirrors confirm_invoice) so two concurrent
     # accepts touching overlapping shelves always lock in the same order.
-    return_items = sorted(return_record.items.all(), key=lambda ri: ri.invoice_item.product_id)
+    return_items = sorted(return_record.items.all(), key=lambda ri: ri.invoice_item.sort_key)
 
     from purchases.services import validate_allocations_complete
 
@@ -1402,23 +1553,32 @@ def accept_return(*, return_id: int, user) -> Return:
         # Reverse FIFO and restore inventory (global), then put the returned
         # quantity away on the shelf(s) the user chose (any shelf is valid).
         _reverse_fifo(invoice_item=invoice_item, return_quantity=qty)
-        from inventory.services import apply_shelf_allocations
-        from inventory.models import ShelfStockMovement
-        apply_shelf_allocations(
-            product=invoice_item.product,
-            allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in return_item.shelf_allocations.all()],
-            sign=1, reason=ShelfStockMovement.Reason.INVOICE_RETURN_PUTAWAY,
-            reference=return_record.reference_number, user=user,
-        )
+        return_allocations = [{"shelf": a.shelf, "quantity": a.quantity} for a in return_item.shelf_allocations.all()]
+        if invoice_item.is_fg:
+            from inventory.services import apply_fg_shelf_allocations
+            from inventory.models import FgShelfStockMovement
+            apply_fg_shelf_allocations(
+                product=invoice_item.product, allocations=return_allocations,
+                sign=1, reason=FgShelfStockMovement.Reason.INVOICE_RETURN_PUTAWAY,
+                reference=return_record.reference_number, user=user,
+            )
+        else:
+            from inventory.services import apply_shelf_allocations
+            from inventory.models import ShelfStockMovement
+            apply_shelf_allocations(
+                product=invoice_item.product, allocations=return_allocations,
+                sign=1, reason=ShelfStockMovement.Reason.INVOICE_RETURN_PUTAWAY,
+                reference=return_record.reference_number, user=user,
+            )
 
         # Track returned quantity on invoice item
         invoice_item.returned_quantity += qty
         invoice_item.save(update_fields=["returned_quantity"])
 
-        # Stock Movement Report
-        if not invoice_item.invoice.is_data_entry:
+        # Stock Movement Report — RM-scoped only, same as confirm_invoice.
+        if not invoice_item.is_fg and not invoice_item.invoice.is_data_entry:
             from inventory.services import _adjust_stock_movement
-            _adjust_stock_movement(product_id=invoice_item.product_id, sale_returned_delta=qty)
+            _adjust_stock_movement(product_id=invoice_item.rm_product_id, sale_returned_delta=qty)
 
         total_return_amount += line_total
         total_return_cogs   += line_cogs

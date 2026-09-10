@@ -60,6 +60,14 @@ class BillingTestBase(TestCase):
             name="Big Mart", code="BM", address="Main St", user=self.admin,
         )
         self.cash = PaymentMethod.objects.get_or_create(name="Cash", defaults={"balance": Decimal("1000000")})[0]
+        # rates/billing now only allow selling RM products in the Cartons
+        # line (see purchases.selectors.is_cartons_product) — every product
+        # these tests price/sell must be a variant of the Cartons anchor.
+        from purchases.models import CARTONS_PRODUCT_CODE
+        self.cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
 
     def cash_split(self, amount):
         """[(PaymentMethod, amount)] — the single-method split most tests
@@ -73,8 +81,9 @@ class BillingTestBase(TestCase):
         """Product with a rate and a confirmed PO providing FIFO stock."""
         product = Product.objects.create(
             name=name, code=code, family=Family.objects.get(name="Raw Material"),
+            base_product=self.cartons_anchor,
         )
-        create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
             items=[{"product_id": product.id, "quantity": stock, "unit_price": Decimal(unit_cost)}],
@@ -108,7 +117,7 @@ class BillingTestBase(TestCase):
     def make_confirmed_invoice(self, product, quantity=4):
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": quantity}],
+            items=[{"rm_product_id": product.id, "quantity": quantity}],
             user=self.admin,
         )
         self.allocate_invoice_items(invoice)
@@ -120,9 +129,9 @@ class BillingReferenceTests(BillingTestBase):
         product = self.make_stocked_product()
         year = timezone.now().year
         i1 = create_invoice(customer_id=self.customer.id,
-                            items=[{"product_id": product.id, "quantity": 1}], user=self.admin)
+                            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin)
         i2 = create_invoice(customer_id=self.customer.id,
-                            items=[{"product_id": product.id, "quantity": 1}], user=self.admin)
+                            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin)
         self.assertEqual(i1.bill_number, f"BILL-{year}-0001")
         self.assertEqual(i2.bill_number, f"BILL-{year}-0002")
 
@@ -498,7 +507,7 @@ class ProfitFieldVisibilityTests(BillingTestBase):
 
         request = self.factory.post("/billing/invoices/", {
             "customer_id": self.customer.id,
-            "items": [{"product_id": product.id, "quantity": 2}],
+            "items": [{"rm_product_id": product.id, "quantity": 2}],
         }, format="json")
         force_authenticate(request, user=normal)
         response = view(request)
@@ -513,7 +522,7 @@ class ProfitFieldVisibilityTests(BillingTestBase):
         product = self.make_stocked_product(stock=10)
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 2}],
+            items=[{"rm_product_id": product.id, "quantity": 2}],
             user=self.admin,
         )
         self.allocate_invoice_items(invoice)
@@ -619,7 +628,7 @@ class InvoiceQueryCountTests(BillingTestBase):
         view = DraftInvoiceListView.as_view()
         p1 = self.make_stocked_product("P001")
         create_invoice(customer_id=self.customer.id,
-                       items=[{"product_id": p1.id, "quantity": 1}], user=self.admin)
+                       items=[{"rm_product_id": p1.id, "quantity": 1}], user=self.admin)
         baseline = self.count_queries(view, "/billing/invoices/drafts/")
 
         # Replace the single draft with one holding 4 items.
@@ -629,7 +638,7 @@ class InvoiceQueryCountTests(BillingTestBase):
         ]
         create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": p.id, "quantity": 1} for p in products],
+            items=[{"rm_product_id": p.id, "quantity": 1} for p in products],
             user=self.admin,
         )
         grown = self.count_queries(view, "/billing/invoices/drafts/")
@@ -658,13 +667,13 @@ class PrintPreviewTests(BillingTestBase):
         product = self.make_stocked_product(stock=10, selling_price="100")
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 2}],
+            items=[{"rm_product_id": product.id, "quantity": 2}],
             user=self.admin,
         )
         update_invoice_items(
             invoice_id=invoice.id,
             items=[{
-                "product_id": product.id, "quantity": 2,
+                "rm_product_id": product.id, "quantity": 2,
                 "discount": Decimal("10"), "gst": Decimal("5"), "wht": Decimal("2"),
             }],
             user=self.admin,
@@ -694,7 +703,7 @@ class PrintPreviewTests(BillingTestBase):
         p1 = self.make_stocked_product("PP01")
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": p1.id, "quantity": 1}],
+            items=[{"rm_product_id": p1.id, "quantity": 1}],
             user=self.admin,
         )
         view = InvoiceRetrieveUpdateDestroyView.as_view()
@@ -713,7 +722,7 @@ class PrintPreviewTests(BillingTestBase):
         products = [p1] + [self.make_stocked_product(f"PP0{i}", f"Preview Product {i}") for i in range(2, 5)]
         update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": p.id, "quantity": 1} for p in products],
+            items=[{"rm_product_id": p.id, "quantity": 1} for p in products],
             user=self.admin,
         )
         grown = fetch()
@@ -729,12 +738,12 @@ class PrintPreviewTests(BillingTestBase):
         product = self.make_stocked_product(stock=10, selling_price="100")
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 2}],
+            items=[{"rm_product_id": product.id, "quantity": 2}],
             user=self.admin,
         )
         update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": product.id, "quantity": 2, "discount": Decimal("10"), "gst": Decimal("5"), "wht": Decimal("2")}],
+            items=[{"rm_product_id": product.id, "quantity": 2, "discount": Decimal("10"), "gst": Decimal("5"), "wht": Decimal("2")}],
             user=self.admin,
         )
         invoice.refresh_from_db()
@@ -855,11 +864,11 @@ class InvoiceDateFilterTests(BillingTestBase):
         product = self.make_stocked_product()
         self.old_invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         self.new_invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         Invoice.all_objects.filter(pk=self.old_invoice.pk).update(
             created_at=timezone.now() - timedelta(days=10),
@@ -885,7 +894,7 @@ class BillingPermissionTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         request = self.factory.post(f"/billing/invoices/{invoice.id}/confirm/")
         force_authenticate(request, user=make_normal_user())
@@ -904,7 +913,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
 
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -925,7 +934,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -934,7 +943,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
 
         update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             advance_amount=Decimal("500"), method_allocations=self.cash_split("500"),
             user=self.admin,
         )
@@ -953,7 +962,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -962,7 +971,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
 
         update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="after_delivery", user=self.admin,
         )
         self.assertEqual(CashFlow.objects.get(pk=1).cash_in_hand, cash_before_switch - Decimal("300"))
@@ -976,7 +985,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         product = self.make_stocked_product(stock=10, unit_cost="50", selling_price="100")
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 4}],  # grand_total 400
+            items=[{"rm_product_id": product.id, "quantity": 4}],  # grand_total 400
             payment_type="advance", advance_amount=Decimal("150"),
             method_allocations=self.cash_split("150"),
             user=self.admin,
@@ -1012,7 +1021,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         # Draft for 5 units (500) with a matching 500 advance.
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 5}],
+            items=[{"rm_product_id": product.id, "quantity": 5}],
             payment_type="advance", advance_amount=Decimal("500"),
             method_allocations=self.cash_split("500"),
             user=self.admin,
@@ -1022,7 +1031,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         # Customer cuts the order down to 1 unit (100) before it's confirmed.
         update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             user=self.admin,
         )
         invoice.refresh_from_db()
@@ -1056,7 +1065,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         cash_before = CashFlow.objects.get(pk=1).cash_in_hand
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -1077,7 +1086,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -1095,7 +1104,7 @@ class InvoiceAdvancePaymentTests(BillingTestBase):
         product = self.make_stocked_product()
         create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_type="advance", advance_amount=Decimal("300"),
             method_allocations=self.cash_split("300"),
             user=self.admin,
@@ -1114,7 +1123,7 @@ class InvoiceDueDateTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         expected = timezone.localtime(timezone.now()).date() + timedelta(days=DEFAULT_DUE_DATE_DAYS)
         self.assertEqual(invoice.payment_due_date, expected)
@@ -1124,7 +1133,7 @@ class InvoiceDueDateTests(BillingTestBase):
         explicit_date = timezone.localtime(timezone.now()).date() + timedelta(days=30)
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=explicit_date, user=self.admin,
         )
         self.assertEqual(invoice.payment_due_date, explicit_date)
@@ -1133,12 +1142,12 @@ class InvoiceDueDateTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         new_date = timezone.localtime(timezone.now()).date() + timedelta(days=45)
         updated = update_invoice_items(
             invoice_id=invoice.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=new_date, user=self.admin,
         )
         self.assertEqual(updated.payment_due_date, new_date)
@@ -1150,7 +1159,7 @@ class InvoiceDueDateTests(BillingTestBase):
 
         overdue_invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=past_date, user=self.admin,
         )
         self.allocate_invoice_items(overdue_invoice)
@@ -1158,7 +1167,7 @@ class InvoiceDueDateTests(BillingTestBase):
 
         not_yet_due_invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=future_date, user=self.admin,
         )
         self.allocate_invoice_items(not_yet_due_invoice)
@@ -1168,7 +1177,7 @@ class InvoiceDueDateTests(BillingTestBase):
         # real outstanding balance yet).
         create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=past_date, user=self.admin,
         )
 
@@ -1184,7 +1193,7 @@ class InvoiceDueDateTests(BillingTestBase):
         past_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 4}],
+            items=[{"rm_product_id": product.id, "quantity": 4}],
             payment_due_date=past_date, user=self.admin,
         )
         self.allocate_invoice_items(invoice)
@@ -1211,7 +1220,7 @@ class InvoiceDueDateTests(BillingTestBase):
         product = self.make_stocked_product()
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}], user=self.admin,
+            items=[{"rm_product_id": product.id, "quantity": 1}], user=self.admin,
         )
         with self.assertRaises(ValidationError):
             update_invoice_due_date(
@@ -1225,7 +1234,7 @@ class InvoiceDueDateTests(BillingTestBase):
         past_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=past_date, user=self.admin,
         )
         self.allocate_invoice_items(invoice)
@@ -1245,7 +1254,7 @@ class InvoiceDueDateTests(BillingTestBase):
         past_date = timezone.localtime(timezone.now()).date() - timedelta(days=1)
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 1}],
+            items=[{"rm_product_id": product.id, "quantity": 1}],
             payment_due_date=past_date, user=self.admin,
         )
         self.allocate_invoice_items(invoice)
@@ -1352,7 +1361,7 @@ class AdvanceCapTrimsCashTests(BillingTestBase):
         into a capped confirmation."""
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": start_qty}],
+            items=[{"rm_product_id": product.id, "quantity": start_qty}],
             payment_type="advance", advance_amount=Decimal(advance),
             method_allocations=self.cash_split(advance),
             user=self.admin,
@@ -1360,7 +1369,7 @@ class AdvanceCapTrimsCashTests(BillingTestBase):
         if end_qty != start_qty:
             update_invoice_items(
                 invoice_id=invoice.id,
-                items=[{"product_id": product.id, "quantity": end_qty}],
+                items=[{"rm_product_id": product.id, "quantity": end_qty}],
                 user=self.admin,
             )
             invoice.refresh_from_db()
@@ -1439,7 +1448,7 @@ class AdvanceCapTrimsCashTests(BillingTestBase):
 
         invoice = create_invoice(
             customer_id=self.customer.id,
-            items=[{"product_id": product.id, "quantity": 2}],   # 200
+            items=[{"rm_product_id": product.id, "quantity": 2}],   # 200
             payment_type="advance", advance_amount=Decimal("200.0040"),
             method_allocations=self.cash_split("200.0040"),
             user=self.admin,

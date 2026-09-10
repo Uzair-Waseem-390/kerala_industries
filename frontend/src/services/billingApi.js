@@ -59,13 +59,24 @@ export const billingApi = {
         deletePDF: (pdfId) => api.delete(`/billing/pdf/${pdfId}/`),
     },
 
+    // Sellable products (invoice-item picker) — Finished Goods
+    // (productType='fg', default) or RM Cartons-family variants
+    // (productType='rm'), each already filtered to live stock > 0.
+    products: {
+        getSellable: (params = {}) => {
+            const query = new URLSearchParams(params).toString();
+            return api.get(`/billing/products/sellable/${query ? `?${query}` : ''}`);
+        },
+    },
+
     // Shelves (for invoice-line/return shelf allocation)
     shelves: {
         // Shelves that currently hold stock (qty > 0) of a given product —
         // the backend search source for a sale line's consumption
-        // allocation. search narrows by shelf name.
-        getCandidates: (productId, search = '') => {
-            const query = new URLSearchParams({ product_id: productId });
+        // allocation. search narrows by shelf name. productType is 'rm'
+        // (default) or 'fg'.
+        getCandidates: (productId, search = '', productType = 'rm') => {
+            const query = new URLSearchParams({ product_id: productId, product_type: productType });
             if (search) query.set('search', search);
             return api.get(`/billing/shelves/candidates/?${query.toString()}`);
         },
@@ -73,10 +84,12 @@ export const billingApi = {
         // currently hold stock, skipping `excludeShelfIds` (shelves the
         // caller already has manual rows for). Returns whatever it could
         // allocate plus a `shortfall` if total remaining stock fell short —
-        // caller applies the allocations as-is either way.
-        autoAllocate: (productId, quantity, excludeShelfIds = []) =>
+        // caller applies the allocations as-is either way. productType is
+        // 'rm' (default) or 'fg'.
+        autoAllocate: (productId, quantity, excludeShelfIds = [], productType = 'rm') =>
             api.post('/billing/shelves/auto-allocate/', {
                 product_id: productId,
+                product_type: productType,
                 quantity,
                 exclude_shelf_ids: excludeShelfIds,
             }),
