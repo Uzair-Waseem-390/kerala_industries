@@ -207,12 +207,22 @@ def _compute_current_month_figures() -> dict:
     direct_labor_paid        = figures["direct_labor_paid"]
     factory_overhead_paid    = figures["factory_overhead_paid"]
 
+    # direct_labor_paid/factory_overhead_paid are computed above and still
+    # returned below, but deliberately NOT subtracted here (2026-09) — that
+    # cost is already recognized exactly once, via COGS, when the FG/WIP it
+    # helped produce is sold (production.services._shared.compute_labor_overhead_pool
+    # capitalizes it into full_unit_cost_snapshot at production time, same
+    # as raw-material cost already only hits net_profit via COGS on sale,
+    # never as a separate "materials_paid" deduction). Subtracting the cash
+    # payment here too double-counted the same labor rupee: once on
+    # payment, again as COGS when the batch sold — see
+    # manufacturing_costs/REMAINING_INTEGRATION.md for why the deduction was
+    # originally added (correct before FG-selling existed, obsolete after).
     net_profit = (
         row["net_gross_profit"]
         - expenses_paid - recurring_expenses_paid - gst_paid - wht_paid
         - lost_cash + found_cash - lost_inventory + found_inventory
         - depreciation + disposal_gain_loss
-        - direct_labor_paid - factory_overhead_paid
     )
 
     return {

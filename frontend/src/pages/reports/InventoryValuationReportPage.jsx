@@ -10,6 +10,7 @@ import { extractErrorMessage } from '../../utils/errorMessage';
 import Card from '../../components/ui/Card';
 import Table from '../../components/ui/Table';
 import Button from '../../components/ui/Button';
+import Badge from '../../components/ui/Badge';
 import BackLink from '../../components/ui/BackLink';
 import SearchBar from '../../components/ui/SearchBar';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -22,8 +23,26 @@ const formatCurrency = (value) => {
     return isNaN(num) ? '0.00' : num.toFixed(2);
 };
 
+// Same convention as LostInventoryReportPage — RM/WIP/FG all show up here
+// now (2026-09), badged the same way for visual consistency across reports.
+const TYPE_BADGE = {
+    raw_material: { variant: 'default', label: 'Raw Material' },
+    wip_core: { variant: 'warning', label: 'WIP — Core' },
+    wip_piece: { variant: 'info', label: 'WIP — Piece' },
+    finished_goods: { variant: 'success', label: 'Finished Goods' },
+};
+
 const columns = [
     { key: 'product_name', label: 'Product' },
+    {
+        key: 'type',
+        label: 'Type',
+        render: (value) => (
+            <Badge variant={TYPE_BADGE[value]?.variant || 'default'} size="sm">
+                {TYPE_BADGE[value]?.label || value}
+            </Badge>
+        ),
+    },
     { key: 'product_code', label: 'Code' },
     { key: 'quantity_on_hand', label: 'Quantity On Hand' },
     { key: 'avg_unit_cost', label: 'Avg Unit Cost (PKR)', render: formatCurrency },

@@ -174,12 +174,25 @@ class ProfitMarginReportItemSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class InventoryValuationReportItemSerializer(serializers.Serializer):
+    """
+    Rows span RM/WIP/FG (see reports.selectors.get_inventory_valuation_report_data,
+    2026-09) — `id` is namespaced by type since the three product catalogs
+    are independent auto-increment sequences that can share a numeric
+    `product_id`, same reasoning/prefix map as
+    inventory.serializers.CombinedInventoryRowSerializer.
+    """
+    id               = serializers.SerializerMethodField()
     product_id       = serializers.IntegerField()
+    type             = serializers.ChoiceField(choices=["raw_material", "wip_core", "wip_piece", "finished_goods"])
     product_name     = serializers.CharField()
-    product_code     = serializers.CharField()
-    quantity_on_hand = serializers.IntegerField()
+    product_code     = serializers.CharField(allow_null=True)
+    quantity_on_hand = serializers.DecimalField(max_digits=14, decimal_places=4)
     avg_unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4)
     total_value      = serializers.DecimalField(max_digits=20, decimal_places=4)
+
+    def get_id(self, obj):
+        from inventory.serializers import _REGISTRY_ID_PREFIX
+        return f"{_REGISTRY_ID_PREFIX[obj['type']]}-{obj['product_id']}"
 
 
 # ---------------------------------------------------------------------------

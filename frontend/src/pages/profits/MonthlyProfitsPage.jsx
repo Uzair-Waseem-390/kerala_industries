@@ -153,9 +153,7 @@ const MonthlyProfitsPage = () => {
                                         (parseFloat(current?.lost_inventory || 0)) -
                                         (parseFloat(current?.found_inventory || 0)) +
                                         (parseFloat(current?.depreciation || 0)) -
-                                        (parseFloat(current?.disposal_gain_loss || 0)) +
-                                        (parseFloat(current?.direct_labor_paid || 0)) +
-                                        (parseFloat(current?.factory_overhead_paid || 0))
+                                        (parseFloat(current?.disposal_gain_loss || 0))
                                     )}
                                 </p>
                             </div>

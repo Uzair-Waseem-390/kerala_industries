@@ -458,12 +458,16 @@ def _finalize_month(period: str, user=None) -> MonthlyProfit:
     direct_labor_paid         = _compute_direct_labor_paid(first_day, last_day)
     factory_overhead_paid     = _compute_factory_overhead_paid(first_day, last_day)
 
+    # direct_labor_paid/factory_overhead_paid: computed above and still
+    # stored on the frozen MonthlyProfit row below, but deliberately NOT
+    # subtracted here — see the matching comment in
+    # profits.selectors._compute_current_month_figures (same rationale, same
+    # formula, must stay in sync between the live and finalized paths).
     net_profit = (
         row["net_gross_profit"]
         - expenses_paid - recurring_expenses_paid - gst_paid - wht_paid
         - lost_cash + found_cash - lost_inventory + found_inventory
         - depreciation + disposal_gain_loss
-        - direct_labor_paid - factory_overhead_paid
     )
 
     try:

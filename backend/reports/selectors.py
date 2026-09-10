@@ -11,7 +11,6 @@ from cash_flow.models import CashFlow, Expense
 # date filters.
 from purchases.selectors import _day_start, _next_day_start
 from purchases.models import LostInventoryItem, PurchaseItem, PurchaseOrder, PurchaseReturn
-from inventory.models import Inventory
 
 
 def _clean(value):
@@ -397,44 +396,140 @@ def get_profit_margin_report_stats_all_time() -> dict:
 
 def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
     """
-    One row per product currently in stock, valued at FIFO cost from its
-    remaining purchase batches. Point-in-time — no date filter applies.
-    Mirrors the batch-walk math in purchases.selectors.get_fifo_cost_preview.
+    One row per product currently in stock — Raw Material, WIP (both
+    stages), and Finished Goods alike — valued at FIFO cost from its
+    remaining batches. Point-in-time — no date filter applies. Mirrors the
+    batch-walk math in purchases.selectors.get_fifo_cost_preview, and the
+    full_unit_cost_snapshot-else-unit_cost_snapshot fallback billing's FIFO
+    (billing.services._run_fifo_fg) and production's own cost chain already
+    use for WIP/FG batches.
 
-    Fetches every product's batches in ONE bulk query instead of one query
-    per product (get_available_purchase_items_for_fifo called in a loop) —
-    that N+1 pattern scaled with the size of the product catalog on every
-    request; this is now 2 queries total regardless of catalog size.
+    Reads each type's own stock-of-record table directly — purchases.Inventory
+    (RM), inventory.WipInventory (WIP), inventory.FgInventory (FG) — the same
+    tables sync_inventory/sync_wip_inventory/sync_fg_inventory actually write,
+    rather than inventory.ProductRegistryEntry. The registry is a pure
+    identity index written only at the normal product-creation call sites
+    (get_or_create_product_variant / WipProduct+FgProduct creation) — several
+    real paths create a Product directly (opening-stock/data-entry bootstrap,
+    some test fixtures) without ever writing a registry row, which silently
+    dropped that product's real inventory value when this selector was first
+    widened via the registry (caught by test_live_balance_sheet_balances /
+    test_balances_with_data_entry_bootstrap_data going from balanced to a
+    balance_check exactly equal to the omitted product's value). Each
+    Inventory-tracking table is written directly by its own sync_* function
+    regardless of how the product itself was created, so it carries the same
+    completeness guarantee the original RM-only version already relied on.
+
+    Batches are fetched in ONE bulk query PER TYPE (4 total, not per-product)
+    — same N+1-avoidance shape the original RM-only version used, just
+    widened to 4 batch sources instead of 1, still O(1) with respect to
+    catalog size.
+
+    2026-09: widened from RM-only — WIP/FG carry real, already-computed
+    FIFO cost the same as RM does, and omitting them understated every
+    consumer of this data (Balance Sheet/Business Worth's inventory asset,
+    this report itself) by the full value of on-hand WIP+FG stock.
     """
-    inventory_qs = Inventory.objects.filter(quantity__gt=0).select_related(
-        "product",
-    ).order_by("product__name")
+    from inventory.models import FgInventory, WipInventory
+    from production.models import (
+        CuttingBreakdownItem, FgProduct, PackingOutputItem, RecipeBreakdownItem, WipProduct,
+    )
 
+    rm_qs = Inventory.objects.filter(quantity__gt=0).select_related("product")
     if _clean(search):
-        inventory_qs = inventory_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+        rm_qs = rm_qs.filter(search_q(_clean(search), "product__name", "product__code"))
 
-    inventories = list(inventory_qs)
-    product_ids = [inv.product_id for inv in inventories]
+    wip_qs = WipInventory.objects.filter(quantity__gt=0).select_related("product")
+    if _clean(search):
+        wip_qs = wip_qs.filter(search_q(_clean(search), "product__name", "product__code"))
 
-    batches_by_product = {}
-    batches = PurchaseItem.objects.filter(
-        product_id__in=product_ids,
-        is_deleted=False,
-        order__status=PurchaseOrder.Status.CONFIRMED,
-        remaining_quantity__gt=0,
-    ).order_by("product_id", "order__confirmed_at")
-    for batch in batches:
-        batches_by_product.setdefault(batch.product_id, []).append(batch)
+    fg_qs = FgInventory.objects.filter(quantity__gt=0).select_related("product")
+    if _clean(search):
+        fg_qs = fg_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+
+    rm_invs  = list(rm_qs)
+    wip_invs = list(wip_qs)
+    fg_invs  = list(fg_qs)
+
+    wip_core_ids  = [inv.product_id for inv in wip_invs if inv.product.stage == WipProduct.Stage.REWINDING]
+    wip_piece_ids = [inv.product_id for inv in wip_invs if inv.product.stage == WipProduct.Stage.CUTTING]
+
+    def _group_by(batches, id_field):
+        grouped = {}
+        for batch in batches:
+            grouped.setdefault(getattr(batch, id_field), []).append(batch)
+        return grouped
+
+    rm_batches = _group_by(
+        PurchaseItem.objects.filter(
+            product_id__in=[inv.product_id for inv in rm_invs], is_deleted=False,
+            order__status=PurchaseOrder.Status.CONFIRMED, remaining_quantity__gt=0,
+        ).order_by("product_id", "order__confirmed_at"),
+        "product_id",
+    )
+    wip_core_batches = _group_by(
+        RecipeBreakdownItem.objects.filter(
+            wip_product_id__in=wip_core_ids, is_deleted=False, remaining_quantity__gt=0,
+        ).order_by("wip_product_id", "recipe__finished_at"),
+        "wip_product_id",
+    )
+    wip_piece_batches = _group_by(
+        CuttingBreakdownItem.objects.filter(
+            wip_product_id__in=wip_piece_ids, is_deleted=False, remaining_quantity__gt=0,
+        ).order_by("wip_product_id", "recipe__finished_at"),
+        "wip_product_id",
+    )
+    fg_batches = _group_by(
+        PackingOutputItem.objects.filter(
+            fg_product_id__in=[inv.product_id for inv in fg_invs], is_deleted=False, remaining_quantity__gt=0,
+        ).order_by("fg_product_id", "recipe__finished_at"),
+        "fg_product_id",
+    )
+
+    def _rm_value(batches):
+        total = Decimal("0")
+        for batch in batches:
+            unit_cost = batch.total_price / batch.quantity if batch.quantity else batch.unit_price
+            total += batch.remaining_quantity * unit_cost
+        return total
+
+    def _snapshot_value(batches):
+        total = Decimal("0")
+        for batch in batches:
+            unit_cost = batch.full_unit_cost_snapshot if batch.full_unit_cost_snapshot is not None else batch.unit_cost_snapshot
+            total += batch.remaining_quantity * (unit_cost or Decimal("0"))
+        return total
 
     rows = []
-    for inv in inventories:
-        total_value = Decimal("0")
-        for batch in batches_by_product.get(inv.product_id, []):
-            unit_cost = batch.total_price / batch.quantity if batch.quantity else batch.unit_price
-            total_value += batch.remaining_quantity * unit_cost
-
+    for inv in rm_invs:
+        total_value = _rm_value(rm_batches.get(inv.product_id, []))
         rows.append({
             "product_id": inv.product_id,
+            "type": "raw_material",
+            "product_name": inv.product.name,
+            "product_code": inv.product.code,
+            "quantity_on_hand": inv.quantity,
+            "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
+            "total_value": total_value,
+        })
+    for inv in wip_invs:
+        is_core = inv.product.stage == WipProduct.Stage.REWINDING
+        batches = wip_core_batches if is_core else wip_piece_batches
+        total_value = _snapshot_value(batches.get(inv.product_id, []))
+        rows.append({
+            "product_id": inv.product_id,
+            "type": "wip_core" if is_core else "wip_piece",
+            "product_name": inv.product.name,
+            "product_code": inv.product.code,
+            "quantity_on_hand": inv.quantity,
+            "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
+            "total_value": total_value,
+        })
+    for inv in fg_invs:
+        total_value = _snapshot_value(fg_batches.get(inv.product_id, []))
+        rows.append({
+            "product_id": inv.product_id,
+            "type": "finished_goods",
             "product_name": inv.product.name,
             "product_code": inv.product.code,
             "quantity_on_hand": inv.quantity,
@@ -442,6 +537,7 @@ def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
             "total_value": total_value,
         })
 
+    rows.sort(key=lambda row: row["product_name"])
     return rows
 
 

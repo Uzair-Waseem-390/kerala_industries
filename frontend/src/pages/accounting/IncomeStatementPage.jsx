@@ -66,7 +66,6 @@ const IncomeStatementPage = () => {
     const totalOperatingExpenses = data
         ? Number(data.expenses_paid) + Number(data.recurring_expenses_paid) + Number(data.gst_paid)
             + Number(data.wht_paid) + Number(data.depreciation)
-            + Number(data.direct_labor_paid) + Number(data.factory_overhead_paid)
         : 0;
 
     return (
@@ -146,8 +145,6 @@ const IncomeStatementPage = () => {
                         <Line label="GST Paid" amount={data.gst_paid} indent />
                         <Line label="WHT Paid" amount={data.wht_paid} indent />
                         <Line label="Depreciation" amount={data.depreciation} indent />
-                        <Line label="Direct Labor Paid" amount={data.direct_labor_paid} indent />
-                        <Line label="Factory Overhead Paid" amount={data.factory_overhead_paid} indent />
                         <Line label="Total Operating Expenses" amount={totalOperatingExpenses} bold />
                     </div>
 
