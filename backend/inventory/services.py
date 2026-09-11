@@ -5,8 +5,8 @@ from django.utils import timezone
 from purchases.models import Product, Shelf
 
 from .models import (
-    LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgShelfStock, FgShelfStockMovement,
-    Inventory, InventoryStatsFlow, ProductRegistryEntry, ProductStockMovement,
+    LOW_STOCK_THRESHOLD, FgInventory, FgInventoryStatsFlow, FgProductStockMovement, FgShelfStock,
+    FgShelfStockMovement, Inventory, InventoryStatsFlow, ProductRegistryEntry, ProductStockMovement,
     ShelfStock, ShelfStockMovement, StockMovementFlow, WipInventory, WipInventoryStatsFlow,
     WipShelfStock, WipShelfStockMovement,
 )
@@ -56,6 +56,40 @@ def _adjust_stock_movement(
         StockMovementFlow.objects.filter(pk=1).update(
             last_updated_at=now,
             **{field: F(field) + delta for field, delta in deltas.items()},
+        )
+
+
+def _adjust_fg_stock_movement(
+    *, fg_product_id: int,
+    sold_delta: int = 0,
+    sale_returned_delta: int = 0,
+) -> None:
+    """
+    FG twin of _adjust_stock_movement (2026-09) — the ONLY function that
+    writes to FgProductStockMovement, and to StockMovementFlow's
+    total_fg_sold/total_fg_sale_returned fields. Called from billing
+    (invoice confirm, customer return accept) for FG line items only — FG
+    is never "purchased"/"lost"/"found" in this report's scope, so there's
+    no equivalent of those three deltas here. Same F()-expression,
+    no-row-lock-needed reasoning as _adjust_stock_movement.
+    """
+    deltas = {
+        "total_sold"          : sold_delta,
+        "total_sale_returned" : sale_returned_delta,
+    }
+    with transaction.atomic():
+        now = timezone.now()
+        FgProductStockMovement.objects.get_or_create(fg_product_id=fg_product_id)
+        FgProductStockMovement.objects.filter(fg_product_id=fg_product_id).update(
+            last_updated_at=now,
+            **{field: F(field) + delta for field, delta in deltas.items()},
+        )
+
+        StockMovementFlow.get_instance()
+        StockMovementFlow.objects.filter(pk=1).update(
+            last_updated_at=now,
+            total_fg_sold=F("total_fg_sold") + sold_delta,
+            total_fg_sale_returned=F("total_fg_sale_returned") + sale_returned_delta,
         )
 
 

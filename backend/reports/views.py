@@ -43,9 +43,12 @@ from .selectors import (
     get_recurring_expenses_report_queryset,
     get_recurring_expenses_report_stats,
     get_recurring_expenses_report_stats_all_time,
-    get_stock_movement_report_rows,
-    get_stock_movement_report_stats,
-    get_stock_movement_report_stats_all_time,
+    get_purchase_movement_report_rows,
+    get_purchase_movement_report_stats,
+    get_purchase_movement_report_stats_all_time,
+    get_sales_movement_report_rows,
+    get_sales_movement_report_stats,
+    get_sales_movement_report_stats_all_time,
 )
 from .serializers import (
     AssetDepreciationReportItemSerializer,
@@ -59,10 +62,11 @@ from .serializers import (
     OutputTaxReportItemSerializer,
     PaymentReportItemSerializer,
     ProfitMarginReportItemSerializer,
+    PurchaseMovementReportItemSerializer,
     PurchaseReturnReportItemSerializer,
     RecurringExpenseReportItemSerializer,
     ReportDateFilterSerializer,
-    StockMovementReportItemSerializer,
+    SalesMovementReportItemSerializer,
 )
 
 
@@ -509,11 +513,19 @@ class RecurringExpensesReportView(generics.ListAPIView):
 class StockMovementReportView(generics.ListAPIView):
     """
     GET /reports/stock-movement/
-    One row per product: quantity purchased, purchase-returned, sold, and
-    sale-returned. Header stats are the same four totals summed across
-    every product.
+    Two tabs, switched by `tab` (default "purchase"):
+
+    tab=purchase (default) — one row per RM product: quantity purchased,
+    purchase-returned, sold, sale-returned, lost, found (unchanged shape —
+    purchase is always RM, nothing to widen here).
+
+    tab=sales (2026-09) — one row per RM (Cartons) or FG product actually
+    sold: quantity sold/sale-returned, each row tagged `type`. Added because
+    billing now sells FG too, not just RM Cartons — the old single-tab
+    report was built before FG-selling existed and never widened for it.
 
     Query params:
+        tab       : "purchase" | "sales" (default "purchase")
         date      : YYYY-MM-DD — exact day
         date_from : YYYY-MM-DD — range start
         date_to   : YYYY-MM-DD — range end
@@ -524,30 +536,37 @@ class StockMovementReportView(generics.ListAPIView):
 
     Response (paginated):
         {"count": int, "total_pages": int, "current_page": int, "page_size": int,
-         "stats": {"total_purchased": int, "total_purchase_returned": int,
-                    "total_sold": int, "total_sale_returned": int},
+         "stats": {...tab-specific totals...},
          "results": [...]}
     """
     permission_classes = [IsAdminOrSuperuser]
-    serializer_class   = StockMovementReportItemSerializer
+
+    def _is_sales_tab(self):
+        return self.request.query_params.get("tab") == "sales"
+
+    def get_serializer_class(self):
+        return SalesMovementReportItemSerializer if self._is_sales_tab() else PurchaseMovementReportItemSerializer
 
     def get_queryset(self):
         filters = ReportDateFilterSerializer(data=self.request.query_params)
         filters.is_valid(raise_exception=True)
         search = self.request.query_params.get("search")
-        return get_stock_movement_report_rows(**filters.validated_data, search=search)
+        row_fn = get_sales_movement_report_rows if self._is_sales_tab() else get_purchase_movement_report_rows
+        return row_fn(**filters.validated_data, search=search)
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         search = request.query_params.get("search")
+        stats_fn, stats_all_time_fn = (
+            (get_sales_movement_report_stats, get_sales_movement_report_stats_all_time)
+            if self._is_sales_tab() else
+            (get_purchase_movement_report_stats, get_purchase_movement_report_stats_all_time)
+        )
         if _has_date_filter(request) or (search and search.strip()):
             # Sums the SAME rows list above — no second aggregation query.
-            # Used to call get_stock_movement_report_stats(**filters, search)
-            # here, which independently re-ran the full 6-table aggregation
-            # a second time every request.
-            stats = get_stock_movement_report_stats(queryset)
+            stats = stats_fn(queryset)
         else:
-            stats = get_stock_movement_report_stats_all_time()
+            stats = stats_all_time_fn()
 
         page = self.paginate_queryset(queryset)
         serializer = self.get_serializer(page, many=True)
@@ -921,11 +940,12 @@ class InventoryValuationReportPrintView(APIView):
 
 class StockMovementReportPrintView(APIView):
     """
-    GET /reports/stock-movement/print/?date=&date_from=&date_to=&search=
-    Rows are grouped across 4 source tables (not a single queryset), and
-    this report uniquely combines a date filter with a search box — doesn't
-    fit BaseReportPrintView's single-queryset_fn shape, so it's written
-    directly here (same as InventoryValuationReportPrintView above).
+    GET /reports/stock-movement/print/?tab=&date=&date_from=&date_to=&search=
+    Rows are grouped across multiple source tables (not a single queryset),
+    and this report uniquely combines a date filter with a search box —
+    doesn't fit BaseReportPrintView's single-queryset_fn shape, so it's
+    written directly here (same as InventoryValuationReportPrintView
+    above). `tab` (default "purchase") mirrors StockMovementReportView.
     """
     permission_classes = [IsAdminOrSuperuser]
 
@@ -934,29 +954,46 @@ class StockMovementReportPrintView(APIView):
         filters_serializer.is_valid(raise_exception=True)
         filters = filters_serializer.validated_data
         search = request.query_params.get("search")
+        is_sales_tab = request.query_params.get("tab") == "sales"
 
-        rows_data = get_stock_movement_report_rows(**filters, search=search)
-
-        if _has_date_filter(request) or (search and search.strip()):
-            stats = get_stock_movement_report_stats(rows_data)
+        if is_sales_tab:
+            rows_data = get_sales_movement_report_rows(**filters, search=search)
+            stats = (
+                get_sales_movement_report_stats(rows_data)
+                if _has_date_filter(request) or (search and search.strip())
+                else get_sales_movement_report_stats_all_time()
+            )
+            rows = SalesMovementReportItemSerializer(rows_data, many=True).data
+            title = "Stock Movement Report — Sales"
+            columns = [
+                {"key": "product_name", "label": "Product"}, {"key": "product_code", "label": "Code"},
+                {"key": "type", "label": "Type"},
+                {"key": "total_sold", "label": "Sold"}, {"key": "total_sale_returned", "label": "Sale Returned"},
+            ]
         else:
-            stats = get_stock_movement_report_stats_all_time()
-
-        rows = StockMovementReportItemSerializer(rows_data, many=True).data
+            rows_data = get_purchase_movement_report_rows(**filters, search=search)
+            stats = (
+                get_purchase_movement_report_stats(rows_data)
+                if _has_date_filter(request) or (search and search.strip())
+                else get_purchase_movement_report_stats_all_time()
+            )
+            rows = PurchaseMovementReportItemSerializer(rows_data, many=True).data
+            title = "Stock Movement Report — Purchases"
+            columns = [
+                {"key": "product_name", "label": "Product"}, {"key": "product_code", "label": "Code"},
+                {"key": "total_purchased", "label": "Purchased"}, {"key": "total_purchase_returned", "label": "Purchase Returned"},
+                {"key": "total_sold", "label": "Sold"}, {"key": "total_sale_returned", "label": "Sale Returned"},
+                {"key": "total_lost", "label": "Lost"}, {"key": "total_found", "label": "Found"},
+            ]
 
         filter_description = _describe_filters(request.query_params)
         if search:
             filter_description += f" — Search: {search}"
 
         pdf_bytes, filename = generate_report_pdf_bytes(
-            title="Stock Movement Report",
+            title=title,
             filter_description=filter_description,
-            columns=[
-                {"key": "product_name", "label": "Product"}, {"key": "product_code", "label": "Code"},
-                {"key": "total_purchased", "label": "Purchased"}, {"key": "total_purchase_returned", "label": "Purchase Returned"},
-                {"key": "total_sold", "label": "Sold"}, {"key": "total_sale_returned", "label": "Sale Returned"},
-                {"key": "total_lost", "label": "Lost"}, {"key": "total_found", "label": "Found"},
-            ],
+            columns=columns,
             rows=rows,
             stats=[{"label": _humanize(k), "value": v} for k, v in stats.items()],
         )

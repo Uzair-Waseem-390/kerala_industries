@@ -6,14 +6,17 @@ from django.db.models.functions import Coalesce
 
 
 class Command(BaseCommand):
-    help = "Backfills ProductStockMovement and StockMovementFlow from existing purchases/returns/invoices/returns."
+    help = (
+        "Backfills ProductStockMovement/FgProductStockMovement and "
+        "StockMovementFlow from existing purchases/returns/invoices/returns."
+    )
 
     def handle(self, *args, **kwargs):
         from purchases.models import (
             LostInventoryItem, LostInventoryRecovery, Product,
             PurchaseItem, PurchaseReturnItem,
         )
-        from inventory.models import ProductStockMovement, StockMovementFlow
+        from inventory.models import FgProductStockMovement, ProductStockMovement, StockMovementFlow
         from billing.models import Invoice, InvoiceItem, ReturnItem
 
         self.stdout.write("Starting stock movement backfill...\n")
@@ -21,6 +24,7 @@ class Command(BaseCommand):
         # Idempotent — reset every product's row (and the flow singleton)
         # before resumming, same discipline as every other backfill command.
         ProductStockMovement.objects.all().delete()
+        FgProductStockMovement.objects.all().delete()
         StockMovementFlow.objects.all().delete()
 
         # PurchaseItem/PurchaseReturnItem/LostInventoryItem/LostInventoryRecovery
@@ -118,6 +122,38 @@ class Command(BaseCommand):
 
         ProductStockMovement.objects.bulk_create(rows)
 
+        # FG side (2026-09) — Sales tab only, FG is never purchased/lost/
+        # found in this report's scope. Mirrors the RM sold/sale_returned
+        # blocks above exactly, just keyed by fg_product_id.
+        fg_sold_by_product = dict(
+            InvoiceItem.objects.filter(
+                invoice__is_deleted=False, invoice__is_data_entry=False, fg_product__isnull=False,
+            ).exclude(invoice__status="draft").values("fg_product_id")
+            .annotate(total=Coalesce(Sum("quantity"), zero)).values_list("fg_product_id", "total")
+        )
+        fg_sale_returned_by_product = {}
+        for row in ReturnItem.objects.filter(
+            return_record__is_deleted=False, return_record__status="accepted",
+            invoice_item__invoice__is_data_entry=False, invoice_item__fg_product__isnull=False,
+        ).values("invoice_item__fg_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+            fg_sale_returned_by_product[row["invoice_item__fg_product_id"]] = row["total"]
+
+        fg_product_ids = set(fg_sold_by_product) | set(fg_sale_returned_by_product)
+        flow_fg_sold = flow_fg_sale_returned = 0
+        fg_rows = []
+        for fg_product_id in fg_product_ids:
+            sold = fg_sold_by_product.get(fg_product_id, 0)
+            sale_returned = fg_sale_returned_by_product.get(fg_product_id, 0)
+            fg_rows.append(FgProductStockMovement(
+                fg_product_id=fg_product_id,
+                total_sold=sold,
+                total_sale_returned=sale_returned,
+            ))
+            flow_fg_sold += sold
+            flow_fg_sale_returned += sale_returned
+
+        FgProductStockMovement.objects.bulk_create(fg_rows)
+
         flow = StockMovementFlow.get_instance()
         flow.total_purchased = flow_purchased
         flow.total_purchase_returned = flow_purchase_returned
@@ -125,6 +161,8 @@ class Command(BaseCommand):
         flow.total_sale_returned = flow_sale_returned
         flow.total_lost = flow_lost
         flow.total_found = flow_found
+        flow.total_fg_sold = flow_fg_sold
+        flow.total_fg_sale_returned = flow_fg_sale_returned
         flow.save()
 
         self.stdout.write(f"  products with movement: {len(rows)}")
@@ -134,4 +172,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  total_sale_returned: {flow_sale_returned}")
         self.stdout.write(f"  total_lost: {flow_lost}")
         self.stdout.write(f"  total_found: {flow_found}")
+        self.stdout.write(f"  fg products with movement: {len(fg_rows)}")
+        self.stdout.write(f"  total_fg_sold: {flow_fg_sold}")
+        self.stdout.write(f"  total_fg_sale_returned: {flow_fg_sale_returned}")
         self.stdout.write(self.style.SUCCESS("\nStock movement backfill complete."))

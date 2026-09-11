@@ -1057,9 +1057,9 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
         # Deduct from inventory (global) and the specific shelf(s) this sale
         # line is fulfilled from — through the shared writers so the
         # inventory stats counters and shelf ledger stay in sync. Branches
-        # by product type; the Stock Movement Report is explicitly RM/
-        # billing-scoped only (existing precedent — see Lost Inventory's
-        # own generalization), so FG sales don't feed it.
+        # by product type; the Stock Movement Report's Purchases side stays
+        # RM-only (FG is never purchased), but its Sales side now covers FG
+        # too (2026-09 — see inventory.services._adjust_fg_stock_movement).
         allocations = [{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()]
         if item.is_fg:
             from inventory.services import apply_fg_shelf_allocations, sync_fg_inventory
@@ -1070,6 +1070,12 @@ def confirm_invoice(*, invoice_id: int, user) -> Invoice:
                 sign=-1, reason=FgShelfStockMovement.Reason.SALE_CONSUMPTION,
                 reference=invoice.bill_number, user=user,
             )
+
+            # Stock Movement Report (Sales tab) — same is_data_entry
+            # exclusion as the RM branch below.
+            if not invoice.is_data_entry:
+                from inventory.services import _adjust_fg_stock_movement
+                _adjust_fg_stock_movement(fg_product_id=item.fg_product_id, sold_delta=item.quantity)
         else:
             from inventory.services import apply_shelf_allocations, sync_inventory
             from inventory.models import ShelfStockMovement
@@ -1575,10 +1581,15 @@ def accept_return(*, return_id: int, user) -> Return:
         invoice_item.returned_quantity += qty
         invoice_item.save(update_fields=["returned_quantity"])
 
-        # Stock Movement Report — RM-scoped only, same as confirm_invoice.
-        if not invoice_item.is_fg and not invoice_item.invoice.is_data_entry:
-            from inventory.services import _adjust_stock_movement
-            _adjust_stock_movement(product_id=invoice_item.rm_product_id, sale_returned_delta=qty)
+        # Stock Movement Report (Sales tab now covers FG too, 2026-09 —
+        # same reasoning as confirm_invoice above).
+        if not invoice_item.invoice.is_data_entry:
+            if invoice_item.is_fg:
+                from inventory.services import _adjust_fg_stock_movement
+                _adjust_fg_stock_movement(fg_product_id=invoice_item.fg_product_id, sale_returned_delta=qty)
+            else:
+                from inventory.services import _adjust_stock_movement
+                _adjust_stock_movement(product_id=invoice_item.rm_product_id, sale_returned_delta=qty)
 
         total_return_amount += line_total
         total_return_cogs   += line_cogs

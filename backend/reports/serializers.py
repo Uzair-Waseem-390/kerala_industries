@@ -286,7 +286,10 @@ class AssetDepreciationReportItemSerializer(serializers.ModelSerializer):
 # tables), not a single model's instances, so this is a plain Serializer.
 # ---------------------------------------------------------------------------
 
-class StockMovementReportItemSerializer(serializers.Serializer):
+class PurchaseMovementReportItemSerializer(serializers.Serializer):
+    """Purchases tab — RM-only, unchanged shape (renamed from
+    StockMovementReportItemSerializer, 2026-09, when the report split into
+    Purchases/Sales tabs — see SalesMovementReportItemSerializer)."""
     product_id              = serializers.IntegerField()
     product_name            = serializers.CharField()
     product_code            = serializers.CharField()
@@ -296,3 +299,21 @@ class StockMovementReportItemSerializer(serializers.Serializer):
     total_sale_returned      = serializers.IntegerField()
     total_lost                = serializers.IntegerField()
     total_found               = serializers.IntegerField()
+
+
+class SalesMovementReportItemSerializer(serializers.Serializer):
+    """Sales tab (2026-09) — RM (Cartons) + FG, type-tagged, same
+    namespaced-id convention as InventoryValuationReportItemSerializer
+    (RM/FG are independent auto-increment sequences that can share a
+    numeric product_id)."""
+    id               = serializers.SerializerMethodField()
+    product_id       = serializers.IntegerField()
+    type             = serializers.ChoiceField(choices=["raw_material", "finished_goods"])
+    product_name     = serializers.CharField()
+    product_code     = serializers.CharField()
+    total_sold        = serializers.IntegerField()
+    total_sale_returned = serializers.IntegerField()
+
+    def get_id(self, obj):
+        from inventory.serializers import _REGISTRY_ID_PREFIX
+        return f"{_REGISTRY_ID_PREFIX[obj['type']]}-{obj['product_id']}"

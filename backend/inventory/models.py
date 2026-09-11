@@ -134,8 +134,16 @@ class StockMovementFlow(models.Model):
     """
     Single live record — the all-time, all-product totals for the Stock
     Movement Report header. Same six fields as ProductStockMovement,
-    summed across every product, kept in sync by the same
+    summed across every RM product, kept in sync by the same
     _adjust_stock_movement() calls.
+
+    total_fg_sold/total_fg_sale_returned (2026-09) are the FG-side twins,
+    summed across every FgProductStockMovement row — FG is never
+    "purchased"/"lost"/"found" in this report's scope (Stock Movement stays
+    RM-only for those four; only the Sales tab widened to include FG — see
+    FgProductStockMovement). Reusing this same singleton rather than a
+    parallel FgStockMovementFlow, same "one flow per app-ish concern, not
+    one per product type" reasoning ManufacturingCostsStats already follows.
     """
     total_purchased         = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     total_purchase_returned = models.DecimalField(max_digits=14, decimal_places=4, default=0)
@@ -143,6 +151,8 @@ class StockMovementFlow(models.Model):
     total_sale_returned      = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     total_lost                = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     total_found               = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_fg_sold             = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_fg_sale_returned    = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at          = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -157,6 +167,32 @@ class StockMovementFlow(models.Model):
     def get_instance(cls):
         instance, _ = cls.objects.get_or_create(pk=1)
         return instance
+
+
+class FgProductStockMovement(models.Model):
+    """
+    Per-FG-product running quantity totals for the Stock Movement Report's
+    Sales tab (2026-09) — FG twin of ProductStockMovement, scoped to only
+    what the Sales tab needs: FG is never purchased, and lost/found stay
+    RM-only exactly as they already are (out of scope for this change).
+    Updated live via _adjust_fg_stock_movement() in services.py, called
+    from billing.services' confirm_invoice/accept_return FG branches — the
+    same two places the RM-side _adjust_stock_movement() is already called
+    from, just the FG counterpart that was previously skipped entirely
+    ("Stock Movement Report — RM-scoped only" — no longer true for sales
+    once FG-selling existed; purchases/lost/found remain RM-only).
+    """
+    fg_product          = models.OneToOneField("production.FgProduct", on_delete=models.CASCADE, related_name="stock_movement")
+    total_sold           = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    total_sale_returned  = models.DecimalField(max_digits=14, decimal_places=4, default=0)
+    last_updated_at      = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name        = "FG Product Stock Movement"
+        verbose_name_plural = "FG Product Stock Movement"
+
+    def __str__(self):
+        return f"{self.fg_product.name} — sold {self.total_sold}"
 
 
 # ---------------------------------------------------------------------------

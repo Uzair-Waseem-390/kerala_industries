@@ -89,6 +89,73 @@ class ReportsTestBase(TestCase):
             invoice.refresh_from_db()
         return invoice
 
+    def make_stocked_fg_product(self, code="FG001", name="FG Product 1", *, stock=10):
+        """
+        Builds a real, sellable FgProduct directly at the PackingOutputItem
+        layer — bypassing the full Rewinding/Cutting/Packing recipe pipeline,
+        since the Sales-tab report only needs a real FG batch with cost/
+        remaining_quantity for confirm_invoice's FIFO draw, not the pipeline
+        mechanics themselves.
+        """
+        from production.models import (
+            FgProduct, PackingOutputItem, Recipe, RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard,
+        )
+        from production.utils import compute_fg_variant_key
+        from inventory.models import FgShelfStockMovement
+        from inventory.services import apply_fg_shelf_allocations, sync_fg_inventory
+
+        binding, _ = RewoundCoreBinding.objects.get_or_create(
+            value=f"{name} binding", defaults={"created_by": self.admin, "updated_by": self.admin},
+        )
+        yard, _ = RewoundCoreYard.objects.get_or_create(
+            value=Decimal("24"), defaults={"created_by": self.admin, "updated_by": self.admin},
+        )
+        length_mm, _ = RewoundCoreLengthMm.objects.get_or_create(
+            value=Decimal("100"), defaults={"created_by": self.admin, "updated_by": self.admin},
+        )
+        variant_key = compute_fg_variant_key(binding_id=binding.id, yard_id=yard.id, length_mm_id=length_mm.id)
+        fg_product = FgProduct.objects.create(
+            name=name, code=code, binding=binding, yard=yard, length_mm=length_mm,
+            variant_key=variant_key, created_by=self.admin, updated_by=self.admin,
+        )
+        recipe = Recipe.objects.create(
+            recipe_number=f"REC-{code}", recipe_type=Recipe.RecipeType.CUTTING,
+            name=f"Recipe for {name}", status=Recipe.Status.FINISHED,
+            created_by=self.admin, updated_by=self.admin,
+        )
+        PackingOutputItem.objects.create(
+            recipe=recipe, fg_product=fg_product, quantity=stock, remaining_quantity=stock,
+            unit_cost_snapshot=Decimal("50"), full_unit_cost_snapshot=Decimal("55"),
+            created_by=self.admin, updated_by=self.admin,
+        )
+        sync_fg_inventory(product=fg_product, quantity_delta=stock, user=self.admin)
+        apply_fg_shelf_allocations(
+            product=fg_product, allocations=[{"shelf": self.shelf, "quantity": stock}],
+            sign=1, reason=FgShelfStockMovement.Reason.PACKING_OUTPUT_PUTAWAY,
+            reference=recipe.recipe_number, user=self.admin,
+        )
+        create_rate(fg_product_id=fg_product.id, selling_price=Decimal("100"), user=self.admin)
+        return fg_product
+
+    def make_confirmed_fg_invoice(self, fg_product, quantity=2, *, confirmed_on=None):
+        invoice = create_invoice(
+            customer_id=self.customer.id,
+            items=[{"fg_product_id": fg_product.id, "quantity": quantity}],
+            user=self.admin,
+        )
+        for item in invoice.items.all():
+            set_invoice_item_shelf_allocations(
+                invoice_item_id=item.id,
+                allocations=[{"shelf_id": self.shelf.id, "quantity": item.quantity}],
+                user=self.admin,
+            )
+        invoice = confirm_invoice(invoice_id=invoice.id, user=self.admin)
+        if confirmed_on is not None:
+            aware = timezone.make_aware(datetime.combine(confirmed_on, time(12, 0)))
+            Invoice.objects.filter(pk=invoice.pk).update(confirmed_at=aware)
+            invoice.refresh_from_db()
+        return invoice
+
 
 class DateRangeFilterBoundaryTests(ReportsTestBase):
     """
@@ -268,3 +335,74 @@ class SearchTests(ReportsTestBase):
         grown_count = len(ctx_grown.captured_queries)
 
         self.assertEqual(baseline_count, grown_count)
+
+
+class StockMovementSalesTabTests(ReportsTestBase):
+    """
+    Sales tab (2026-09) — RM Cartons + FG, added because billing now sells
+    FG too and the old single-tab report was RM-only. Purchases tab
+    (tab omitted/'purchase') is covered by the pre-existing tests above,
+    unchanged.
+    """
+
+    def test_default_tab_is_purchase_unchanged(self):
+        """No `tab` param at all must behave exactly like before this
+        change — same response shape, same default stats/columns."""
+        self.make_stocked_product(code="P1", name="Product One", stock=5)
+        request = self.factory.get("/reports/stock-movement/", {})
+        force_authenticate(request, user=self.admin)
+        response = StockMovementReportView.as_view()(request)
+        self.assertIn("total_purchased", response.data["stats"])
+        self.assertNotIn("type", response.data["results"][0] if response.data["results"] else {})
+
+    def test_sales_tab_includes_both_rm_cartons_and_fg(self):
+        rm_product = self.make_stocked_product(code="RM1", name="RM Cartons Variant", stock=10)
+        self.make_confirmed_invoice(rm_product, quantity=3)
+
+        fg_product = self.make_stocked_fg_product(code="FG1", name="FG Product One", stock=10)
+        self.make_confirmed_fg_invoice(fg_product, quantity=4)
+
+        request = self.factory.get("/reports/stock-movement/", {"tab": "sales"})
+        force_authenticate(request, user=self.admin)
+        response = StockMovementReportView.as_view()(request)
+
+        rows = {r["product_code"]: r for r in response.data["results"]}
+        self.assertEqual(rows["RM1"]["type"], "raw_material")
+        self.assertEqual(rows["RM1"]["total_sold"], 3)
+        self.assertEqual(rows["FG1"]["type"], "finished_goods")
+        self.assertEqual(rows["FG1"]["total_sold"], 4)
+        self.assertEqual(response.data["stats"]["total_sold"], 7)
+
+    def test_sales_tab_date_filtered_matches_unfiltered_live_aggregation(self):
+        """No-filter (O(1) ProductStockMovement/FgProductStockMovement read)
+        and date-filtered (live aggregation) paths must agree — same
+        regression class as the Purchases tab's own equivalence tests."""
+        fg_product = self.make_stocked_fg_product(code="FG2", name="FG Product Two", stock=10)
+        self.make_confirmed_fg_invoice(fg_product, quantity=6)
+
+        unfiltered = self.factory.get("/reports/stock-movement/", {"tab": "sales"})
+        force_authenticate(unfiltered, user=self.admin)
+        unfiltered_response = StockMovementReportView.as_view()(unfiltered)
+
+        today = timezone.localdate().isoformat()
+        filtered = self.factory.get("/reports/stock-movement/", {"tab": "sales", "date_from": today, "date_to": today})
+        force_authenticate(filtered, user=self.admin)
+        filtered_response = StockMovementReportView.as_view()(filtered)
+
+        self.assertEqual(
+            unfiltered_response.data["stats"]["total_sold"],
+            filtered_response.data["stats"]["total_sold"],
+        )
+
+    def test_sales_tab_search_scopes_to_matching_product_only(self):
+        rm_product = self.make_stocked_product(code="RM3", name="Cartons Max", stock=10)
+        self.make_confirmed_invoice(rm_product, quantity=2)
+        fg_product = self.make_stocked_fg_product(code="FG3", name="Other FG", stock=10)
+        self.make_confirmed_fg_invoice(fg_product, quantity=5)
+
+        request = self.factory.get("/reports/stock-movement/", {"tab": "sales", "search": "max"})
+        force_authenticate(request, user=self.admin)
+        response = StockMovementReportView.as_view()(request)
+
+        self.assertEqual([r["product_code"] for r in response.data["results"]], ["RM3"])
+        self.assertEqual(response.data["stats"]["total_sold"], 2)

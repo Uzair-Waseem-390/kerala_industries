@@ -856,7 +856,7 @@ def _stock_movement_totals_by_product(
     "total_found": x}} for every product with ANY movement in the given
     window. Only called when a filter is actually applied — the no-filter
     case reads ProductStockMovement directly instead (O(1) per row, see
-    get_stock_movement_report_rows).
+    get_purchase_movement_report_rows).
 
     `search`, when given, narrows every one of the 6 source queries to only
     the matching products BEFORE aggregating (via an indexed `search_q`
@@ -980,7 +980,7 @@ def _stock_movement_totals_by_product(
     return totals
 
 
-def get_stock_movement_report_stats(rows: list) -> dict:
+def get_purchase_movement_report_stats(rows: list) -> dict:
     """
     Sums the SAME already-fetched row list the response returns — zero
     extra queries (matches get_inventory_valuation_report_stats's
@@ -994,7 +994,7 @@ def get_stock_movement_report_stats(rows: list) -> dict:
     })
 
 
-def get_stock_movement_report_stats_all_time() -> dict:
+def get_purchase_movement_report_stats_all_time() -> dict:
     """No-filter case — reads the pre-synced StockMovementFlow totals, O(1)."""
     from inventory.models import StockMovementFlow
 
@@ -1009,7 +1009,7 @@ def get_stock_movement_report_stats_all_time() -> dict:
     }
 
 
-def get_stock_movement_report_rows(
+def get_purchase_movement_report_rows(
     *,
     date      : str = None,
     date_from : str = None,
@@ -1092,5 +1092,181 @@ def _stock_movement_stats_from_totals(totals: dict) -> dict:
         for key in stats:
             stats[key] += row[key]
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Stock Movement report — Sales tab (2026-09). Purchase is always RM (see
+# the Purchases-tab functions above, unchanged); what SELLS now spans RM
+# Cartons + FG, so this is a separate merged/typed row set, same shape as
+# reports.selectors.get_inventory_valuation_report_data's RM+WIP+FG merge —
+# reused reasoning: Cartons-family RM never has purchased/lost/found here,
+# and no other RM product can ever be sold (billing._validate_sellable_product
+# enforces this), so ProductStockMovement rows with a nonzero total_sold/
+# total_sale_returned are, by construction, always Cartons — no extra type
+# filter needed on the RM side.
+# ---------------------------------------------------------------------------
+
+def _sales_movement_totals_by_product(
+    *, date: str = None, date_from: str = None, date_to: str = None, search: str = None,
+) -> dict:
+    """
+    {(type, product_id): {"total_sold": x, "total_sale_returned": x}} for
+    every RM (Cartons) or FG product with a sale/return in the given
+    window. Only called when a date filter is applied — see
+    get_sales_movement_report_rows for the no-filter O(1) path.
+    """
+    zero = 0
+    zero_dec = Decimal("0")
+    totals = {}
+
+    rm_ids, fg_ids = None, None
+    if _clean(search):
+        from purchases.models import Product
+        from production.models import FgProduct
+        rm_ids = list(Product.objects.filter(search_q(_clean(search), "name", "code")).values_list("id", flat=True))
+        fg_ids = list(FgProduct.objects.filter(search_q(_clean(search), "name", "code")).values_list("id", flat=True))
+        if not rm_ids and not fg_ids:
+            return {}
+
+    def _add(type_, product_id, field, amount):
+        key = (type_, product_id)
+        row = totals.setdefault(key, {"total_sold": 0, "total_sale_returned": 0})
+        row[field] += amount
+
+    from billing.models import InvoiceItem, ReturnItem
+
+    rm_sold_qs = InvoiceItem.objects.filter(
+        invoice__is_deleted=False, invoice__is_data_entry=False, rm_product__isnull=False,
+    ).exclude(invoice__status="draft")
+    if rm_ids is not None:
+        rm_sold_qs = rm_sold_qs.filter(rm_product_id__in=rm_ids)
+    rm_sold_qs = _stock_movement_date_filter(rm_sold_qs, field="invoice__confirmed_at", date=date, date_from=date_from, date_to=date_to)
+    for row in rm_sold_qs.values("rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add("raw_material", row["rm_product_id"], "total_sold", row["total"])
+
+    fg_sold_qs = InvoiceItem.objects.filter(
+        invoice__is_deleted=False, invoice__is_data_entry=False, fg_product__isnull=False,
+    ).exclude(invoice__status="draft")
+    if fg_ids is not None:
+        fg_sold_qs = fg_sold_qs.filter(fg_product_id__in=fg_ids)
+    fg_sold_qs = _stock_movement_date_filter(fg_sold_qs, field="invoice__confirmed_at", date=date, date_from=date_from, date_to=date_to)
+    for row in fg_sold_qs.values("fg_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add("finished_goods", row["fg_product_id"], "total_sold", row["total"])
+
+    rm_returned_qs = ReturnItem.objects.filter(
+        return_record__is_deleted=False, return_record__status="accepted",
+        invoice_item__invoice__is_data_entry=False, invoice_item__rm_product__isnull=False,
+    )
+    if rm_ids is not None:
+        rm_returned_qs = rm_returned_qs.filter(invoice_item__rm_product_id__in=rm_ids)
+    rm_returned_qs = _stock_movement_date_filter(rm_returned_qs, field="return_record__accepted_at", date=date, date_from=date_from, date_to=date_to)
+    for row in rm_returned_qs.values("invoice_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add("raw_material", row["invoice_item__rm_product_id"], "total_sale_returned", row["total"])
+
+    fg_returned_qs = ReturnItem.objects.filter(
+        return_record__is_deleted=False, return_record__status="accepted",
+        invoice_item__invoice__is_data_entry=False, invoice_item__fg_product__isnull=False,
+    )
+    if fg_ids is not None:
+        fg_returned_qs = fg_returned_qs.filter(invoice_item__fg_product_id__in=fg_ids)
+    fg_returned_qs = _stock_movement_date_filter(fg_returned_qs, field="return_record__accepted_at", date=date, date_from=date_from, date_to=date_to)
+    for row in fg_returned_qs.values("invoice_item__fg_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
+        _add("finished_goods", row["invoice_item__fg_product_id"], "total_sale_returned", row["total"])
+
+    return totals
+
+
+def get_sales_movement_report_rows(
+    *,
+    date      : str = None,
+    date_from : str = None,
+    date_to   : str = None,
+    search    : str = None,
+) -> list:
+    """
+    One row per RM (Cartons) or FG product with at least one sale/return in
+    scope, each tagged with `type` (raw_material/finished_goods — same
+    convention Inventory Valuation/Lost Inventory already use). No filter ->
+    reads ProductStockMovement + FgProductStockMovement directly (O(1) per
+    row). Any date filter -> live aggregation via _sales_movement_totals_by_product.
+    """
+    from inventory.models import FgProductStockMovement, ProductStockMovement
+
+    has_date_filter = bool(_clean(date) or _clean(date_from) or _clean(date_to))
+
+    if not has_date_filter:
+        rm_qs = ProductStockMovement.objects.select_related("product").filter(
+            Q(total_sold__gt=0) | Q(total_sale_returned__gt=0)
+        )
+        fg_qs = FgProductStockMovement.objects.select_related("fg_product").filter(
+            Q(total_sold__gt=0) | Q(total_sale_returned__gt=0)
+        )
+        if _clean(search):
+            rm_qs = rm_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+            fg_qs = fg_qs.filter(search_q(_clean(search), "fg_product__name", "fg_product__code"))
+
+        rows = [
+            {
+                "type": "raw_material", "product_id": row.product_id,
+                "product_name": row.product.name, "product_code": row.product.code,
+                "total_sold": row.total_sold, "total_sale_returned": row.total_sale_returned,
+            }
+            for row in rm_qs
+        ] + [
+            {
+                "type": "finished_goods", "product_id": row.fg_product_id,
+                "product_name": row.fg_product.name, "product_code": row.fg_product.code,
+                "total_sold": row.total_sold, "total_sale_returned": row.total_sale_returned,
+            }
+            for row in fg_qs
+        ]
+        rows.sort(key=lambda r: r["product_name"])
+        return rows
+
+    totals = _sales_movement_totals_by_product(date=date, date_from=date_from, date_to=date_to, search=search)
+    if not totals:
+        return []
+
+    from purchases.models import Product
+    from production.models import FgProduct
+
+    rm_ids = [pid for (t, pid) in totals if t == "raw_material"]
+    fg_ids = [pid for (t, pid) in totals if t == "finished_goods"]
+    rm_products = {p.id: p for p in Product.objects.filter(id__in=rm_ids)}
+    fg_products = {p.id: p for p in FgProduct.objects.filter(id__in=fg_ids)}
+
+    rows = []
+    for (type_, product_id), t in totals.items():
+        product = rm_products.get(product_id) if type_ == "raw_material" else fg_products.get(product_id)
+        if product is None:
+            continue
+        rows.append({
+            "type": type_, "product_id": product_id,
+            "product_name": product.name, "product_code": product.code,
+            "total_sold": t["total_sold"], "total_sale_returned": t["total_sale_returned"],
+        })
+    rows.sort(key=lambda r: r["product_name"])
+    return rows
+
+
+def get_sales_movement_report_stats(rows: list) -> dict:
+    stats = {"total_sold": 0, "total_sale_returned": 0}
+    for row in rows:
+        stats["total_sold"] += row["total_sold"]
+        stats["total_sale_returned"] += row["total_sale_returned"]
+    return stats
+
+
+def get_sales_movement_report_stats_all_time() -> dict:
+    """No-filter case — reads the pre-synced StockMovementFlow totals, O(1).
+    total_sold/total_sale_returned here are RM (Cartons-only, see module
+    note above); total_fg_sold/total_fg_sale_returned are the FG side."""
+    from inventory.models import StockMovementFlow
+
+    flow = StockMovementFlow.get_instance()
+    return {
+        "total_sold"          : flow.total_sold + flow.total_fg_sold,
+        "total_sale_returned" : flow.total_sale_returned + flow.total_fg_sale_returned,
+    }
 
 
