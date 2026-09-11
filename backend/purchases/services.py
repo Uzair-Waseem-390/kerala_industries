@@ -387,9 +387,68 @@ def move_shelf_stock(*, from_shelf_id: int, to_shelf_id: int, product_id: int, q
 # existing convention (Shelf is equally hand-written despite being a
 # near-identical shape).
 
+# ---------------------------------------------------------------------------
+# Attribute-value → variant auto-generation (2026-09)
+# ---------------------------------------------------------------------------
+# The moment a new attribute value is added, every Product combination it
+# newly makes possible is created immediately (zero-stock, same shape
+# get_or_create_product_variant already produces for a purchased variant) —
+# a deliberate change from "variants only ever get created lazily by a
+# purchase" to "the catalog is kept complete as attributes are curated",
+# per explicit user request. Reuses get_or_create_product_variant itself
+# for every combination, so variant_key computation, the
+# IntegrityError/soft-delete-race handling, the ProductRegistryEntry, and
+# the rates unpriced-queue side effect all stay in the single place that
+# already owns them — no stock/Inventory side effect either way.
+
+def _generate_jumbo_variant_for_new_name(*, jumbo_name_id: int, user) -> None:
+    jumbo_anchor = get_product_by_code(JUMBO_PRODUCT_CODE)
+    get_or_create_product_variant(base_product_id=jumbo_anchor.id, jumbo_name_id=jumbo_name_id, user=user)
+
+
+def _generate_core_variants_for_new_attribute(
+    *, core_name_id: int = None, core_length_id: int = None, core_thickness_id: int = None, user,
+) -> None:
+    """
+    Exactly one of the three kwargs is the attribute value that was just
+    created; the other two are left None so every EXISTING value on those
+    two dimensions is enumerated and combined with it — the cartesian
+    product of (this new value) x (existing values on the other two
+    dimensions). If either other dimension has no values yet, the product
+    is empty (nothing to create yet) — correct, since there's no valid
+    3-way combination until all three dimensions have at least one value;
+    that dimension's own first value will generate against whatever
+    already exists at that point instead.
+    """
+    cores_anchor = get_product_by_code(CORES_PRODUCT_CODE)
+    names       = [core_name_id] if core_name_id else list(CoreName.objects.values_list("id", flat=True))
+    lengths     = [core_length_id] if core_length_id else list(CoreLength.objects.values_list("id", flat=True))
+    thicknesses = [core_thickness_id] if core_thickness_id else list(CoreThickness.objects.values_list("id", flat=True))
+    for name_id in names:
+        for length_id in lengths:
+            for thickness_id in thicknesses:
+                get_or_create_product_variant(
+                    base_product_id=cores_anchor.id, user=user,
+                    core_name_id=name_id, core_length_id=length_id, core_thickness_id=thickness_id,
+                )
+
+
+def _generate_packing_variant_for_new_size(*, packing_size_id: int, user) -> None:
+    packing_anchor = get_product_by_code(PACKING_PRODUCT_CODE)
+    get_or_create_product_variant(base_product_id=packing_anchor.id, packing_size_id=packing_size_id, user=user)
+
+
+def _generate_carton_variant_for_new_size(*, carton_size_id: int, user) -> None:
+    cartons_anchor = get_product_by_code(CARTONS_PRODUCT_CODE)
+    get_or_create_product_variant(base_product_id=cartons_anchor.id, carton_size_id=carton_size_id, user=user)
+
+
+@transaction.atomic
 def create_jumbo_name(*, value: str, user) -> JumboName:
     with _unique_constraint_guard("A Jumbo Name with this value already exists."):
-        return JumboName.objects.create(value=value, created_by=user, updated_by=user)
+        obj = JumboName.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_jumbo_variant_for_new_name(jumbo_name_id=obj.id, user=user)
+    return obj
 
 def update_jumbo_name(*, pk: int, value: str = None, user) -> JumboName:
     obj = get_jumbo_name_by_id(pk)
@@ -404,9 +463,12 @@ def delete_jumbo_name(*, pk: int, user) -> None:
     _soft_delete(get_jumbo_name_by_id(pk), user)
 
 
+@transaction.atomic
 def create_core_name(*, value: str, user) -> CoreName:
     with _unique_constraint_guard("A Core Name with this value already exists."):
-        return CoreName.objects.create(value=value, created_by=user, updated_by=user)
+        obj = CoreName.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_core_variants_for_new_attribute(core_name_id=obj.id, user=user)
+    return obj
 
 def update_core_name(*, pk: int, value: str = None, user) -> CoreName:
     obj = get_core_name_by_id(pk)
@@ -421,9 +483,12 @@ def delete_core_name(*, pk: int, user) -> None:
     _soft_delete(get_core_name_by_id(pk), user)
 
 
+@transaction.atomic
 def create_core_length(*, value: str, user) -> CoreLength:
     with _unique_constraint_guard("A Core Length with this value already exists."):
-        return CoreLength.objects.create(value=value, created_by=user, updated_by=user)
+        obj = CoreLength.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_core_variants_for_new_attribute(core_length_id=obj.id, user=user)
+    return obj
 
 def update_core_length(*, pk: int, value: str = None, user) -> CoreLength:
     obj = get_core_length_by_id(pk)
@@ -438,9 +503,12 @@ def delete_core_length(*, pk: int, user) -> None:
     _soft_delete(get_core_length_by_id(pk), user)
 
 
+@transaction.atomic
 def create_core_thickness(*, value: str, user) -> CoreThickness:
     with _unique_constraint_guard("A Core Thickness with this value already exists."):
-        return CoreThickness.objects.create(value=value, created_by=user, updated_by=user)
+        obj = CoreThickness.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_core_variants_for_new_attribute(core_thickness_id=obj.id, user=user)
+    return obj
 
 def update_core_thickness(*, pk: int, value: str = None, user) -> CoreThickness:
     obj = get_core_thickness_by_id(pk)
@@ -455,9 +523,12 @@ def delete_core_thickness(*, pk: int, user) -> None:
     _soft_delete(get_core_thickness_by_id(pk), user)
 
 
+@transaction.atomic
 def create_packing_size(*, value: str, user) -> PackingSize:
     with _unique_constraint_guard("A Packing Size with this value already exists."):
-        return PackingSize.objects.create(value=value, created_by=user, updated_by=user)
+        obj = PackingSize.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_packing_variant_for_new_size(packing_size_id=obj.id, user=user)
+    return obj
 
 def update_packing_size(*, pk: int, value: str = None, user) -> PackingSize:
     obj = get_packing_size_by_id(pk)
@@ -472,9 +543,12 @@ def delete_packing_size(*, pk: int, user) -> None:
     _soft_delete(get_packing_size_by_id(pk), user)
 
 
+@transaction.atomic
 def create_carton_size(*, value: str, user) -> CartonSize:
     with _unique_constraint_guard("A Carton Size with this value already exists."):
-        return CartonSize.objects.create(value=value, created_by=user, updated_by=user)
+        obj = CartonSize.objects.create(value=value, created_by=user, updated_by=user)
+    _generate_carton_variant_for_new_size(carton_size_id=obj.id, user=user)
+    return obj
 
 def update_carton_size(*, pk: int, value: str = None, user) -> CartonSize:
     obj = get_carton_size_by_id(pk)
