@@ -866,9 +866,10 @@ def _assemble_balance_sheet(*, cash_in_hand, accounts_receivable, accounts_payab
                               opening_balance_equity, retained_earnings,
                               pre_owned_asset_equity=Decimal("0"),
                               asset_revaluation_surplus=Decimal("0"),
+                              dl_foh_payable=Decimal("0"),
                               freshness=None) -> dict:
     total_assets = cash_in_hand + accounts_receivable + inventory_value + fixed_assets_nbv
-    total_liabilities = accounts_payable + gst_payable + wht_payable
+    total_liabilities = accounts_payable + gst_payable + wht_payable + dl_foh_payable
     total_equity = (
         owner_capital + investor_capital + opening_balance_equity
         + pre_owned_asset_equity + asset_revaluation_surplus + retained_earnings
@@ -887,6 +888,7 @@ def _assemble_balance_sheet(*, cash_in_hand, accounts_receivable, accounts_payab
             "accounts_payable": accounts_payable,
             "gst_payable": gst_payable,
             "wht_payable": wht_payable,
+            "dl_foh_payable": dl_foh_payable,
             "total": total_liabilities,
         },
         "equity": {
@@ -985,6 +987,8 @@ def get_balance_sheet_live() -> dict:
     inventory_rows = get_inventory_valuation_report_data()
     inventory_value = get_inventory_valuation_report_stats(inventory_rows)["total_inventory_value"]
 
+    from manufacturing_costs.selectors import get_dl_foh_payable_balance
+
     return _assemble_balance_sheet(
         cash_in_hand=row.get("cash_in_hand") or zero,
         accounts_receivable=row.get("customer_outstanding") or zero,
@@ -993,6 +997,7 @@ def get_balance_sheet_live() -> dict:
         fixed_assets_nbv=row.get("_fixed_assets_nbv") or zero,
         gst_payable=row.get("_gst_payable") or zero,
         wht_payable=row.get("_wht_payable") or zero,
+        dl_foh_payable=get_dl_foh_payable_balance(),
         owner_capital=row.get("_owner_capital") or zero,
         investor_capital=row.get("_investor_capital") or zero,
         **_compute_equity_offsets(),
@@ -1015,6 +1020,7 @@ def get_balance_sheet_for_period(period: str) -> dict:
         fixed_assets_nbv=snap.fixed_assets_nbv,
         gst_payable=snap.gst_payable,
         wht_payable=snap.wht_payable,
+        dl_foh_payable=snap.dl_foh_payable,
         owner_capital=snap.owner_capital,
         investor_capital=snap.investor_capital,
         opening_balance_equity=snap.opening_balance_equity,

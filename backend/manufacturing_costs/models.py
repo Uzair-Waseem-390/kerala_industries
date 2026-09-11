@@ -312,6 +312,22 @@ class ManufacturingCostsStats(models.Model):
     cron" idiom as every other catch-up in this app). This is exactly the
     "record now, cost at month-end" real-time figure profits.services reads
     for its live (not-yet-finalized) current-month net profit.
+
+    total_dl_foh_accrued (2026-09) is a SEPARATE, never-reset, all-time
+    running total of every DL+FOH pool ever embedded into
+    production.PackingOutputItem/CuttingBreakdownItem/RecipeBreakdownItem's
+    full_unit_cost_snapshot (see production.services._shared.compute_labor_overhead_pool
+    and its 3 call sites in production/services/{rewinding,cutting,packing}.py)
+    — the ACCRUED side of manufacturing cost, independent of when/whether
+    that labor was actually paid in cash. Paired with
+    PayableEntity.overall_total_paid (already an all-time running total) via
+    accounting.selectors.get_dl_foh_payable_balance() to give the Balance
+    Sheet a real "Accrued Manufacturing Cost Payable" liability line — the
+    missing double-entry counterpart to capitalizing DL+FOH into inventory
+    value. See profits.selectors._compute_current_month_figures's docstring
+    for why DL/FOH cash paid is no longer subtracted from net_profit
+    directly (COGS-on-sale recognizes it instead) — this field is what
+    reconciles the resulting gap on the Balance Sheet.
     """
     total_employees             = models.PositiveIntegerField(default=0)
     total_machines               = models.PositiveIntegerField(default=0)
@@ -322,6 +338,7 @@ class ManufacturingCostsStats(models.Model):
     this_month_dl_paid           = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     this_month_foh_paid          = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     this_month_period            = models.CharField(max_length=7, null=True, blank=True, help_text="YYYY-MM")
+    total_dl_foh_accrued         = models.DecimalField(max_digits=18, decimal_places=4, default=0)
     last_updated_at              = models.DateTimeField(auto_now=True)
 
     class Meta:

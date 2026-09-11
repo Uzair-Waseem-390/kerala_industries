@@ -447,6 +447,9 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
         created_by=user, updated_by=user,
     )
 
+    from manufacturing_costs.services import record_dl_foh_accrued
+    record_dl_foh_accrued(pool)
+
     sync_fg_inventory(product=fg_product, quantity_delta=total_pieces, user=user)
     apply_fg_shelf_allocations(
         product=fg_product,

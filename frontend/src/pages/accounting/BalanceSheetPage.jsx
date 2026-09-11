@@ -157,6 +157,7 @@ const BalanceSheetPage = () => {
                                 <Line label="Money You Owe Suppliers" amount={data.liabilities.accounts_payable} />
                                 <Line label="GST Owed to FBR" amount={data.liabilities.gst_payable} />
                                 <Line label="WHT Owed to FBR" amount={data.liabilities.wht_payable} />
+                                <Line label="Manufacturing Cost Payable (Accrued DL/FOH)" amount={data.liabilities.dl_foh_payable} />
                                 <div className="pt-3 mt-2 border-t border-neutral-200">
                                     <Line label="Total Liabilities" amount={data.liabilities.total} bold />
                                 </div>

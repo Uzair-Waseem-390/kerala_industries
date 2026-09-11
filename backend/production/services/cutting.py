@@ -364,6 +364,9 @@ def finish_cutting_recipe(*, recipe_id: int, user) -> Recipe:
         breakdown_items, ["unit_cost_before_waste", "unit_cost_snapshot", "full_unit_cost_snapshot"],
     )
 
+    from manufacturing_costs.services import record_dl_foh_accrued
+    record_dl_foh_accrued(pool)
+
     recipe.status = Recipe.Status.FINISHED
     recipe.cost_per_unit = (total_cost / total_output_pieces).quantize(precision, rounding=ROUND_HALF_UP) if total_output_pieces > 0 else Decimal("0")
     recipe.full_cost_per_unit = (

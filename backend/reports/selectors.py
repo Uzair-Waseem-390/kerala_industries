@@ -11,6 +11,7 @@ from cash_flow.models import CashFlow, Expense
 # date filters.
 from purchases.selectors import _day_start, _next_day_start
 from purchases.models import LostInventoryItem, PurchaseItem, PurchaseOrder, PurchaseReturn
+from inventory.models import Inventory
 
 
 def _clean(value):

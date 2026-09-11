@@ -514,3 +514,24 @@ def _period_bounds(period: str):
     y, m = (int(p) for p in period.split("-"))
     last_day_num = calendar.monthrange(y, m)[1]
     return (f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{last_day_num:02d}")
+
+
+# ---------------------------------------------------------------------------
+# DL+FOH accrual — called from production.services at recipe-finish time
+# ---------------------------------------------------------------------------
+
+def record_dl_foh_accrued(pool: Decimal) -> None:
+    """
+    Adds `pool` (a recipe's compute_labor_overhead_pool result) to the
+    all-time ManufacturingCostsStats.total_dl_foh_accrued running total —
+    called by production.services at the exact 3 places a recipe finishes
+    and freezes full_unit_cost_snapshot (rewinding/cutting/packing). Kept as
+    a public service here, not a raw model update from production, so
+    production doesn't reach across app boundaries into this app's model
+    internals — same "go through selectors/services" rule as everywhere
+    else. See ManufacturingCostsStats' docstring for what this field is for.
+    """
+    ManufacturingCostsStats.get_instance()
+    ManufacturingCostsStats.objects.filter(pk=1).update(
+        total_dl_foh_accrued=F("total_dl_foh_accrued") + pool,
+    )

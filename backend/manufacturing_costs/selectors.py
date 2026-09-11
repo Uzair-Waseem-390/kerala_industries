@@ -175,3 +175,34 @@ def get_manufacturing_costs_stats() -> ManufacturingCostsStats:
     catch_up_manufacturing_costs_snapshots()
     _ensure_this_month_counters_current()
     return ManufacturingCostsStats.get_instance()
+
+
+# ---------------------------------------------------------------------------
+# Accrued Manufacturing Cost Payable — Balance Sheet liability line (2026-09)
+# ---------------------------------------------------------------------------
+
+def get_dl_foh_payable_balance() -> Decimal:
+    """
+    Accrued-minus-paid: ManufacturingCostsStats.total_dl_foh_accrued (all-time
+    DL+FOH cost embedded into production, see services.record_dl_foh_accrued)
+    minus all-time cash actually paid (Σ PayableEntity.overall_total_paid,
+    already an incrementally-maintained running total per entity — a live
+    Sum() here is bounded by entity count, not history size, same exception
+    architecture.md already allows for Inventory Valuation).
+
+    Positive: the business has accrued more manufacturing cost into
+    production than it's actually paid in cash — a real liability (owed
+    wages/overhead against goods already produced). Negative: paid ahead of
+    what's been accrued/capitalized — shown as a negative liability line,
+    same signed-line convention accounting.selectors already uses (e.g.
+    disposal_gain_loss). This is the reconciling entry that makes the
+    Balance Sheet balance again now that DL/FOH cash payment is no longer
+    subtracted from net_profit directly (see profits.selectors
+    ._compute_current_month_figures — that cost is recognized via COGS on
+    sale instead, capitalized into inventory in the meantime).
+    """
+    from django.db.models import Sum
+
+    stats = ManufacturingCostsStats.get_instance()
+    total_paid = PayableEntity.objects.aggregate(total=Sum("overall_total_paid"))["total"] or Decimal("0")
+    return stats.total_dl_foh_accrued - total_paid

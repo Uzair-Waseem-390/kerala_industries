@@ -696,6 +696,65 @@ class IncomeStatementTests(AccountingTestBase):
 # Balance Sheet
 # ---------------------------------------------------------------------------
 
+class DlFohPayableReconciliationTests(AccountingTestBase):
+    """
+    Verifies the Accrued Manufacturing Cost Payable line (2026-09) actually
+    reconciles the Balance Sheet, since DL/FOH cash payment is no longer
+    subtracted directly from net_profit (see profits.selectors
+    ._compute_current_month_figures) — that cost is meant to hit the books
+    exactly once, via COGS when the batch it funded sells, with this
+    liability line covering the gap while it's unsold/unmatched. A full
+    recipe-finish pipeline (Rewinding/Cutting/Packing) isn't needed to prove
+    the reconciliation formula itself — this exercises
+    manufacturing_costs.selectors.get_dl_foh_payable_balance and the Balance
+    Sheet's use of it directly, the same way ProfitsCombinedQueryEquivalenceTests
+    exercises profits' figures without needing a full invoice/return pipeline
+    for every case.
+    """
+
+    def test_balance_sheet_balances_when_cash_paid_exceeds_accrued(self):
+        """Cash paid ahead of what's been accrued into production — the
+        exact real-data scenario that first surfaced this gap (paid FOH
+        cash with no recipe finished yet to accrue it into)."""
+        from manufacturing_costs.models import Machine, ManufacturingCostsStats
+        from manufacturing_costs.selectors import get_dl_foh_payable_balance
+        from manufacturing_costs.services import create_machine, create_payment
+
+        machine = create_machine(
+            name="Test Machine", category=Machine.Category.CUTTING, monthly_repair_cost=Decimal("2000"),
+            avg_hours_per_day=Decimal("8"), working_days_per_month=Decimal("26"), user=self.admin,
+        )
+        create_payment(
+            entity_id=machine.payable_entity.id, amount=Decimal("500"),
+            payment_date=timezone.localdate(), method_allocations=self.cash_split("500"), user=self.admin,
+        )
+        # No recipe finished — total_dl_foh_accrued stays 0, so the paid
+        # amount is entirely "ahead of accrual" (negative liability).
+        self.assertEqual(get_dl_foh_payable_balance(), Decimal("-500"))
+
+        data = get_balance_sheet_live()
+        self.assertEqual(data["liabilities"]["dl_foh_payable"], Decimal("-500"))
+        self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
+
+    def test_dl_foh_payable_is_accrued_minus_paid(self):
+        """
+        Direct unit check of the reconciliation formula itself — accrued
+        cost that has no matching cash payment yet is a real, standalone
+        assertion (unlike the "accrued exceeds paid" direction on the full
+        Balance Sheet, which additionally needs a real produced batch's
+        inventory value to balance against — covered by production's own
+        finish-recipe tests plus this session's manual dev-data
+        verification, not fabricated here).
+        """
+        from manufacturing_costs.selectors import get_dl_foh_payable_balance
+        from manufacturing_costs.services import record_dl_foh_accrued
+
+        self.assertEqual(get_dl_foh_payable_balance(), Decimal("0"))
+        record_dl_foh_accrued(Decimal("1200"))
+        record_dl_foh_accrued(Decimal("300"))
+        self.assertEqual(get_dl_foh_payable_balance(), Decimal("1500"))
+
+
 class BalanceSheetTests(AccountingTestBase):
     def test_live_balance_sheet_balances(self):
         product = self.make_stocked_product(stock=20, unit_cost="50", selling_price="100")
@@ -786,25 +845,42 @@ class BalanceSheetTests(AccountingTestBase):
     def test_live_view_query_count_is_small_and_fixed(self):
         """
         Per architecture.md's STRICT 200ms rule and verification.md rule 6 —
-        counted, never eyeballed. 7 is the honest number today, down from 21:
+        counted, never eyeballed. 12 is the honest number today (2026-09,
+        up from 7 when Inventory Valuation widened from RM-only to RM+WIP+FG
+        and the DL/FOH Payable liability line was added):
 
             1  subquery-joined read of all five Flow singletons
             2  get_gross_profit_trend (invoice + return TruncMonth GROUP BY)
             1  profits.compute_month_figures_in_one_query — ten month
-               figures that used to be ten separate round-trips
-            2  inventory valuation (Inventory rows + FIFO batches)
+               figures that used to be ten separate round-trips (this
+               includes one ManufacturingCostsStats read for this_month_dl/
+               foh_paid)
+            7  inventory valuation, now RM + WIP + FG (was 2, RM-only):
+               3 identity/quantity queries (purchases.Inventory,
+               inventory.WipInventory, inventory.FgInventory) + 4 bulk FIFO
+               batch queries (PurchaseItem, RecipeBreakdownItem,
+               CuttingBreakdownItem, PackingOutputItem) — bounded by
+               product-type count, not catalog size or history, same
+               "genuinely bounded live snapshot" exception architecture.md
+               already grants this report.
+            2  get_dl_foh_payable_balance (manufacturing_costs.selectors) —
+               a second ManufacturingCostsStats singleton read (a real, tiny
+               duplicate with the one inside compute_month_figures_in_one_query,
+               left alone: reusing it would couple profits' and
+               manufacturing_costs' internals across an app boundary for one
+               query's worth of saving) + a bounded Sum(overall_total_paid)
+               over PayableEntity (employees + machines + 2 fixed rows, not
+               growing with payment history).
             1  _compute_equity_offsets — eight bootstrap/asset offsets that
                used to be six separate round-trips
 
         None is an N+1 or proportional to total data size; each was verified
         by reading the emitted SQL, not inferred.
 
-        Bound set a little above 7 so this catches a REAL regression (an
+        Bound set a little above 12 so this catches a REAL regression (an
         accidental N+1, or a collapsed query silently un-collapsing) instead
-        of false-alarming on variance. If it creeps past 10, investigate —
-        do not just raise the bound. Getting below ~4 would need caching
-        opening_balance_equity on a singleton, which is a design change (new
-        persistent state + an invalidation obligation), not an optimization.
+        of false-alarming on variance. If it creeps past 15, investigate —
+        do not just raise the bound.
         """
         product = self.make_stocked_product(stock=20)
         self.make_confirmed_invoice(product, quantity=1)
@@ -822,7 +898,7 @@ class BalanceSheetTests(AccountingTestBase):
             response = BalanceSheetView.as_view()(request)
         self.assertEqual(response.status_code, 200)
         self.assertLessEqual(
-            len(ctx.captured_queries), 10,
+            len(ctx.captured_queries), 15,
             msg=f"{len(ctx.captured_queries)} queries — investigate before shipping:\n"
                 + "\n".join(q["sql"][:120] for q in ctx.captured_queries),
         )

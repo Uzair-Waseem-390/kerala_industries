@@ -40,6 +40,9 @@ class BalanceSheetSnapshot(models.Model):
     accounts_payable       = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     gst_payable             = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     wht_payable             = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    dl_foh_payable           = models.DecimalField(max_digits=20, decimal_places=4, default=0,
+                                    help_text="Accrued-minus-paid DL/FOH — see "
+                                               "manufacturing_costs.selectors.get_dl_foh_payable_balance.")
     total_liabilities       = models.DecimalField(max_digits=20, decimal_places=4, default=0)
 
     # ---- Equity ----

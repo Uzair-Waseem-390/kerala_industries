@@ -422,6 +422,9 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
         item.full_unit_cost_snapshot = (item.unit_cost_snapshot + shares[item]).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
     RecipeBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_snapshot", "full_unit_cost_snapshot"])
 
+    from manufacturing_costs.services import record_dl_foh_accrued
+    record_dl_foh_accrued(pool)
+
     recipe.status = Recipe.Status.FINISHED
     recipe.cost_per_unit = cost_per_unit
     recipe.full_cost_per_unit = (

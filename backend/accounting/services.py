@@ -65,6 +65,7 @@ def catch_up_balance_sheet_snapshots(*, user=None) -> int:
                 accounts_payable=live["liabilities"]["accounts_payable"],
                 gst_payable=live["liabilities"]["gst_payable"],
                 wht_payable=live["liabilities"]["wht_payable"],
+                dl_foh_payable=live["liabilities"]["dl_foh_payable"],
                 total_liabilities=live["liabilities"]["total"],
                 owner_capital=live["equity"]["owner_capital"],
                 investor_capital=live["equity"]["investor_capital"],
