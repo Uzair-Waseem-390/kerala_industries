@@ -287,16 +287,18 @@ class AssetDepreciationReportItemSerializer(serializers.ModelSerializer):
 # ---------------------------------------------------------------------------
 
 class PurchaseMovementReportItemSerializer(serializers.Serializer):
-    """Purchases tab — RM-only, unchanged shape (renamed from
+    """Purchases tab — RM-only, purchase-side only (renamed from
     StockMovementReportItemSerializer, 2026-09, when the report split into
-    Purchases/Sales tabs — see SalesMovementReportItemSerializer)."""
+    Purchases/Sales tabs — see SalesMovementReportItemSerializer).
+    total_sold/total_sale_returned were dropped from this tab in the same
+    change — selling is now the Sales tab's job (RM Cartons + FG), so a
+    purely-acquisition report showing "Sold"/"Sale Returned" numbers read
+    as out of place / confusing here."""
     product_id              = serializers.IntegerField()
     product_name            = serializers.CharField()
     product_code            = serializers.CharField()
     total_purchased         = serializers.IntegerField()
     total_purchase_returned = serializers.IntegerField()
-    total_sold               = serializers.IntegerField()
-    total_sale_returned      = serializers.IntegerField()
     total_lost                = serializers.IntegerField()
     total_found               = serializers.IntegerField()
 

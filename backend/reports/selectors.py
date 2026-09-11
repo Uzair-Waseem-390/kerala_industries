@@ -852,25 +852,21 @@ def _stock_movement_totals_by_product(
 ) -> dict:
     """
     {product_id: {"total_purchased": x, "total_purchase_returned": x,
-    "total_sold": x, "total_sale_returned": x, "total_lost": x,
-    "total_found": x}} for every product with ANY movement in the given
-    window. Only called when a filter is actually applied — the no-filter
-    case reads ProductStockMovement directly instead (O(1) per row, see
+    "total_lost": x, "total_found": x}} for every RM product with any
+    PURCHASE-side movement in the given window — this is the Purchases tab
+    only (2026-09); sold/sale-returned live on the separate Sales tab now
+    (_sales_movement_totals_by_product), which also covers FG, not just RM.
+    Only called when a filter is actually applied — the no-filter case
+    reads ProductStockMovement directly instead (O(1) per row, see
     get_purchase_movement_report_rows).
 
-    `search`, when given, narrows every one of the 6 source queries to only
+    `search`, when given, narrows every one of the 4 source queries to only
     the matching products BEFORE aggregating (via an indexed `search_q`
     lookup on Product name/code, same trigram index the rows path already
     relies on) — so a search-scoped call stays fast and bounded by the
     (typically tiny) matching-product set, never by total table size, and
     "total X" in the response only ever sums the products actually shown.
     """
-    # PurchaseItem/PurchaseReturnItem/LostInventoryItem/LostInventoryRecovery
-    # ("purchases" app) quantity fields are Decimal; InvoiceItem/ReturnItem
-    # ("billing", untouched) are still Integer — Coalesce requires its
-    # default to match the aggregate's own type, so each Coalesce below
-    # uses whichever zero matches its source.
-    zero = 0
     zero_dec = Decimal("0")
     totals = {}
 
@@ -884,7 +880,6 @@ def _stock_movement_totals_by_product(
     def _add(product_id, field, amount):
         row = totals.setdefault(product_id, {
             "total_purchased": 0, "total_purchase_returned": 0,
-            "total_sold": 0, "total_sale_returned": 0,
             "total_lost": 0, "total_found": 0,
         })
         row[field] += amount
@@ -921,34 +916,15 @@ def _stock_movement_totals_by_product(
     for row in purchase_returned_qs.values("purchase_item__product_id").annotate(total=Coalesce(Sum("quantity"), zero_dec)):
         _add(row["purchase_item__product_id"], "total_purchase_returned", row["total"])
 
-    # RM-only (rm_product__isnull=False) — Stock Movement Report is RM/
-    # billing-scoped only; billing now also sells FG (2026-09), so FG
-    # InvoiceItem rows (rm_product is null on those) must be explicitly
-    # excluded here, not just renamed, or they'd silently bucket under a
-    # None product key.
-    from billing.models import InvoiceItem, ReturnItem
-    sold_qs = InvoiceItem.objects.filter(
-        invoice__is_deleted=False, invoice__is_data_entry=False, rm_product__isnull=False,
-    ).exclude(invoice__status="draft")
-    if product_ids is not None:
-        sold_qs = sold_qs.filter(rm_product_id__in=product_ids)
-    sold_qs = _stock_movement_date_filter(
-        sold_qs, field="invoice__confirmed_at", date=date, date_from=date_from, date_to=date_to,
-    )
-    for row in sold_qs.values("rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
-        _add(row["rm_product_id"], "total_sold", row["total"])
-
-    sale_returned_qs = ReturnItem.objects.filter(
-        return_record__is_deleted=False, return_record__status="accepted",
-        invoice_item__invoice__is_data_entry=False, invoice_item__rm_product__isnull=False,
-    )
-    if product_ids is not None:
-        sale_returned_qs = sale_returned_qs.filter(invoice_item__rm_product_id__in=product_ids)
-    sale_returned_qs = _stock_movement_date_filter(
-        sale_returned_qs, field="return_record__accepted_at", date=date, date_from=date_from, date_to=date_to,
-    )
-    for row in sale_returned_qs.values("invoice_item__rm_product_id").annotate(total=Coalesce(Sum("quantity"), zero)):
-        _add(row["invoice_item__rm_product_id"], "total_sale_returned", row["total"])
+    # Sold/sale-returned are NOT tracked here (2026-09) — this is the
+    # Purchases tab now, purely acquisition-side; what's SOLD (RM Cartons +
+    # FG) moved to its own Sales tab/selectors (_sales_movement_totals_by_product
+    # below), matching the "purchase is always RM, sale can be RM or FG"
+    # split this report was rebuilt around. ProductStockMovement/
+    # StockMovementFlow's total_sold/total_sale_returned fields still exist
+    # and are still written by billing (see inventory.services._adjust_stock_movement)
+    # — the Sales tab reads them directly; this function just no longer
+    # surfaces them under the Purchases tab.
 
     # RM-only (type=raw_material) — Stock Movement Report is RM/billing-
     # scoped only; WIP/FG losses never feed it (see purchases.services.
@@ -1002,8 +978,6 @@ def get_purchase_movement_report_stats_all_time() -> dict:
     return {
         "total_purchased"         : flow.total_purchased,
         "total_purchase_returned" : flow.total_purchase_returned,
-        "total_sold"               : flow.total_sold,
-        "total_sale_returned"      : flow.total_sale_returned,
         "total_lost"                : flow.total_lost,
         "total_found"               : flow.total_found,
     }
@@ -1031,7 +1005,6 @@ def get_purchase_movement_report_rows(
     if not has_date_filter:
         qs = ProductStockMovement.objects.select_related("product").filter(
             Q(total_purchased__gt=0) | Q(total_purchase_returned__gt=0) |
-            Q(total_sold__gt=0) | Q(total_sale_returned__gt=0) |
             Q(total_lost__gt=0) | Q(total_found__gt=0)
         )
         if _clean(search):
@@ -1044,8 +1017,6 @@ def get_purchase_movement_report_rows(
                 "product_code"            : row.product.code,
                 "total_purchased"         : row.total_purchased,
                 "total_purchase_returned" : row.total_purchase_returned,
-                "total_sold"               : row.total_sold,
-                "total_sale_returned"      : row.total_sale_returned,
                 "total_lost"               : row.total_lost,
                 "total_found"              : row.total_found,
             }
@@ -1073,8 +1044,6 @@ def _stock_movement_rows_from_totals(totals: dict) -> list:
             "product_code"            : p.code,
             "total_purchased"         : totals[p.id]["total_purchased"],
             "total_purchase_returned" : totals[p.id]["total_purchase_returned"],
-            "total_sold"               : totals[p.id]["total_sold"],
-            "total_sale_returned"      : totals[p.id]["total_sale_returned"],
             "total_lost"               : totals[p.id]["total_lost"],
             "total_found"              : totals[p.id]["total_found"],
         }
@@ -1085,7 +1054,6 @@ def _stock_movement_rows_from_totals(totals: dict) -> list:
 def _stock_movement_stats_from_totals(totals: dict) -> dict:
     stats = {
         "total_purchased": 0, "total_purchase_returned": 0,
-        "total_sold": 0, "total_sale_returned": 0,
         "total_lost": 0, "total_found": 0,
     }
     for row in totals.values():
