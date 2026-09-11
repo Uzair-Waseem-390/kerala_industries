@@ -189,6 +189,13 @@ class Recipe(AuditMixin):
 
     recipe_number = models.CharField(max_length=30, unique=True, editable=False)
     recipe_type   = models.CharField(max_length=20, choices=RecipeType.choices, default=RecipeType.REWINDING, db_index=True)
+    # True only for the synthetic "Opening Stock" recipes data_entry's WIP/FG
+    # bootstrap creates (production.services.opening_stock) — a real,
+    # FIFO-consumable batch-bearing Recipe under the hood, but excluded from
+    # get_all_recipes() by default so it never shows up in the Recipes list
+    # as if real manufacturing work happened. Same shape/purpose as
+    # purchases.PurchaseOrder.is_data_entry / billing.Invoice.is_data_entry.
+    is_data_entry = models.BooleanField(default=False, db_index=True)
     # Overrides AuditMixin.created_at to add an index — get_all_recipes()
     # (and Recipe.Meta.ordering below) sorts by -created_at on every list
     # request, same reasoning as PurchaseOrder.created_at.

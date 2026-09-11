@@ -23,6 +23,118 @@ def next_fg_product_code() -> str:
     return next_reference(counter_key="FG", prefix_label="FG", model=FgProduct, field="code")
 
 
+def get_or_create_wip_product(*, binding, yard, length_mm, stage: str, user):
+    """
+    Get-or-create a WipProduct by its (binding, yard, length_mm, stage)
+    variant_key — factored out for production.services.opening_stock
+    (2026-09), which already has real binding/yard/length_mm lookup rows
+    picked by the user (unlike rewinding.py/cutting.py's own inline
+    versions of this block, which first have to get-or-create the lookup
+    rows themselves from a derived raw value). Left unused by those 3
+    existing call sites deliberately — unifying them is a separate,
+    later cleanup, not part of this change, so no existing production
+    behavior changes as a side effect.
+    """
+    from django.db import IntegrityError, transaction
+    from rest_framework.exceptions import ValidationError
+
+    from inventory.services import create_registry_entry
+    from inventory.models import ProductRegistryEntry
+    from purchases.models import Family
+
+    from ..models import WipProduct
+    from ..utils import compute_wip_variant_key
+
+    variant_key = compute_wip_variant_key(
+        binding_id=binding.id, yard_id=yard.id, length_mm_id=length_mm.id, stage=stage,
+    )
+    wip_product = WipProduct.objects.filter(variant_key=variant_key).first()
+    if wip_product is not None:
+        return wip_product
+
+    wip_family = Family.objects.get(name="WIP")
+    name = f"{binding.value} {_fmt(yard.value)} yard {_fmt(length_mm.value)}"
+    registry_type = (
+        ProductRegistryEntry.Type.WIP_CORE if stage == WipProduct.Stage.REWINDING
+        else ProductRegistryEntry.Type.WIP_PIECE
+    )
+    try:
+        with transaction.atomic():
+            wip_product = WipProduct.objects.create(
+                name=name, code=next_wip_product_code(), family=wip_family, binding=binding,
+                yard=yard, length_mm=length_mm, stage=stage, variant_key=variant_key,
+                created_by=user, updated_by=user,
+            )
+            create_registry_entry(
+                type=registry_type, wip_product=wip_product,
+                name=wip_product.name, code=wip_product.code, category="WIP",
+            )
+    except IntegrityError:
+        # Lost a create race, or the row occupying variant_key is
+        # soft-deleted — same fix rewinding.py/cutting.py already apply.
+        wip_product = WipProduct.all_objects.filter(variant_key=variant_key).first()
+        if wip_product is None:
+            raise
+        if wip_product.is_deleted:
+            raise ValidationError({
+                "wip_product": (
+                    f"A previously deleted WIP product ('{wip_product.name}') already used this "
+                    f"exact attribute combination. Restore it before adding opening stock for it."
+                )
+            })
+    return wip_product
+
+
+def get_or_create_fg_product(*, binding, yard, length_mm, user):
+    """
+    Get-or-create an FgProduct by its (binding, yard, length_mm)
+    variant_key — FG twin of get_or_create_wip_product, same reasoning.
+    """
+    from django.db import IntegrityError, transaction
+    from rest_framework.exceptions import ValidationError
+
+    from inventory.services import create_registry_entry
+    from inventory.models import ProductRegistryEntry
+
+    from ..models import FgProduct
+    from ..utils import compute_fg_variant_key
+
+    variant_key = compute_fg_variant_key(binding_id=binding.id, yard_id=yard.id, length_mm_id=length_mm.id)
+    fg_product = FgProduct.objects.filter(variant_key=variant_key).first()
+    if fg_product is not None:
+        return fg_product
+
+    name = f"{binding.value} {_fmt(yard.value)} yard {_fmt(length_mm.value)}"
+    try:
+        with transaction.atomic():
+            fg_product = FgProduct.objects.create(
+                name=name, code=next_fg_product_code(),
+                binding=binding, yard=yard, length_mm=length_mm,
+                variant_key=variant_key, created_by=user, updated_by=user,
+            )
+            create_registry_entry(
+                type=ProductRegistryEntry.Type.FINISHED_GOODS, fg_product=fg_product,
+                name=fg_product.name, code=fg_product.code, category="Finished Goods",
+            )
+            # New FG product needs a selling price before it can be
+            # invoiced — same queue purchases.services.create_product()
+            # feeds for a new RM product.
+            from rates.services import add_to_unpriced_queue
+            add_to_unpriced_queue(fg_product)
+    except IntegrityError:
+        fg_product = FgProduct.all_objects.filter(variant_key=variant_key).first()
+        if fg_product is None:
+            raise
+        if fg_product.is_deleted:
+            raise ValidationError({
+                "fg_product": (
+                    f"A previously deleted FG product ('{fg_product.name}') already used this "
+                    f"exact attribute combination. Restore it before adding opening stock for it."
+                )
+            })
+    return fg_product
+
+
 def _fmt(value: Decimal) -> str:
     """'100.0000' -> '100', '1295.4000' -> '1295.4' — no trailing zeros/decimal point."""
     s = format(value, "f")

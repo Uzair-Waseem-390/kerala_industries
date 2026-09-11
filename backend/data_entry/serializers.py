@@ -113,6 +113,85 @@ class OpeningStockOrderReadSerializer(serializers.Serializer):
 
 
 # ---------------------------------------------------------------------------
+# Feature 4b — Opening WIP Stock (2026-09)
+# ---------------------------------------------------------------------------
+
+class OpeningWipStockItemSerializer(serializers.Serializer):
+    binding_id   = serializers.IntegerField()
+    yard_id      = serializers.IntegerField()
+    length_mm_id = serializers.IntegerField()
+    stage        = serializers.ChoiceField(choices=["rewinding", "cutting"])
+    shelf_id     = serializers.IntegerField()
+    quantity     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+
+
+class OpeningWipStockWriteSerializer(serializers.Serializer):
+    items = OpeningWipStockItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one item is required.")
+        return value
+
+
+class _OpeningWipStockBreakdownItemReadSerializer(serializers.Serializer):
+    """One RecipeBreakdownItem (core) or CuttingBreakdownItem (piece) row."""
+    product_name = serializers.CharField(source="wip_product.name", read_only=True)
+    stage        = serializers.SerializerMethodField()
+    quantity     = serializers.DecimalField(max_digits=14, decimal_places=4, read_only=True)
+    unit_cost    = serializers.DecimalField(source="unit_cost_snapshot", max_digits=14, decimal_places=4, read_only=True)
+
+    def get_stage(self, obj):
+        from production.models import CuttingBreakdownItem
+        return "cutting" if isinstance(obj, CuttingBreakdownItem) else "rewinding"
+
+
+class OpeningWipStockRecipeReadSerializer(serializers.Serializer):
+    id            = serializers.IntegerField(read_only=True)
+    recipe_number = serializers.CharField(read_only=True)
+    created_at    = serializers.DateTimeField(read_only=True)
+    items         = serializers.SerializerMethodField()
+
+    def get_items(self, obj):
+        rows = list(obj.breakdown_items.all()) + list(obj.cutting_breakdown_items.all())
+        return _OpeningWipStockBreakdownItemReadSerializer(rows, many=True).data
+
+
+# ---------------------------------------------------------------------------
+# Feature 4c — Opening FG Stock (2026-09)
+# ---------------------------------------------------------------------------
+
+class OpeningFgStockItemSerializer(serializers.Serializer):
+    binding_id   = serializers.IntegerField()
+    yard_id      = serializers.IntegerField()
+    length_mm_id = serializers.IntegerField()
+    shelf_id     = serializers.IntegerField()
+    quantity     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+
+
+class OpeningFgStockWriteSerializer(serializers.Serializer):
+    items = OpeningFgStockItemSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one item is required.")
+        return value
+
+
+class OpeningFgStockRecipeReadSerializer(serializers.Serializer):
+    """One recipe per FG item (PackingOutputItem.recipe is a OneToOneField
+    — see production.services.opening_stock.create_opening_fg_stock)."""
+    id            = serializers.IntegerField(read_only=True)
+    recipe_number = serializers.CharField(read_only=True)
+    created_at    = serializers.DateTimeField(read_only=True)
+    product_name  = serializers.CharField(source="packing_output_item.fg_product.name", read_only=True)
+    quantity      = serializers.DecimalField(source="packing_output_item.quantity", max_digits=14, decimal_places=4, read_only=True)
+    unit_cost     = serializers.DecimalField(source="packing_output_item.unit_cost_snapshot", max_digits=14, decimal_places=4, read_only=True)
+
+
+# ---------------------------------------------------------------------------
 # Feature 5 — Opening Investor Investment
 # ---------------------------------------------------------------------------
 

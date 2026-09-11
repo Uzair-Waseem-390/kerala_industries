@@ -103,7 +103,15 @@ def _recipe_qs():
 
 
 def get_all_recipes(*, status: str = None, search: str = None) -> QuerySet:
-    qs = _recipe_qs().filter(is_deleted=False)
+    """
+    Excludes is_data_entry=True by default — the synthetic "Opening Stock"
+    recipes data_entry's WIP/FG bootstrap creates (production.services.
+    opening_stock) are real, FIFO-consumable batch-bearing Recipe rows, but
+    should never appear in the normal Recipes list as if real manufacturing
+    work happened — same reasoning purchases/billing already apply to their
+    own is_data_entry rows.
+    """
+    qs = _recipe_qs().filter(is_deleted=False, is_data_entry=False)
     if _clean(status):
         qs = qs.filter(status=_clean(status))
     if _clean(search):

@@ -208,6 +208,33 @@ def create_opening_stock(*, items: list, user):
 
 
 # ---------------------------------------------------------------------------
+# Feature 4b/4c — Opening WIP/FG Stock (2026-09)
+#
+# Same shape as Feature 4 above: zero data_entry-owned state. The real rows
+# are production.Recipe (is_data_entry=True) + RecipeBreakdownItem/
+# CuttingBreakdownItem/PackingOutputItem — see production.services
+# .opening_stock, which does the actual work; this just validates the
+# envelope and forwards.
+# ---------------------------------------------------------------------------
+
+def create_opening_wip_stock(*, items: list, user):
+    """
+    items: [{"binding_id", "yard_id", "length_mm_id", "stage", "quantity",
+    "unit_cost", "shelf_id"}, ...] — stage is "rewinding" (core) or
+    "cutting" (piece). See production.services.opening_stock
+    .create_opening_wip_stock for the full field contract/validation.
+    """
+    from production.services.opening_stock import create_opening_wip_stock as _create_opening_wip_stock
+    return _create_opening_wip_stock(items=items, user=user)
+
+
+def create_opening_fg_stock(*, items: list, user):
+    """items: [{"binding_id", "yard_id", "length_mm_id", "quantity", "unit_cost", "shelf_id"}, ...]"""
+    from production.services.opening_stock import create_opening_fg_stock as _create_opening_fg_stock
+    return _create_opening_fg_stock(items=items, user=user)
+
+
+# ---------------------------------------------------------------------------
 # Feature 5 — Opening Investor Investment
 # ---------------------------------------------------------------------------
 

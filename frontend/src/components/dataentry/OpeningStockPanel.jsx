@@ -3,31 +3,81 @@ import { motion } from 'framer-motion';
 import { PackagePlus, ClipboardList, Plus, Trash2 } from 'lucide-react';
 import { dataEntryApi } from '../../services/dataEntryApi';
 import { purchasesApi } from '../../services/purchasesApi';
+import { productionApi } from '../../services/productionApi';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { useToast } from '../../context/ToastContext';
 import Card from '../ui/Card';
 import Input from '../ui/Input';
+import Select from '../ui/Select';
 import Button from '../ui/Button';
 import SearchableSelect from '../ui/SearchableSelect';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import InlineAlert from '../ui/InlineAlert';
 import EmptyState from '../ui/EmptyState';
+import Tabs from '../ui/Tabs';
 
 const fmt = (v) => Number(v || 0).toFixed(2);
-const emptyRow = () => ({ product_id: '', product_label: '', shelf_id: '', shelf_label: '', quantity: '', unit_price: '', gst: '0', wht: '0', description: '' });
+
+const TYPE_TABS = [
+    { value: 'rm', label: 'Raw Material' },
+    { value: 'wip_core', label: 'WIP — Core' },
+    { value: 'wip_piece', label: 'WIP — Piece' },
+    { value: 'fg', label: 'Finished Goods' },
+];
+
+// RM keeps its own row shape (free-text product search); WIP/FG are
+// attribute-defined (binding + yard + length, not freely named), so their
+// rows pick from the existing lookup catalogs instead — same "limit what
+// the user can enter to what we actually need" reasoning the whole feature
+// is built around.
+const emptyRmRow = () => ({ product_id: '', product_label: '', shelf_id: '', shelf_label: '', quantity: '', unit_price: '', gst: '0', wht: '0', description: '' });
+const emptyAttrRow = () => ({ binding_id: '', yard_id: '', length_mm_id: '', shelf_id: '', shelf_label: '', quantity: '', unit_cost: '' });
 
 const OpeningStockPanel = () => {
     const { toast } = useToast();
+    const [stockType, setStockType] = useState('rm');
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [saving, setSaving] = useState(false);
-    const [rows, setRows] = useState([emptyRow()]);
+    const [rmRows, setRmRows] = useState([emptyRmRow()]);
+    const [attrRows, setAttrRows] = useState([emptyAttrRow()]);
     const [bannerError, setBannerError] = useState('');
 
-    const loadRecords = useCallback(async () => {
+    // Binding/Yard/Length are small, closed lookup catalogs (a handful of
+    // rows each in real usage) — fetched once, not searched server-side.
+    const [bindings, setBindings] = useState([]);
+    const [yards, setYards] = useState([]);
+    const [lengths, setLengths] = useState([]);
+    const [lookupsLoaded, setLookupsLoaded] = useState(false);
+
+    const isRm = stockType === 'rm';
+    const isFg = stockType === 'fg';
+    const stage = stockType === 'wip_core' ? 'rewinding' : 'cutting';
+
+    const loadLookups = useCallback(async () => {
+        if (lookupsLoaded) return;
         try {
-            const res = await dataEntryApi.openingStock.getAll({ page_size: 500 });
+            const [b, y, l] = await Promise.all([
+                productionApi.rewoundCoreBindings.getAll({ page_size: 200 }),
+                productionApi.rewoundCoreYards.getAll({ page_size: 200 }),
+                productionApi.rewoundCoreLengthMms.getAll({ page_size: 200 }),
+            ]);
+            setBindings(b?.results ?? b ?? []);
+            setYards(y?.results ?? y ?? []);
+            setLengths(l?.results ?? l ?? []);
+            setLookupsLoaded(true);
+        } catch (err) {
+            toast.error(extractErrorMessage(err, 'Failed to load binding/yard/length options.'));
+        }
+    }, [lookupsLoaded, toast]);
+
+    const loadRecords = useCallback(async (type) => {
+        try {
+            const endpoint = type === 'rm' ? dataEntryApi.openingStock
+                : type === 'fg' ? dataEntryApi.openingFgStock
+                : dataEntryApi.openingWipStock;
+            const res = await endpoint.getAll({ page_size: 500 });
             setRecords(res?.results ?? res ?? []);
             setLoadError('');
         } catch (err) {
@@ -39,12 +89,21 @@ const OpeningStockPanel = () => {
         (async () => {
             setLoading(true);
             try {
-                await loadRecords();
+                if (stockType !== 'rm') await loadLookups();
+                await loadRecords(stockType);
             } finally {
                 setLoading(false);
             }
         })();
-    }, [loadRecords]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [stockType]);
+
+    const handleTypeChange = (value) => {
+        setStockType(value);
+        setBannerError('');
+        setRmRows([emptyRmRow()]);
+        setAttrRows([emptyAttrRow()]);
+    };
 
     const searchProducts = useCallback(async (query) => {
         const res = await purchasesApi.products.getAll({ search: query, page_size: 25 });
@@ -58,17 +117,25 @@ const OpeningStockPanel = () => {
         return results.map(s => ({ value: s.id, label: s.name }));
     }, []);
 
-    const updateRow = (i, key, val) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
-    const addRow = () => setRows(rs => [...rs, emptyRow()]);
-    const removeRow = (i) => setRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
+    const bindingOptions = bindings.map(b => ({ value: b.id, label: b.value }));
+    const yardOptions = yards.map(y => ({ value: y.id, label: y.value }));
+    const lengthOptions = lengths.map(l => ({ value: l.id, label: l.value }));
 
-    const handleSubmit = async (e) => {
+    const updateRmRow = (i, key, val) => setRmRows(rs => rs.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
+    const addRmRow = () => setRmRows(rs => [...rs, emptyRmRow()]);
+    const removeRmRow = (i) => setRmRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
+
+    const updateAttrRow = (i, key, val) => setAttrRows(rs => rs.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
+    const addAttrRow = () => setAttrRows(rs => [...rs, emptyAttrRow()]);
+    const removeAttrRow = (i) => setAttrRows(rs => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
+
+    const handleSubmitRm = async (e) => {
         e.preventDefault();
         setBannerError('');
 
         const seen = new Set();
         const items = [];
-        for (const r of rows) {
+        for (const r of rmRows) {
             if (!r.product_id) return setBannerError('Every row needs a product.');
             if (seen.has(r.product_id)) return setBannerError('A product is listed more than once.');
             seen.add(r.product_id);
@@ -90,8 +157,43 @@ const OpeningStockPanel = () => {
         try {
             await dataEntryApi.openingStock.create({ items });
             toast.success('Opening stock added to inventory.');
-            setRows([emptyRow()]);
-            await loadRecords();
+            setRmRows([emptyRmRow()]);
+            await loadRecords('rm');
+        } catch (err) {
+            setBannerError(extractErrorMessage(err, 'Failed to add opening stock.'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSubmitAttr = async (e) => {
+        e.preventDefault();
+        setBannerError('');
+
+        const items = [];
+        for (const r of attrRows) {
+            if (!r.binding_id || !r.yard_id || !r.length_mm_id) return setBannerError('Every row needs a binding, yard, and length.');
+            if (!r.shelf_id) return setBannerError('Every row needs a shelf.');
+            if (!r.quantity || parseFloat(r.quantity) <= 0) return setBannerError('Quantity must be greater than 0.');
+            if (!r.unit_cost || parseFloat(r.unit_cost) <= 0) return setBannerError('Unit cost must be greater than 0.');
+            items.push({
+                binding_id: parseInt(r.binding_id),
+                yard_id: parseInt(r.yard_id),
+                length_mm_id: parseInt(r.length_mm_id),
+                shelf_id: parseInt(r.shelf_id),
+                quantity: parseFloat(r.quantity),
+                unit_cost: r.unit_cost,
+                ...(isFg ? {} : { stage }),
+            });
+        }
+
+        setSaving(true);
+        try {
+            const endpoint = isFg ? dataEntryApi.openingFgStock : dataEntryApi.openingWipStock;
+            await endpoint.create({ items });
+            toast.success('Opening stock added to inventory.');
+            setAttrRows([emptyAttrRow()]);
+            await loadRecords(stockType);
         } catch (err) {
             setBannerError(extractErrorMessage(err, 'Failed to add opening stock.'));
         } finally {
@@ -105,6 +207,8 @@ const OpeningStockPanel = () => {
 
     return (
         <div className="space-y-6">
+            <Tabs tabs={TYPE_TABS} activeTab={stockType} onChange={handleTypeChange} />
+
             <Card hover={false}>
                 <div className="flex items-center gap-3 mb-5">
                     <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center flex-shrink-0">
@@ -112,88 +216,176 @@ const OpeningStockPanel = () => {
                     </div>
                     <h3 className="font-semibold text-neutral-900">Add Opening Stock</h3>
                 </div>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {rows.map((row, i) => (
-                        <motion.div
-                            key={i}
-                            initial={{ opacity: 0, y: 6 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="space-y-3 border border-neutral-100 rounded-xl p-4 bg-neutral-50/50"
-                        >
-                            {/* Row 1: Product, Shelf, Qty, Unit Price */}
-                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                <div className="md:col-span-3">
-                                    <SearchableSelect
-                                        label="Product"
-                                        value={row.product_id}
-                                        selectedLabel={row.product_label}
-                                        onChange={(v, option) => {
-                                            updateRow(i, 'product_id', v);
-                                            updateRow(i, 'product_label', option?.label ?? '');
-                                        }}
-                                        onSearch={searchProducts}
-                                        placeholder="Search product..."
-                                    />
-                                </div>
-                                <div className="md:col-span-3">
-                                    <SearchableSelect
-                                        label="Shelf"
-                                        value={row.shelf_id}
-                                        selectedLabel={row.shelf_label}
-                                        onChange={(v, option) => {
-                                            updateRow(i, 'shelf_id', v);
-                                            updateRow(i, 'shelf_label', option?.label ?? '');
-                                        }}
-                                        onSearch={searchShelves}
-                                        placeholder="Search shelf..."
-                                    />
-                                </div>
-                                <div className="md:col-span-3">
-                                    <Input label="Qty" type="number" min="0.0001" step="0.0001"
-                                        value={row.quantity} onChange={(e) => updateRow(i, 'quantity', e.target.value)} placeholder="Qty" />
-                                </div>
-                                <div className="md:col-span-3">
-                                    <Input label="Unit Price" type="number" step="0.01" min="0.01"
-                                        value={row.unit_price} onChange={(e) => updateRow(i, 'unit_price', e.target.value)} placeholder="Price" />
-                                </div>
-                            </div>
-                            {/* Row 2: GST, WHT, Remove */}
-                            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                                <div className="md:col-span-2">
-                                    <Input label="GST%" type="number" step="0.01" min="0"
-                                        value={row.gst} onChange={(e) => updateRow(i, 'gst', e.target.value)} />
-                                </div>
-                                <div className="md:col-span-2">
-                                    <Input label="WHT%" type="number" step="0.01" min="0"
-                                        value={row.wht} onChange={(e) => updateRow(i, 'wht', e.target.value)} />
-                                </div>
-                                <div className="md:col-span-6" />
-                                <div className="md:col-span-2">
-                                    <Button type="button" variant="secondary" size="sm" className="w-full"
-                                        icon={Trash2}
-                                        onClick={() => removeRow(i)} disabled={rows.length === 1}>
-                                        Remove
-                                    </Button>
-                                </div>
-                            </div>
-                        </motion.div>
-                    ))}
 
-                    <div className="flex items-center gap-3">
-                        <Button type="button" variant="outline" size="sm" icon={Plus} onClick={addRow}>
-                            Add Product
+                {isRm ? (
+                    <form onSubmit={handleSubmitRm} className="space-y-4">
+                        {rmRows.map((row, i) => (
+                            <motion.div
+                                key={i}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="space-y-3 border border-neutral-100 rounded-xl p-4 bg-neutral-50/50"
+                            >
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                    <div className="md:col-span-3">
+                                        <SearchableSelect
+                                            label="Product"
+                                            value={row.product_id}
+                                            selectedLabel={row.product_label}
+                                            onChange={(v, option) => {
+                                                updateRmRow(i, 'product_id', v);
+                                                updateRmRow(i, 'product_label', option?.label ?? '');
+                                            }}
+                                            onSearch={searchProducts}
+                                            placeholder="Search product..."
+                                        />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <SearchableSelect
+                                            label="Shelf"
+                                            value={row.shelf_id}
+                                            selectedLabel={row.shelf_label}
+                                            onChange={(v, option) => {
+                                                updateRmRow(i, 'shelf_id', v);
+                                                updateRmRow(i, 'shelf_label', option?.label ?? '');
+                                            }}
+                                            onSearch={searchShelves}
+                                            placeholder="Search shelf..."
+                                        />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <Input label="Qty" type="number" min="0.0001" step="0.0001"
+                                            value={row.quantity} onChange={(e) => updateRmRow(i, 'quantity', e.target.value)} placeholder="Qty" />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <Input label="Unit Price" type="number" step="0.01" min="0.01"
+                                            value={row.unit_price} onChange={(e) => updateRmRow(i, 'unit_price', e.target.value)} placeholder="Price" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                    <div className="md:col-span-2">
+                                        <Input label="GST%" type="number" step="0.01" min="0"
+                                            value={row.gst} onChange={(e) => updateRmRow(i, 'gst', e.target.value)} />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <Input label="WHT%" type="number" step="0.01" min="0"
+                                            value={row.wht} onChange={(e) => updateRmRow(i, 'wht', e.target.value)} />
+                                    </div>
+                                    <div className="md:col-span-6" />
+                                    <div className="md:col-span-2">
+                                        <Button type="button" variant="secondary" size="sm" className="w-full"
+                                            icon={Trash2}
+                                            onClick={() => removeRmRow(i)} disabled={rmRows.length === 1}>
+                                            Remove
+                                        </Button>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        ))}
+
+                        <div className="flex items-center gap-3">
+                            <Button type="button" variant="outline" size="sm" icon={Plus} onClick={addRmRow}>
+                                Add Product
+                            </Button>
+                        </div>
+
+                        <InlineAlert
+                            variant="info"
+                            message="Adds quantities to inventory (FIFO-ready). No cash or supplier-payable effect."
+                        />
+                        {bannerError && <InlineAlert variant="error" message={bannerError} />}
+                        <Button type="submit" loading={saving} icon={PackagePlus} className="w-full sm:w-auto">
+                            Add Opening Stock
                         </Button>
-                    </div>
+                    </form>
+                ) : (
+                    <form onSubmit={handleSubmitAttr} className="space-y-4">
+                        {attrRows.map((row, i) => (
+                            <motion.div
+                                key={i}
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="space-y-3 border border-neutral-100 rounded-xl p-4 bg-neutral-50/50"
+                            >
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                    <div className="md:col-span-3">
+                                        <Select
+                                            label="Binding"
+                                            value={row.binding_id}
+                                            onChange={(e) => updateAttrRow(i, 'binding_id', e.target.value)}
+                                            options={bindingOptions}
+                                            placeholder="Select binding"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <Select
+                                            label="Yard"
+                                            value={row.yard_id}
+                                            onChange={(e) => updateAttrRow(i, 'yard_id', e.target.value)}
+                                            options={yardOptions}
+                                            placeholder="Select yard"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <Select
+                                            label="Length (mm)"
+                                            value={row.length_mm_id}
+                                            onChange={(e) => updateAttrRow(i, 'length_mm_id', e.target.value)}
+                                            options={lengthOptions}
+                                            placeholder="Select length"
+                                        />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <SearchableSelect
+                                            label="Shelf"
+                                            value={row.shelf_id}
+                                            selectedLabel={row.shelf_label}
+                                            onChange={(v, option) => {
+                                                updateAttrRow(i, 'shelf_id', v);
+                                                updateAttrRow(i, 'shelf_label', option?.label ?? '');
+                                            }}
+                                            onSearch={searchShelves}
+                                            placeholder="Search shelf..."
+                                        />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                                    <div className="md:col-span-3">
+                                        <Input label="Qty" type="number" min="0.0001" step="0.0001"
+                                            value={row.quantity} onChange={(e) => updateAttrRow(i, 'quantity', e.target.value)} placeholder="Qty" />
+                                    </div>
+                                    <div className="md:col-span-3">
+                                        <Input label="Unit Cost" type="number" step="0.01" min="0.01"
+                                            value={row.unit_cost} onChange={(e) => updateAttrRow(i, 'unit_cost', e.target.value)} placeholder="Cost" />
+                                    </div>
+                                    <div className="md:col-span-4" />
+                                    <div className="md:col-span-2">
+                                        <Button type="button" variant="secondary" size="sm" className="w-full"
+                                            icon={Trash2}
+                                            onClick={() => removeAttrRow(i)} disabled={attrRows.length === 1}>
+                                            Remove
+                                        </Button>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        ))}
 
-                    <InlineAlert
-                        variant="info"
-                        message="Adds quantities to inventory (FIFO-ready). No cash or supplier-payable effect."
-                    />
-                    {bannerError && <InlineAlert variant="error" message={bannerError} />}
-                    <Button type="submit" loading={saving} icon={PackagePlus} className="w-full sm:w-auto">
-                        Add Opening Stock
-                    </Button>
-                </form>
+                        <div className="flex items-center gap-3">
+                            <Button type="button" variant="outline" size="sm" icon={Plus} onClick={addAttrRow}>
+                                Add Product
+                            </Button>
+                        </div>
+
+                        <InlineAlert
+                            variant="info"
+                            message="Adds quantities to inventory (FIFO-ready, real cost basis). No cash effect. A matching product is reused if this exact binding/yard/length combination already exists."
+                        />
+                        {bannerError && <InlineAlert variant="error" message={bannerError} />}
+                        <Button type="submit" loading={saving} icon={PackagePlus} className="w-full sm:w-auto">
+                            Add Opening Stock
+                        </Button>
+                    </form>
+                )}
             </Card>
 
             <Card hover={false}>
@@ -203,13 +395,13 @@ const OpeningStockPanel = () => {
                     </div>
                     <h3 className="font-semibold text-neutral-900">Recorded Stock Entries ({records.length})</h3>
                 </div>
-                {loadError && <InlineAlert variant="error" message={loadError} onRetry={loadRecords} className="mb-4" />}
+                {loadError && <InlineAlert variant="error" message={loadError} onRetry={() => loadRecords(stockType)} className="mb-4" />}
                 {records.length === 0 ? (
                     <EmptyState
                         title="No opening stock entries yet"
                         description="Stock batches you add will appear here for audit."
                     />
-                ) : (
+                ) : isRm ? (
                     <div className="space-y-4">
                         {records.map(order => (
                             <div key={order.id} className="border border-neutral-200 rounded-xl p-4">
@@ -234,6 +426,54 @@ const OpeningStockPanel = () => {
                                                     <td className="py-1 pr-3 text-right">{it.quantity}</td>
                                                     <td className="py-1 pr-3 text-right">{fmt(it.unit_price)}</td>
                                                     <td className="py-1 text-right">{fmt(it.total_price)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : isFg ? (
+                    <div className="space-y-4">
+                        {records.map(recipe => (
+                            <div key={recipe.id} className="border border-neutral-200 rounded-xl p-4">
+                                <div className="flex items-center justify-between flex-wrap gap-1">
+                                    <span className="font-medium text-neutral-900">{recipe.recipe_number}</span>
+                                    <span className="text-xs text-neutral-500">{new Date(recipe.created_at).toLocaleString()}</span>
+                                </div>
+                                <div className="text-sm mt-1 flex items-center justify-between">
+                                    <span>{recipe.product_name} — Qty {recipe.quantity}</span>
+                                    <span className="text-neutral-500">Unit Cost: {fmt(recipe.unit_cost)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {records.map(recipe => (
+                            <div key={recipe.id} className="border border-neutral-200 rounded-xl p-4">
+                                <div className="flex items-center justify-between mb-2 flex-wrap gap-1">
+                                    <span className="font-medium text-neutral-900">{recipe.recipe_number}</span>
+                                    <span className="text-xs text-neutral-500">{new Date(recipe.created_at).toLocaleString()}</span>
+                                </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="text-left text-xs text-neutral-500 border-b border-neutral-100">
+                                                <th className="py-1 pr-3">Product</th>
+                                                <th className="py-1 pr-3">Stage</th>
+                                                <th className="py-1 pr-3 text-right">Qty</th>
+                                                <th className="py-1 text-right">Unit Cost</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-neutral-50">
+                                            {(recipe.items || []).map((it, idx) => (
+                                                <tr key={idx}>
+                                                    <td className="py-1 pr-3">{it.product_name}</td>
+                                                    <td className="py-1 pr-3">{it.stage === 'cutting' ? 'Piece' : 'Core'}</td>
+                                                    <td className="py-1 pr-3 text-right">{it.quantity}</td>
+                                                    <td className="py-1 text-right">{fmt(it.unit_cost)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
