@@ -34,8 +34,8 @@ def _validate_items(items: list) -> None:
     for item in items:
         if not item.get("shelf_id"):
             raise ValidationError({"shelf_id": "A shelf is required for every opening stock item."})
-        if not item.get("binding_id"):
-            raise ValidationError({"binding_id": "A binding is required for every item."})
+        if not item.get("jumbo_name_id"):
+            raise ValidationError({"jumbo_name_id": "A name is required for every item."})
         for field in ("yard_value", "length_mm_value"):
             if not item.get(field):
                 raise ValidationError({field: f"{field} is required for every item."})
@@ -52,22 +52,31 @@ def _validate_items(items: list) -> None:
 
 def _get_lookups(item: dict, *, user):
     """
-    binding stays pick-an-existing-one (a Select of known bindings); yard/
-    length_mm are typed free values (2026-09) — get-or-create by value,
-    exactly like production.services.rewinding's own inline lookup
-    creation already does for a normal recipe (RewoundCoreYard/LengthMm.value
-    is the real uniqueness key, not an id the user is expected to already
-    know). Matches the "if the product already exists, add to its quantity;
+    "Name" (2026-09, was "binding") is picked from the real RM Jumbo Names
+    (purchases.JumboName) — the same source production.services.rewinding's
+    own inline flow derives binding from at breakdown time
+    (`binding_value = jumbo_product.jumbo_name.value`,
+    production/services/rewinding.py). Get-or-creates the matching
+    RewoundCoreBinding by that value, exactly like the real flow. yard/
+    length_mm are typed free values — get-or-create by value, exactly like
+    production.services.rewinding's own inline lookup creation already does
+    for a normal recipe (RewoundCoreYard/LengthMm.value is the real
+    uniqueness key, not an id the user is expected to already know).
+    Matches the "if the product already exists, add to its quantity;
     otherwise create it" requirement — get_or_create_wip_product/
     get_or_create_fg_product downstream already do exactly this by
-    variant_key, so typing the same yard/length a second time correctly
-    reuses the same product and just adds quantity.
+    variant_key, so typing the same name/yard/length a second time
+    correctly reuses the same product and just adds quantity.
     """
+    from purchases.models import JumboName
     from purchases.selectors import get_shelf_by_id
 
     from ..models import RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard
 
-    binding = get_object_or_404_lookup(RewoundCoreBinding, item["binding_id"], "binding_id")
+    jumbo_name = get_object_or_404_lookup(JumboName, item["jumbo_name_id"], "jumbo_name_id")
+    binding, _ = RewoundCoreBinding.objects.get_or_create(
+        value=jumbo_name.value, defaults={"created_by": user, "updated_by": user},
+    )
     yard, _ = RewoundCoreYard.objects.get_or_create(
         value=Decimal(str(item["yard_value"])), defaults={"created_by": user, "updated_by": user},
     )
@@ -88,7 +97,7 @@ def get_object_or_404_lookup(model, pk, field_label):
 
 def create_opening_wip_stock(*, items: list, user) -> Recipe:
     """
-    items: [{"binding_id", "yard_value", "length_mm_value", "stage"
+    items: [{"jumbo_name_id", "yard_value", "length_mm_value", "stage"
     ("rewinding"=core or "cutting"=piece), "quantity", "unit_cost",
     "shelf_id"}, ...]. yard_value/length_mm_value are typed numbers, not
     ids — get-or-created by value (see _get_lookups). One shared "Opening
@@ -150,7 +159,7 @@ def create_opening_wip_stock(*, items: list, user) -> Recipe:
 
 def create_opening_fg_stock(*, items: list, user) -> list[Recipe]:
     """
-    items: [{"binding_id", "yard_value", "length_mm_value", "quantity",
+    items: [{"jumbo_name_id", "yard_value", "length_mm_value", "quantity",
     "unit_cost", "shelf_id"}, ...]. yard_value/length_mm_value are typed
     numbers, not ids — get-or-created by value (see _get_lookups).
 

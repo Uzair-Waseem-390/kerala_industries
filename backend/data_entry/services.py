@@ -219,9 +219,9 @@ def create_opening_stock(*, items: list, user):
 
 def create_opening_wip_stock(*, items: list, user):
     """
-    items: [{"binding_id", "yard_id", "length_mm_id", "stage", "quantity",
-    "unit_cost", "shelf_id"}, ...] — stage is "rewinding" (core) or
-    "cutting" (piece). See production.services.opening_stock
+    items: [{"jumbo_name_id", "yard_value", "length_mm_value", "stage",
+    "quantity", "unit_cost", "shelf_id"}, ...] — stage is "rewinding"
+    (core) or "cutting" (piece). See production.services.opening_stock
     .create_opening_wip_stock for the full field contract/validation.
     """
     from production.services.opening_stock import create_opening_wip_stock as _create_opening_wip_stock
@@ -229,7 +229,7 @@ def create_opening_wip_stock(*, items: list, user):
 
 
 def create_opening_fg_stock(*, items: list, user):
-    """items: [{"binding_id", "yard_id", "length_mm_id", "quantity", "unit_cost", "shelf_id"}, ...]"""
+    """items: [{"jumbo_name_id", "yard_value", "length_mm_value", "quantity", "unit_cost", "shelf_id"}, ...]"""
     from production.services.opening_stock import create_opening_fg_stock as _create_opening_fg_stock
     return _create_opening_fg_stock(items=items, user=user)
 

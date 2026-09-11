@@ -117,7 +117,11 @@ class OpeningStockOrderReadSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class OpeningWipStockItemSerializer(serializers.Serializer):
-    binding_id      = serializers.IntegerField()
+    # "Name" (2026-09, was "binding_id") — an RM purchases.JumboName id,
+    # the real source production.services.rewinding derives binding from
+    # at breakdown time. production.services.opening_stock._get_lookups
+    # get-or-creates the matching RewoundCoreBinding from its value.
+    jumbo_name_id   = serializers.IntegerField()
     # Typed values, not lookup ids (2026-09) — get-or-created by value in
     # production.services.opening_stock._get_lookups, same "if it already
     # exists, reuse it and add quantity; otherwise create it" rule the
@@ -167,7 +171,7 @@ class OpeningWipStockRecipeReadSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class OpeningFgStockItemSerializer(serializers.Serializer):
-    binding_id      = serializers.IntegerField()
+    jumbo_name_id   = serializers.IntegerField()
     yard_value      = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
     length_mm_value = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
     shelf_id        = serializers.IntegerField()

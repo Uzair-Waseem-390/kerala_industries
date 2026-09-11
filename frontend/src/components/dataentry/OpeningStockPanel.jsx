@@ -3,12 +3,10 @@ import { motion } from 'framer-motion';
 import { PackagePlus, ClipboardList, Plus, Trash2 } from 'lucide-react';
 import { dataEntryApi } from '../../services/dataEntryApi';
 import { purchasesApi } from '../../services/purchasesApi';
-import { productionApi } from '../../services/productionApi';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { useToast } from '../../context/ToastContext';
 import Card from '../ui/Card';
 import Input from '../ui/Input';
-import Select from '../ui/Select';
 import Button from '../ui/Button';
 import SearchableSelect from '../ui/SearchableSelect';
 import LoadingSpinner from '../ui/LoadingSpinner';
@@ -26,13 +24,17 @@ const TYPE_TABS = [
 ];
 
 // RM keeps its own row shape (free-text product search). WIP/FG are
-// attribute-defined (binding + yard + length, not freely named): binding
-// picks from the existing lookup catalog (a closed set of known material
-// names), but yard/length are typed numbers (2026-09) — the backend
-// get-or-creates the matching product by that exact value, reusing it and
-// adding quantity if it already exists, or creating it if it doesn't.
+// attribute-defined (name + yard + length, not freely named): "Name"
+// backend-searches the real RM Jumbo Names (purchases.JumboName, 2026-09 —
+// was a separate closed "binding" lookup), same server-side search_q()
+// pattern as Product/Shelf below (purchases.selectors.get_all_jumbo_names)
+// — the backend get-or-creates the matching RewoundCoreBinding from that
+// name's value, mirroring how a real production recipe derives it.
+// Yard/length are typed numbers — the backend get-or-creates the matching
+// product by that exact value, reusing it and adding quantity if it
+// already exists, or creating it if it doesn't.
 const emptyRmRow = () => ({ product_id: '', product_label: '', shelf_id: '', shelf_label: '', quantity: '', unit_price: '', gst: '0', wht: '0', description: '' });
-const emptyAttrRow = () => ({ binding_id: '', yard_value: '', length_mm_value: '', shelf_id: '', shelf_label: '', quantity: '', unit_cost: '' });
+const emptyAttrRow = () => ({ jumbo_name_id: '', jumbo_name_label: '', yard_value: '', length_mm_value: '', shelf_id: '', shelf_label: '', quantity: '', unit_cost: '' });
 
 const OpeningStockPanel = () => {
     const { toast } = useToast();
@@ -45,26 +47,9 @@ const OpeningStockPanel = () => {
     const [attrRows, setAttrRows] = useState([emptyAttrRow()]);
     const [bannerError, setBannerError] = useState('');
 
-    // Binding is a small, closed lookup catalog (a handful of rows in real
-    // usage) — fetched once, not searched server-side. Yard/Length are
-    // typed values instead (2026-09), no catalog fetch needed for them.
-    const [bindings, setBindings] = useState([]);
-    const [lookupsLoaded, setLookupsLoaded] = useState(false);
-
     const isRm = stockType === 'rm';
     const isFg = stockType === 'fg';
     const stage = stockType === 'wip_core' ? 'rewinding' : 'cutting';
-
-    const loadLookups = useCallback(async () => {
-        if (lookupsLoaded) return;
-        try {
-            const b = await productionApi.rewoundCoreBindings.getAll({ page_size: 200 });
-            setBindings(b?.results ?? b ?? []);
-            setLookupsLoaded(true);
-        } catch (err) {
-            toast.error(extractErrorMessage(err, 'Failed to load binding options.'));
-        }
-    }, [lookupsLoaded, toast]);
 
     const loadRecords = useCallback(async (type) => {
         try {
@@ -83,7 +68,6 @@ const OpeningStockPanel = () => {
         (async () => {
             setLoading(true);
             try {
-                if (stockType !== 'rm') await loadLookups();
                 await loadRecords(stockType);
             } finally {
                 setLoading(false);
@@ -111,7 +95,11 @@ const OpeningStockPanel = () => {
         return results.map(s => ({ value: s.id, label: s.name }));
     }, []);
 
-    const bindingOptions = bindings.map(b => ({ value: b.id, label: b.value }));
+    const searchJumboNames = useCallback(async (query) => {
+        const res = await purchasesApi.jumboNames.getAll({ search: query, page_size: 25 });
+        const results = res?.results ?? res ?? [];
+        return results.map(n => ({ value: n.id, label: n.value }));
+    }, []);
 
     const updateRmRow = (i, key, val) => setRmRows(rs => rs.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
     const addRmRow = () => setRmRows(rs => [...rs, emptyRmRow()]);
@@ -164,14 +152,14 @@ const OpeningStockPanel = () => {
 
         const items = [];
         for (const r of attrRows) {
-            if (!r.binding_id) return setBannerError('Every row needs a binding.');
+            if (!r.jumbo_name_id) return setBannerError('Every row needs a name.');
             if (!r.yard_value || parseFloat(r.yard_value) <= 0) return setBannerError('Yard must be greater than 0.');
             if (!r.length_mm_value || parseFloat(r.length_mm_value) <= 0) return setBannerError('Length (mm) must be greater than 0.');
             if (!r.shelf_id) return setBannerError('Every row needs a shelf.');
             if (!r.quantity || parseFloat(r.quantity) <= 0) return setBannerError('Quantity must be greater than 0.');
             if (!r.unit_cost || parseFloat(r.unit_cost) <= 0) return setBannerError('Unit cost must be greater than 0.');
             items.push({
-                binding_id: parseInt(r.binding_id),
+                jumbo_name_id: parseInt(r.jumbo_name_id),
                 yard_value: r.yard_value,
                 length_mm_value: r.length_mm_value,
                 shelf_id: parseInt(r.shelf_id),
@@ -303,12 +291,16 @@ const OpeningStockPanel = () => {
                             >
                                 <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
                                     <div className="md:col-span-3">
-                                        <Select
-                                            label="Binding"
-                                            value={row.binding_id}
-                                            onChange={(e) => updateAttrRow(i, 'binding_id', e.target.value)}
-                                            options={bindingOptions}
-                                            placeholder="Select binding"
+                                        <SearchableSelect
+                                            label="Name"
+                                            value={row.jumbo_name_id}
+                                            selectedLabel={row.jumbo_name_label}
+                                            onChange={(v, option) => {
+                                                updateAttrRow(i, 'jumbo_name_id', v);
+                                                updateAttrRow(i, 'jumbo_name_label', option?.label ?? '');
+                                            }}
+                                            onSearch={searchJumboNames}
+                                            placeholder="Search name..."
                                         />
                                     </div>
                                     <div className="md:col-span-3">
@@ -370,7 +362,7 @@ const OpeningStockPanel = () => {
 
                         <InlineAlert
                             variant="info"
-                            message="Adds quantities to inventory (FIFO-ready, real cost basis). No cash effect. A matching product is reused if this exact binding/yard/length combination already exists."
+                            message="Adds quantities to inventory (FIFO-ready, real cost basis). No cash effect. A matching product is reused if this exact name/yard/length combination already exists."
                         />
                         {bannerError && <InlineAlert variant="error" message={bannerError} />}
                         <Button type="submit" loading={saving} icon={PackagePlus} className="w-full sm:w-auto">

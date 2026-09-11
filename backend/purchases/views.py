@@ -153,7 +153,7 @@ class JumboNameListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIVi
     write_serializer_class = JumboNameWriteSerializer
 
     def get_queryset(self):
-        return get_all_jumbo_names()
+        return get_all_jumbo_names(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

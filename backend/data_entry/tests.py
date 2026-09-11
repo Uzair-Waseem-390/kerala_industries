@@ -83,12 +83,20 @@ class OpeningWipFgStockTests(TestCase):
         self.admin = make_admin()
         from purchases.models import Shelf
         self.shelf = Shelf.objects.create(name="Shelf A", created_by=self.admin, updated_by=self.admin)
-        self.binding, self.yard, self.length_mm = self._make_lookups()
+        self.jumbo_name, self.yard, self.length_mm = self._make_lookups()
 
     def _make_lookups(self, suffix=""):
-        from production.models import RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard
-        binding = RewoundCoreBinding.objects.create(
-            value=f"Test Binding{suffix}", created_by=self.admin, updated_by=self.admin,
+        """
+        "Name" is a real RM purchases.JumboName (2026-09, was a standalone
+        RewoundCoreBinding value the caller picked directly) — the service
+        get-or-creates the matching RewoundCoreBinding from the jumbo
+        name's value itself, mirroring production.services.rewinding's
+        own real derivation.
+        """
+        from purchases.models import JumboName
+        from production.models import RewoundCoreLengthMm, RewoundCoreYard
+        jumbo_name = JumboName.objects.create(
+            value=f"Test Jumbo{suffix}", created_by=self.admin, updated_by=self.admin,
         )
         yard, _ = RewoundCoreYard.objects.get_or_create(
             value=Decimal("50"), defaults={"created_by": self.admin, "updated_by": self.admin},
@@ -96,7 +104,11 @@ class OpeningWipFgStockTests(TestCase):
         length_mm, _ = RewoundCoreLengthMm.objects.get_or_create(
             value=Decimal("100"), defaults={"created_by": self.admin, "updated_by": self.admin},
         )
-        return binding, yard, length_mm
+        return jumbo_name, yard, length_mm
+
+    def _binding_for(self, jumbo_name):
+        from production.models import RewoundCoreBinding
+        return RewoundCoreBinding.objects.get(value=jumbo_name.value)
 
     def test_wip_core_opening_stock_creates_product_and_inventory(self):
         from production.services.opening_stock import create_opening_wip_stock
@@ -104,14 +116,15 @@ class OpeningWipFgStockTests(TestCase):
         from inventory.models import WipInventory, WipShelfStock
 
         recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
         self.assertTrue(recipe.is_data_entry)
         self.assertEqual(recipe.status, "finished")
+        binding = self._binding_for(self.jumbo_name)
         wip = WipProduct.objects.get(
-            binding=self.binding, yard=self.yard, length_mm=self.length_mm, stage=WipProduct.Stage.REWINDING,
+            binding=binding, yard=self.yard, length_mm=self.length_mm, stage=WipProduct.Stage.REWINDING,
         )
         self.assertEqual(WipInventory.objects.get(product=wip).quantity, Decimal("10"))
         self.assertEqual(WipShelfStock.objects.get(product=wip, shelf=self.shelf).quantity, Decimal("10"))
@@ -122,13 +135,14 @@ class OpeningWipFgStockTests(TestCase):
         from inventory.models import WipInventory
 
         item = {
-            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }
         create_opening_wip_stock(items=[item], user=self.admin)
         create_opening_wip_stock(items=[{**item, "quantity": 5, "unit_cost": 30}], user=self.admin)
 
-        wip_qs = WipProduct.objects.filter(binding=self.binding, yard=self.yard, length_mm=self.length_mm)
+        binding = self._binding_for(self.jumbo_name)
+        wip_qs = WipProduct.objects.filter(binding=binding, yard=self.yard, length_mm=self.length_mm)
         self.assertEqual(wip_qs.count(), 1)
         self.assertEqual(WipInventory.objects.get(product=wip_qs.first()).quantity, Decimal("15"))
 
@@ -138,11 +152,11 @@ class OpeningWipFgStockTests(TestCase):
         from production.services.opening_stock import create_opening_fg_stock
         from production.models import PackingOutputItem
 
-        binding2, yard2, length_mm2 = self._make_lookups(suffix="2")
+        jumbo_name2, yard2, length_mm2 = self._make_lookups(suffix="2")
         recipes = create_opening_fg_stock(items=[
-            {"binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            {"jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
              "quantity": 5, "unit_cost": 10, "shelf_id": self.shelf.id},
-            {"binding_id": binding2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
+            {"jumbo_name_id": jumbo_name2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
              "quantity": 7, "unit_cost": 20, "shelf_id": self.shelf.id},
         ], user=self.admin)
 
@@ -158,12 +172,12 @@ class OpeningWipFgStockTests(TestCase):
         from production.models import WipProduct
 
         wip_recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
-        binding2, yard2, length_mm2 = self._make_lookups(suffix="2")
+        jumbo_name2, yard2, length_mm2 = self._make_lookups(suffix="2")
         fg_recipes = create_opening_fg_stock(items=[{
-            "binding_id": binding2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
+            "jumbo_name_id": jumbo_name2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
             "quantity": 5, "unit_cost": 10, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
@@ -177,7 +191,7 @@ class OpeningWipFgStockTests(TestCase):
         from production.models import WipProduct
 
         recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
         self.assertEqual(compute_labor_overhead_pool(recipe), Decimal("0"))
@@ -188,11 +202,11 @@ class OpeningWipFgStockTests(TestCase):
         from reports.selectors import get_inventory_valuation_report_data
 
         create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
-        rows = get_inventory_valuation_report_data(search="Test Binding")
+        rows = get_inventory_valuation_report_data(search=self.jumbo_name.value)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["type"], "wip_core")
         self.assertEqual(rows[0]["total_value"], Decimal("250"))
@@ -212,25 +226,26 @@ class OpeningWipFgStockTests(TestCase):
         self.assertFalse(RewoundCoreLengthMm.objects.filter(value=Decimal("133.25")).exists())
 
         create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": "77.5", "length_mm_value": "133.25",
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": "77.5", "length_mm_value": "133.25",
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 20, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
         yard = RewoundCoreYard.objects.get(value=Decimal("77.5"))
         length_mm = RewoundCoreLengthMm.objects.get(value=Decimal("133.25"))
-        wip = WipProduct.objects.get(binding=self.binding, yard=yard, length_mm=length_mm)
+        binding = self._binding_for(self.jumbo_name)
+        wip = WipProduct.objects.get(binding=binding, yard=yard, length_mm=length_mm)
         self.assertEqual(WipInventory.objects.get(product=wip).quantity, Decimal("10"))
 
         # Same typed values again -> reuses the same lookup rows and product,
         # just adds quantity — no duplicates created.
         create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_value": "77.5", "length_mm_value": "133.25",
+            "jumbo_name_id": self.jumbo_name.id, "yard_value": "77.5", "length_mm_value": "133.25",
             "stage": WipProduct.Stage.REWINDING, "quantity": 4, "unit_cost": 22, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
         self.assertEqual(RewoundCoreYard.objects.filter(value=Decimal("77.5")).count(), 1)
         self.assertEqual(RewoundCoreLengthMm.objects.filter(value=Decimal("133.25")).count(), 1)
-        self.assertEqual(WipProduct.objects.filter(binding=self.binding, yard=yard, length_mm=length_mm).count(), 1)
+        self.assertEqual(WipProduct.objects.filter(binding=binding, yard=yard, length_mm=length_mm).count(), 1)
         self.assertEqual(WipInventory.objects.get(product=wip).quantity, Decimal("14"))
 
     def test_invalid_yard_value_raises_clean_validation_error(self):
@@ -239,7 +254,7 @@ class OpeningWipFgStockTests(TestCase):
 
         with self.assertRaises(ValidationError) as ctx:
             create_opening_wip_stock(items=[{
-                "binding_id": self.binding.id, "yard_value": "not-a-number", "length_mm_value": "10",
+                "jumbo_name_id": self.jumbo_name.id, "yard_value": "not-a-number", "length_mm_value": "10",
                 "stage": WipProduct.Stage.REWINDING, "quantity": 1, "unit_cost": 1, "shelf_id": self.shelf.id,
             }], user=self.admin)
         self.assertIn("yard_value", ctx.exception.detail)

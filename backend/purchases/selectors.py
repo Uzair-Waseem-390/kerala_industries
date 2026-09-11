@@ -55,8 +55,11 @@ def _next_day_start(value):
 # Fixed-product attribute lookups (Jumbo/Cores/Packing/Cartons)
 # ---------------------------------------------------------------------------
 
-def get_all_jumbo_names():
-    return JumboName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_jumbo_names(*, search: str = None):
+    qs = JumboName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_jumbo_name_by_id(pk: int) -> JumboName:
     return get_object_or_404(JumboName, pk=pk, is_deleted=False)
