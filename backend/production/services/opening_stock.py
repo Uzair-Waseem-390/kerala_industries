@@ -34,22 +34,46 @@ def _validate_items(items: list) -> None:
     for item in items:
         if not item.get("shelf_id"):
             raise ValidationError({"shelf_id": "A shelf is required for every opening stock item."})
-        if not item.get("binding_id") or not item.get("yard_id") or not item.get("length_mm_id"):
-            raise ValidationError({"items": "binding_id, yard_id, and length_mm_id are required for every item."})
+        if not item.get("binding_id"):
+            raise ValidationError({"binding_id": "A binding is required for every item."})
+        for field in ("yard_value", "length_mm_value"):
+            if not item.get(field):
+                raise ValidationError({field: f"{field} is required for every item."})
+            try:
+                if Decimal(str(item[field])) <= 0:
+                    raise ValidationError({field: f"{field} must be greater than zero."})
+            except (ValueError, ArithmeticError):
+                raise ValidationError({field: f"{field} must be a valid number."})
         if not item.get("quantity") or Decimal(str(item["quantity"])) <= 0:
             raise ValidationError({"quantity": "Quantity must be greater than zero."})
         if not item.get("unit_cost") or Decimal(str(item["unit_cost"])) <= 0:
             raise ValidationError({"unit_cost": "Unit cost must be greater than zero."})
 
 
-def _get_lookups(item: dict):
+def _get_lookups(item: dict, *, user):
+    """
+    binding stays pick-an-existing-one (a Select of known bindings); yard/
+    length_mm are typed free values (2026-09) — get-or-create by value,
+    exactly like production.services.rewinding's own inline lookup
+    creation already does for a normal recipe (RewoundCoreYard/LengthMm.value
+    is the real uniqueness key, not an id the user is expected to already
+    know). Matches the "if the product already exists, add to its quantity;
+    otherwise create it" requirement — get_or_create_wip_product/
+    get_or_create_fg_product downstream already do exactly this by
+    variant_key, so typing the same yard/length a second time correctly
+    reuses the same product and just adds quantity.
+    """
     from purchases.selectors import get_shelf_by_id
 
     from ..models import RewoundCoreBinding, RewoundCoreLengthMm, RewoundCoreYard
 
     binding = get_object_or_404_lookup(RewoundCoreBinding, item["binding_id"], "binding_id")
-    yard = get_object_or_404_lookup(RewoundCoreYard, item["yard_id"], "yard_id")
-    length_mm = get_object_or_404_lookup(RewoundCoreLengthMm, item["length_mm_id"], "length_mm_id")
+    yard, _ = RewoundCoreYard.objects.get_or_create(
+        value=Decimal(str(item["yard_value"])), defaults={"created_by": user, "updated_by": user},
+    )
+    length_mm, _ = RewoundCoreLengthMm.objects.get_or_create(
+        value=Decimal(str(item["length_mm_value"])), defaults={"created_by": user, "updated_by": user},
+    )
     shelf = get_shelf_by_id(item["shelf_id"])
     return binding, yard, length_mm, shelf
 
@@ -64,9 +88,11 @@ def get_object_or_404_lookup(model, pk, field_label):
 
 def create_opening_wip_stock(*, items: list, user) -> Recipe:
     """
-    items: [{"binding_id", "yard_id", "length_mm_id", "stage" ("rewinding"=
-    core or "cutting"=piece), "quantity", "unit_cost", "shelf_id"}, ...]
-    One shared "Opening Stock" Recipe per call, one batch row per item.
+    items: [{"binding_id", "yard_value", "length_mm_value", "stage"
+    ("rewinding"=core or "cutting"=piece), "quantity", "unit_cost",
+    "shelf_id"}, ...]. yard_value/length_mm_value are typed numbers, not
+    ids — get-or-created by value (see _get_lookups). One shared "Opening
+    Stock" Recipe per call, one batch row per item.
     """
     from inventory.models import WipShelfStockMovement
     from inventory.services import apply_wip_shelf_allocations, sync_wip_inventory
@@ -87,7 +113,7 @@ def create_opening_wip_stock(*, items: list, user) -> Recipe:
             created_by=user, updated_by=user,
         )
         for item in items:
-            binding, yard, length_mm, shelf = _get_lookups(item)
+            binding, yard, length_mm, shelf = _get_lookups(item, user=user)
             quantity = Decimal(str(item["quantity"]))
             unit_cost = Decimal(str(item["unit_cost"]))
             stage = item["stage"]
@@ -124,7 +150,9 @@ def create_opening_wip_stock(*, items: list, user) -> Recipe:
 
 def create_opening_fg_stock(*, items: list, user) -> list[Recipe]:
     """
-    items: [{"binding_id", "yard_id", "length_mm_id", "quantity", "unit_cost", "shelf_id"}, ...]
+    items: [{"binding_id", "yard_value", "length_mm_value", "quantity",
+    "unit_cost", "shelf_id"}, ...]. yard_value/length_mm_value are typed
+    numbers, not ids — get-or-created by value (see _get_lookups).
 
     Unlike WIP (RecipeBreakdownItem/CuttingBreakdownItem, plain ForeignKeys
     to Recipe — several items can share one recipe), PackingOutputItem.recipe
@@ -141,7 +169,7 @@ def create_opening_fg_stock(*, items: list, user) -> list[Recipe]:
     recipes = []
     with transaction.atomic():
         for item in items:
-            binding, yard, length_mm, shelf = _get_lookups(item)
+            binding, yard, length_mm, shelf = _get_lookups(item, user=user)
             quantity = Decimal(str(item["quantity"]))
             unit_cost = Decimal(str(item["unit_cost"]))
 

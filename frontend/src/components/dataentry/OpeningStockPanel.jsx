@@ -25,13 +25,14 @@ const TYPE_TABS = [
     { value: 'fg', label: 'Finished Goods' },
 ];
 
-// RM keeps its own row shape (free-text product search); WIP/FG are
-// attribute-defined (binding + yard + length, not freely named), so their
-// rows pick from the existing lookup catalogs instead — same "limit what
-// the user can enter to what we actually need" reasoning the whole feature
-// is built around.
+// RM keeps its own row shape (free-text product search). WIP/FG are
+// attribute-defined (binding + yard + length, not freely named): binding
+// picks from the existing lookup catalog (a closed set of known material
+// names), but yard/length are typed numbers (2026-09) — the backend
+// get-or-creates the matching product by that exact value, reusing it and
+// adding quantity if it already exists, or creating it if it doesn't.
 const emptyRmRow = () => ({ product_id: '', product_label: '', shelf_id: '', shelf_label: '', quantity: '', unit_price: '', gst: '0', wht: '0', description: '' });
-const emptyAttrRow = () => ({ binding_id: '', yard_id: '', length_mm_id: '', shelf_id: '', shelf_label: '', quantity: '', unit_cost: '' });
+const emptyAttrRow = () => ({ binding_id: '', yard_value: '', length_mm_value: '', shelf_id: '', shelf_label: '', quantity: '', unit_cost: '' });
 
 const OpeningStockPanel = () => {
     const { toast } = useToast();
@@ -44,11 +45,10 @@ const OpeningStockPanel = () => {
     const [attrRows, setAttrRows] = useState([emptyAttrRow()]);
     const [bannerError, setBannerError] = useState('');
 
-    // Binding/Yard/Length are small, closed lookup catalogs (a handful of
-    // rows each in real usage) — fetched once, not searched server-side.
+    // Binding is a small, closed lookup catalog (a handful of rows in real
+    // usage) — fetched once, not searched server-side. Yard/Length are
+    // typed values instead (2026-09), no catalog fetch needed for them.
     const [bindings, setBindings] = useState([]);
-    const [yards, setYards] = useState([]);
-    const [lengths, setLengths] = useState([]);
     const [lookupsLoaded, setLookupsLoaded] = useState(false);
 
     const isRm = stockType === 'rm';
@@ -58,17 +58,11 @@ const OpeningStockPanel = () => {
     const loadLookups = useCallback(async () => {
         if (lookupsLoaded) return;
         try {
-            const [b, y, l] = await Promise.all([
-                productionApi.rewoundCoreBindings.getAll({ page_size: 200 }),
-                productionApi.rewoundCoreYards.getAll({ page_size: 200 }),
-                productionApi.rewoundCoreLengthMms.getAll({ page_size: 200 }),
-            ]);
+            const b = await productionApi.rewoundCoreBindings.getAll({ page_size: 200 });
             setBindings(b?.results ?? b ?? []);
-            setYards(y?.results ?? y ?? []);
-            setLengths(l?.results ?? l ?? []);
             setLookupsLoaded(true);
         } catch (err) {
-            toast.error(extractErrorMessage(err, 'Failed to load binding/yard/length options.'));
+            toast.error(extractErrorMessage(err, 'Failed to load binding options.'));
         }
     }, [lookupsLoaded, toast]);
 
@@ -118,8 +112,6 @@ const OpeningStockPanel = () => {
     }, []);
 
     const bindingOptions = bindings.map(b => ({ value: b.id, label: b.value }));
-    const yardOptions = yards.map(y => ({ value: y.id, label: y.value }));
-    const lengthOptions = lengths.map(l => ({ value: l.id, label: l.value }));
 
     const updateRmRow = (i, key, val) => setRmRows(rs => rs.map((r, idx) => idx === i ? { ...r, [key]: val } : r));
     const addRmRow = () => setRmRows(rs => [...rs, emptyRmRow()]);
@@ -172,14 +164,16 @@ const OpeningStockPanel = () => {
 
         const items = [];
         for (const r of attrRows) {
-            if (!r.binding_id || !r.yard_id || !r.length_mm_id) return setBannerError('Every row needs a binding, yard, and length.');
+            if (!r.binding_id) return setBannerError('Every row needs a binding.');
+            if (!r.yard_value || parseFloat(r.yard_value) <= 0) return setBannerError('Yard must be greater than 0.');
+            if (!r.length_mm_value || parseFloat(r.length_mm_value) <= 0) return setBannerError('Length (mm) must be greater than 0.');
             if (!r.shelf_id) return setBannerError('Every row needs a shelf.');
             if (!r.quantity || parseFloat(r.quantity) <= 0) return setBannerError('Quantity must be greater than 0.');
             if (!r.unit_cost || parseFloat(r.unit_cost) <= 0) return setBannerError('Unit cost must be greater than 0.');
             items.push({
                 binding_id: parseInt(r.binding_id),
-                yard_id: parseInt(r.yard_id),
-                length_mm_id: parseInt(r.length_mm_id),
+                yard_value: r.yard_value,
+                length_mm_value: r.length_mm_value,
                 shelf_id: parseInt(r.shelf_id),
                 quantity: parseFloat(r.quantity),
                 unit_cost: r.unit_cost,
@@ -318,21 +312,19 @@ const OpeningStockPanel = () => {
                                         />
                                     </div>
                                     <div className="md:col-span-3">
-                                        <Select
-                                            label="Yard"
-                                            value={row.yard_id}
-                                            onChange={(e) => updateAttrRow(i, 'yard_id', e.target.value)}
-                                            options={yardOptions}
-                                            placeholder="Select yard"
+                                        <Input
+                                            label="Yard" type="number" step="0.0001" min="0.0001"
+                                            value={row.yard_value}
+                                            onChange={(e) => updateAttrRow(i, 'yard_value', e.target.value)}
+                                            placeholder="e.g. 24"
                                         />
                                     </div>
                                     <div className="md:col-span-3">
-                                        <Select
-                                            label="Length (mm)"
-                                            value={row.length_mm_id}
-                                            onChange={(e) => updateAttrRow(i, 'length_mm_id', e.target.value)}
-                                            options={lengthOptions}
-                                            placeholder="Select length"
+                                        <Input
+                                            label="Length (mm)" type="number" step="0.0001" min="0.0001"
+                                            value={row.length_mm_value}
+                                            onChange={(e) => updateAttrRow(i, 'length_mm_value', e.target.value)}
+                                            placeholder="e.g. 100"
                                         />
                                     </div>
                                     <div className="md:col-span-3">

@@ -104,7 +104,7 @@ class OpeningWipFgStockTests(TestCase):
         from inventory.models import WipInventory, WipShelfStock
 
         recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
@@ -122,7 +122,7 @@ class OpeningWipFgStockTests(TestCase):
         from inventory.models import WipInventory
 
         item = {
-            "binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }
         create_opening_wip_stock(items=[item], user=self.admin)
@@ -140,9 +140,9 @@ class OpeningWipFgStockTests(TestCase):
 
         binding2, yard2, length_mm2 = self._make_lookups(suffix="2")
         recipes = create_opening_fg_stock(items=[
-            {"binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            {"binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
              "quantity": 5, "unit_cost": 10, "shelf_id": self.shelf.id},
-            {"binding_id": binding2.id, "yard_id": yard2.id, "length_mm_id": length_mm2.id,
+            {"binding_id": binding2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
              "quantity": 7, "unit_cost": 20, "shelf_id": self.shelf.id},
         ], user=self.admin)
 
@@ -158,12 +158,12 @@ class OpeningWipFgStockTests(TestCase):
         from production.models import WipProduct
 
         wip_recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
         binding2, yard2, length_mm2 = self._make_lookups(suffix="2")
         fg_recipes = create_opening_fg_stock(items=[{
-            "binding_id": binding2.id, "yard_id": yard2.id, "length_mm_id": length_mm2.id,
+            "binding_id": binding2.id, "yard_value": yard2.value, "length_mm_value": length_mm2.value,
             "quantity": 5, "unit_cost": 10, "shelf_id": self.shelf.id,
         }], user=self.admin)
 
@@ -177,7 +177,7 @@ class OpeningWipFgStockTests(TestCase):
         from production.models import WipProduct
 
         recipe = create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
         self.assertEqual(compute_labor_overhead_pool(recipe), Decimal("0"))
@@ -188,7 +188,7 @@ class OpeningWipFgStockTests(TestCase):
         from reports.selectors import get_inventory_valuation_report_data
 
         create_opening_wip_stock(items=[{
-            "binding_id": self.binding.id, "yard_id": self.yard.id, "length_mm_id": self.length_mm.id,
+            "binding_id": self.binding.id, "yard_value": self.yard.value, "length_mm_value": self.length_mm.value,
             "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 25, "shelf_id": self.shelf.id,
         }], user=self.admin)
 

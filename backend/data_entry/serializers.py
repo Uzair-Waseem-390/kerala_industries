@@ -117,13 +117,17 @@ class OpeningStockOrderReadSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class OpeningWipStockItemSerializer(serializers.Serializer):
-    binding_id   = serializers.IntegerField()
-    yard_id      = serializers.IntegerField()
-    length_mm_id = serializers.IntegerField()
-    stage        = serializers.ChoiceField(choices=["rewinding", "cutting"])
-    shelf_id     = serializers.IntegerField()
-    quantity     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
-    unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    binding_id      = serializers.IntegerField()
+    # Typed values, not lookup ids (2026-09) — get-or-created by value in
+    # production.services.opening_stock._get_lookups, same "if it already
+    # exists, reuse it and add quantity; otherwise create it" rule the
+    # WIP/FG product itself already follows.
+    yard_value      = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    length_mm_value = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    stage           = serializers.ChoiceField(choices=["rewinding", "cutting"])
+    shelf_id        = serializers.IntegerField()
+    quantity        = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    unit_cost       = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
 
 
 class OpeningWipStockWriteSerializer(serializers.Serializer):
@@ -163,11 +167,11 @@ class OpeningWipStockRecipeReadSerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class OpeningFgStockItemSerializer(serializers.Serializer):
-    binding_id   = serializers.IntegerField()
-    yard_id      = serializers.IntegerField()
-    length_mm_id = serializers.IntegerField()
-    shelf_id     = serializers.IntegerField()
-    quantity     = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    binding_id      = serializers.IntegerField()
+    yard_value      = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    length_mm_value = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
+    shelf_id        = serializers.IntegerField()
+    quantity        = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
     unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=0)
 
 
