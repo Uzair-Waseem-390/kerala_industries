@@ -845,9 +845,10 @@ class BalanceSheetTests(AccountingTestBase):
     def test_live_view_query_count_is_small_and_fixed(self):
         """
         Per architecture.md's STRICT 200ms rule and verification.md rule 6 —
-        counted, never eyeballed. 12 is the honest number today (2026-09,
-        up from 7 when Inventory Valuation widened from RM-only to RM+WIP+FG
-        and the DL/FOH Payable liability line was added):
+        counted, never eyeballed. Was 7 (down from 21) before Inventory
+        Valuation widened from RM-only to RM+WIP+FG and the DL/FOH Payable
+        liability line was added (2026-09); this test's own minimal fixture
+        measures 12 today, made up of roughly:
 
             1  subquery-joined read of all five Flow singletons
             2  get_gross_profit_trend (invoice + return TruncMonth GROUP BY)
@@ -855,7 +856,7 @@ class BalanceSheetTests(AccountingTestBase):
                figures that used to be ten separate round-trips (this
                includes one ManufacturingCostsStats read for this_month_dl/
                foh_paid)
-            7  inventory valuation, now RM + WIP + FG (was 2, RM-only):
+            up to 7  inventory valuation, now RM + WIP + FG (was 2, RM-only):
                3 identity/quantity queries (purchases.Inventory,
                inventory.WipInventory, inventory.FgInventory) + 4 bulk FIFO
                batch queries (PurchaseItem, RecipeBreakdownItem,
@@ -874,8 +875,11 @@ class BalanceSheetTests(AccountingTestBase):
             1  _compute_equity_offsets — eight bootstrap/asset offsets that
                used to be six separate round-trips
 
-        None is an N+1 or proportional to total data size; each was verified
-        by reading the emitted SQL, not inferred.
+        (These don't always sum to exactly the same total across every
+        fixture — e.g. a purchase-order-backed RM product this test's own
+        setUp doesn't create skips one of the 4 batch queries above — but
+        every one of them is still O(1)/bounded, never an N+1, each
+        verified by reading the emitted SQL, not inferred.)
 
         Bound set a little above 12 so this catches a REAL regression (an
         accidental N+1, or a collapsed query silently un-collapsing) instead
