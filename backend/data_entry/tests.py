@@ -196,3 +196,50 @@ class OpeningWipFgStockTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["type"], "wip_core")
         self.assertEqual(rows[0]["total_value"], Decimal("250"))
+
+    def test_yard_length_are_typed_values_not_lookup_ids(self):
+        """
+        2026-09: yard_value/length_mm_value are typed numbers, not
+        pre-existing lookup ids — a brand-new value creates the lookup row
+        (and the product) on the fly; the exact same typed value on a later
+        call reuses both instead of creating duplicates.
+        """
+        from production.models import RewoundCoreLengthMm, RewoundCoreYard, WipProduct
+        from production.services.opening_stock import create_opening_wip_stock
+        from inventory.models import WipInventory
+
+        self.assertFalse(RewoundCoreYard.objects.filter(value=Decimal("77.5")).exists())
+        self.assertFalse(RewoundCoreLengthMm.objects.filter(value=Decimal("133.25")).exists())
+
+        create_opening_wip_stock(items=[{
+            "binding_id": self.binding.id, "yard_value": "77.5", "length_mm_value": "133.25",
+            "stage": WipProduct.Stage.REWINDING, "quantity": 10, "unit_cost": 20, "shelf_id": self.shelf.id,
+        }], user=self.admin)
+
+        yard = RewoundCoreYard.objects.get(value=Decimal("77.5"))
+        length_mm = RewoundCoreLengthMm.objects.get(value=Decimal("133.25"))
+        wip = WipProduct.objects.get(binding=self.binding, yard=yard, length_mm=length_mm)
+        self.assertEqual(WipInventory.objects.get(product=wip).quantity, Decimal("10"))
+
+        # Same typed values again -> reuses the same lookup rows and product,
+        # just adds quantity — no duplicates created.
+        create_opening_wip_stock(items=[{
+            "binding_id": self.binding.id, "yard_value": "77.5", "length_mm_value": "133.25",
+            "stage": WipProduct.Stage.REWINDING, "quantity": 4, "unit_cost": 22, "shelf_id": self.shelf.id,
+        }], user=self.admin)
+
+        self.assertEqual(RewoundCoreYard.objects.filter(value=Decimal("77.5")).count(), 1)
+        self.assertEqual(RewoundCoreLengthMm.objects.filter(value=Decimal("133.25")).count(), 1)
+        self.assertEqual(WipProduct.objects.filter(binding=self.binding, yard=yard, length_mm=length_mm).count(), 1)
+        self.assertEqual(WipInventory.objects.get(product=wip).quantity, Decimal("14"))
+
+    def test_invalid_yard_value_raises_clean_validation_error(self):
+        from production.models import WipProduct
+        from production.services.opening_stock import create_opening_wip_stock
+
+        with self.assertRaises(ValidationError) as ctx:
+            create_opening_wip_stock(items=[{
+                "binding_id": self.binding.id, "yard_value": "not-a-number", "length_mm_value": "10",
+                "stage": WipProduct.Stage.REWINDING, "quantity": 1, "unit_cost": 1, "shelf_id": self.shelf.id,
+            }], user=self.admin)
+        self.assertIn("yard_value", ctx.exception.detail)
