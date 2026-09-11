@@ -19,6 +19,7 @@ stock that was never actually produced here.
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from purchases.services import next_reference
@@ -35,9 +36,9 @@ def _validate_items(items: list) -> None:
             raise ValidationError({"shelf_id": "A shelf is required for every opening stock item."})
         if not item.get("binding_id") or not item.get("yard_id") or not item.get("length_mm_id"):
             raise ValidationError({"items": "binding_id, yard_id, and length_mm_id are required for every item."})
-        if Decimal(str(item["quantity"])) <= 0:
+        if not item.get("quantity") or Decimal(str(item["quantity"])) <= 0:
             raise ValidationError({"quantity": "Quantity must be greater than zero."})
-        if Decimal(str(item["unit_cost"])) <= 0:
+        if not item.get("unit_cost") or Decimal(str(item["unit_cost"])) <= 0:
             raise ValidationError({"unit_cost": "Unit cost must be greater than zero."})
 
 
@@ -81,6 +82,7 @@ def create_opening_wip_stock(*, items: list, user) -> Recipe:
             recipe_type=Recipe.RecipeType.REWINDING,
             name="Opening Stock (Data Entry)",
             status=Recipe.Status.FINISHED,
+            finished_at=timezone.now(),
             is_data_entry=True,
             created_by=user, updated_by=user,
         )
@@ -148,6 +150,7 @@ def create_opening_fg_stock(*, items: list, user) -> list[Recipe]:
                 recipe_type=Recipe.RecipeType.PACKING,
                 name="Opening Stock (Data Entry)",
                 status=Recipe.Status.FINISHED,
+                finished_at=timezone.now(),
                 is_data_entry=True,
                 created_by=user, updated_by=user,
             )

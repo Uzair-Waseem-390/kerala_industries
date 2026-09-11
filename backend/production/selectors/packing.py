@@ -117,7 +117,16 @@ def get_packing_recipe_by_id(pk: int) -> Recipe:
 
 
 def get_all_packing_recipes(*, status: str = None, search: str = None) -> QuerySet:
-    qs = _packing_recipe_qs().filter(is_deleted=False, recipe_type=Recipe.RecipeType.PACKING)
+    """
+    Excludes is_data_entry=True by default — the synthetic "Opening Stock"
+    recipes data_entry's FG bootstrap creates (production.services.
+    opening_stock.create_opening_fg_stock, always recipe_type=PACKING) are
+    real, FIFO-consumable batch-bearing Recipe rows, but should never appear
+    in the Packing Recipes list as if real packing work happened — same
+    exclusion production.selectors.rewinding.get_all_recipes already
+    applies to the generic Recipes list.
+    """
+    qs = _packing_recipe_qs().filter(is_deleted=False, recipe_type=Recipe.RecipeType.PACKING, is_data_entry=False)
     if _clean(status):
         qs = qs.filter(status=_clean(status))
     if _clean(search):

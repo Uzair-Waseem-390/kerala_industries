@@ -107,7 +107,15 @@ def get_cutting_recipe_by_id(pk: int) -> Recipe:
 
 
 def get_all_cutting_recipes(*, status: str = None, search: str = None) -> QuerySet:
-    qs = _cutting_recipe_qs().filter(is_deleted=False, recipe_type=Recipe.RecipeType.CUTTING)
+    """
+    Excludes is_data_entry=True by default — see get_all_packing_recipes's
+    identical reasoning. Opening WIP stock's own recipes are always
+    recipe_type=REWINDING today (production.services.opening_stock
+    .create_opening_wip_stock, regardless of item stage), so this filter is
+    currently a no-op in practice, not a live leak — added anyway so the
+    exclusion doesn't silently depend on that detail never changing.
+    """
+    qs = _cutting_recipe_qs().filter(is_deleted=False, recipe_type=Recipe.RecipeType.CUTTING, is_data_entry=False)
     if _clean(status):
         qs = qs.filter(status=_clean(status))
     if _clean(search):
