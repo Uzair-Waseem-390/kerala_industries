@@ -17,6 +17,7 @@ import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import Pagination from '../../components/ui/Pagination';
 import InlineAlert from '../../components/ui/InlineAlert';
 import EmptyState from '../../components/ui/EmptyState';
+import Tabs from '../../components/ui/Tabs';
 
 const formatCurrency = (value) => {
     const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -31,6 +32,18 @@ const TYPE_BADGE = {
     wip_piece: { variant: 'info', label: 'WIP — Piece' },
     finished_goods: { variant: 'success', label: 'Finished Goods' },
 };
+
+// Same tab set/values AllInventoryPage already uses — the stat cards below
+// are server-computed from exactly the filtered rows (see
+// reports.views.InventoryValuationReportView), so switching tabs recomputes
+// them live, not just the table.
+const TYPE_TABS = [
+    { value: 'all', label: 'All' },
+    { value: 'raw_material', label: 'Raw Material' },
+    { value: 'wip_core', label: 'WIP — Cores' },
+    { value: 'wip_piece', label: 'WIP — Pieces' },
+    { value: 'finished_goods', label: 'Finished Goods' },
+];
 
 const columns = [
     { key: 'product_name', label: 'Product' },
@@ -56,18 +69,21 @@ const InventoryValuationReportPage = () => {
     const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
 
     const [searchTerm, setSearchTerm] = useState('');
+    const [activeType, setActiveType] = useState('all');
     const [printing, setPrinting] = useState(false);
 
-    // Point-in-time snapshot — no date filters, just an optional search.
+    // Point-in-time snapshot — no date filters, just an optional search +
+    // type filter.
     const fetchValuationPage = (params) => {
         const p = { ...params };
         if (searchTerm) p.search = searchTerm;
+        if (activeType !== 'all') p.type = activeType;
         return reportsApi.inventoryValuation.get(p);
     };
 
     const {
         data: results, meta, extra, page, setPage, loading, error, refetch,
-    } = usePaginatedList(fetchValuationPage, {}, 25, [searchTerm]);
+    } = usePaginatedList(fetchValuationPage, {}, 25, [searchTerm, activeType]);
 
     // Stats are computed server-side over the full filtered set (not just
     // the current page) and passed through as an extra top-level field.
@@ -86,7 +102,10 @@ const InventoryValuationReportPage = () => {
     const handlePrint = async () => {
         setPrinting(true);
         try {
-            await printReport('/reports/inventory-valuation/print/', searchTerm ? { search: searchTerm } : {});
+            const params = {};
+            if (searchTerm) params.search = searchTerm;
+            if (activeType !== 'all') params.type = activeType;
+            await printReport('/reports/inventory-valuation/print/', params);
         } catch (err) {
             toast.error(extractErrorMessage(err, 'Failed to print report'));
         } finally {
@@ -117,6 +136,12 @@ const InventoryValuationReportPage = () => {
                     Print
                 </Button>
             </div>
+
+            <Tabs
+                tabs={TYPE_TABS}
+                activeTab={activeType}
+                onChange={(value) => { setActiveType(value); setPage(1); }}
+            />
 
             {error && <InlineAlert variant="error" message={error} onRetry={refetch} />}
 

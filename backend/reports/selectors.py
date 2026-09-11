@@ -395,7 +395,7 @@ def get_profit_margin_report_stats_all_time() -> dict:
 # Inventory valuation report — live snapshot, no date filtering
 # ---------------------------------------------------------------------------
 
-def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
+def get_inventory_valuation_report_data(*, search: str = None, type_filter: str = None) -> list[dict]:
     """
     One row per product currently in stock — Raw Material, WIP (both
     stages), and Finished Goods alike — valued at FIFO cost from its
@@ -404,6 +404,12 @@ def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
     full_unit_cost_snapshot-else-unit_cost_snapshot fallback billing's FIFO
     (billing.services._run_fifo_fg) and production's own cost chain already
     use for WIP/FG batches.
+
+    type_filter: 'raw_material' | 'wip_core' | 'wip_piece' | 'finished_goods'
+    | None (all) — same 4 values AllInventoryPage/Lost Inventory Report
+    already use. Skips the other types' queries entirely rather than
+    fetching then discarding, so filtering to one type is strictly cheaper
+    than the unfiltered read, not just a smaller result set.
 
     Reads each type's own stock-of-record table directly — purchases.Inventory
     (RM), inventory.WipInventory (WIP), inventory.FgInventory (FG) — the same
@@ -436,21 +442,35 @@ def get_inventory_valuation_report_data(*, search: str = None) -> list[dict]:
         CuttingBreakdownItem, FgProduct, PackingOutputItem, RecipeBreakdownItem, WipProduct,
     )
 
-    rm_qs = Inventory.objects.filter(quantity__gt=0).select_related("product")
-    if _clean(search):
-        rm_qs = rm_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+    want_rm  = type_filter in (None, "raw_material")
+    want_wip = type_filter in (None, "wip_core", "wip_piece")
+    want_fg  = type_filter in (None, "finished_goods")
 
-    wip_qs = WipInventory.objects.filter(quantity__gt=0).select_related("product")
-    if _clean(search):
-        wip_qs = wip_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+    rm_invs, wip_invs, fg_invs = [], [], []
 
-    fg_qs = FgInventory.objects.filter(quantity__gt=0).select_related("product")
-    if _clean(search):
-        fg_qs = fg_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+    if want_rm:
+        rm_qs = Inventory.objects.filter(quantity__gt=0).select_related("product")
+        if _clean(search):
+            rm_qs = rm_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+        rm_invs = list(rm_qs)
 
-    rm_invs  = list(rm_qs)
-    wip_invs = list(wip_qs)
-    fg_invs  = list(fg_qs)
+    if want_wip:
+        wip_qs = WipInventory.objects.filter(quantity__gt=0).select_related("product")
+        if _clean(search):
+            wip_qs = wip_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+        # A single-stage filter (wip_core/wip_piece) narrows at the DB level
+        # instead of fetching both stages and discarding the other in Python.
+        if type_filter == "wip_core":
+            wip_qs = wip_qs.filter(product__stage=WipProduct.Stage.REWINDING)
+        elif type_filter == "wip_piece":
+            wip_qs = wip_qs.filter(product__stage=WipProduct.Stage.CUTTING)
+        wip_invs = list(wip_qs)
+
+    if want_fg:
+        fg_qs = FgInventory.objects.filter(quantity__gt=0).select_related("product")
+        if _clean(search):
+            fg_qs = fg_qs.filter(search_q(_clean(search), "product__name", "product__code"))
+        fg_invs = list(fg_qs)
 
     wip_core_ids  = [inv.product_id for inv in wip_invs if inv.product.stage == WipProduct.Stage.REWINDING]
     wip_piece_ids = [inv.product_id for inv in wip_invs if inv.product.stage == WipProduct.Stage.CUTTING]

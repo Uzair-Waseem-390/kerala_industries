@@ -355,6 +355,10 @@ class InventoryValuationReportView(generics.ListAPIView):
 
     Query params:
         search : product name/code (partial match, optional)
+        type   : raw_material|wip_core|wip_piece|finished_goods (optional,
+                 default all) — stats below are recomputed from exactly the
+                 filtered rows, so the summary cards always match what's
+                 currently on screen, not the all-time total.
 
     Response (paginated):
         {"count": int, "total_pages": int, "current_page": int, "page_size": int,
@@ -366,7 +370,10 @@ class InventoryValuationReportView(generics.ListAPIView):
     serializer_class   = InventoryValuationReportItemSerializer
 
     def get_queryset(self):
-        return get_inventory_valuation_report_data(search=self.request.query_params.get("search"))
+        return get_inventory_valuation_report_data(
+            search=self.request.query_params.get("search"),
+            type_filter=self.request.query_params.get("type"),
+        )
 
     def list(self, request, *args, **kwargs):
         rows = self.get_queryset()
@@ -884,11 +891,17 @@ class InventoryValuationReportPrintView(APIView):
 
     def get(self, request):
         search = request.query_params.get("search")
-        rows_data = get_inventory_valuation_report_data(search=search)
+        type_filter = request.query_params.get("type")
+        rows_data = get_inventory_valuation_report_data(search=search, type_filter=type_filter)
         stats = get_inventory_valuation_report_stats(rows_data)
         rows = InventoryValuationReportItemSerializer(rows_data, many=True).data
 
-        filter_description = f"Search: {search}" if search else "All products currently in stock"
+        from inventory.models import ProductRegistryEntry
+        type_label = dict(ProductRegistryEntry.Type.choices).get(type_filter)
+        parts = [f"Type: {type_label}"] if type_label else []
+        if search:
+            parts.append(f"Search: {search}")
+        filter_description = " | ".join(parts) if parts else "All products currently in stock"
 
         pdf_bytes, filename = generate_report_pdf_bytes(
             title="Inventory Valuation Report",

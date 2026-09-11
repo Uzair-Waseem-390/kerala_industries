@@ -370,7 +370,6 @@ class IncomeStatementPrintView(APIView):
         total_opex = (
             Decimal(data["expenses_paid"]) + Decimal(data["recurring_expenses_paid"])
             + Decimal(data["gst_paid"]) + Decimal(data["wht_paid"]) + Decimal(data["depreciation"])
-            + Decimal(data["direct_labor_paid"]) + Decimal(data["factory_overhead_paid"])
         )
 
         return [
@@ -395,8 +394,6 @@ class IncomeStatementPrintView(APIView):
                     {"label": "GST Paid", "amount": _fmt(data["gst_paid"])},
                     {"label": "WHT Paid", "amount": _fmt(data["wht_paid"])},
                     {"label": "Depreciation", "amount": _fmt(data["depreciation"])},
-                    {"label": "Direct Labor Paid", "amount": _fmt(data["direct_labor_paid"])},
-                    {"label": "Factory Overhead Paid", "amount": _fmt(data["factory_overhead_paid"])},
                     {"label": "Total Operating Expenses", "amount": _fmt(total_opex), "bold": True},
                 ],
             },
