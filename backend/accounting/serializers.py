@@ -127,6 +127,7 @@ class BalanceSheetLiabilitiesSerializer(serializers.Serializer):
     accounts_payable  = serializers.DecimalField(max_digits=20, decimal_places=4)
     gst_payable         = serializers.DecimalField(max_digits=20, decimal_places=4)
     wht_payable           = serializers.DecimalField(max_digits=20, decimal_places=4)
+    dl_foh_payable          = serializers.DecimalField(max_digits=20, decimal_places=4)
     total                   = serializers.DecimalField(max_digits=20, decimal_places=4)
 
 

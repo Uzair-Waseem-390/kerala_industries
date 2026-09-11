@@ -20,9 +20,21 @@ def get_business_worth() -> dict:
         - sales_tax_outstanding         (TaxFlow — GST owed to FBR)
         - wht_outstanding               (TaxFlow — WHT withheld from suppliers, not yet deposited)
         - recurring_expense_pending     (RecurringExpenseFlow — assigned but unpaid dues)
+        - dl_foh_payable                (manufacturing_costs — accrued-minus-paid DL/FOH,
+                                          same reconciling liability accounting.selectors
+                                          ._assemble_balance_sheet adds; see
+                                          manufacturing_costs.selectors.get_dl_foh_payable_balance.
+                                          Without this, inventory_value's WIP/FG figures
+                                          already capitalize DL/FOH cost that may not be paid
+                                          yet, overstating total_business_worth — and since
+                                          get_ownership_split divides each investor's stake by
+                                          this total, that overstatement silently understates
+                                          every investor's share_percent, which then gets
+                                          snapshotted forever onto MonthlyProfitInvestorShare.)
     """
     from assets.models import AssetFlow
     from cash_flow.models import CashFlow
+    from manufacturing_costs.selectors import get_dl_foh_payable_balance
     from recurring_expenses.models import RecurringExpenseFlow
     from reports.selectors import get_inventory_valuation_report_data, get_inventory_valuation_report_stats
     from taxes.models import TaxFlow
@@ -43,6 +55,7 @@ def get_business_worth() -> dict:
     sales_tax_outstanding        = tf.sales_tax_outstanding
     wht_outstanding              = tf.wht_outstanding
     recurring_expense_pending    = ref.total_pending_amount
+    dl_foh_payable                = get_dl_foh_payable_balance()
 
     # 2026-07-29: Sales Tax Outstanding and WHT Outstanding temporarily
     # excluded from the total per explicit request — see
@@ -56,6 +69,7 @@ def get_business_worth() -> dict:
         # - sales_tax_outstanding
         # - wht_outstanding
         - recurring_expense_pending
+        - dl_foh_payable
     )
 
     return {
@@ -67,6 +81,7 @@ def get_business_worth() -> dict:
         "sales_tax_outstanding"        : sales_tax_outstanding,
         "wht_outstanding"              : wht_outstanding,
         "recurring_expense_pending"    : recurring_expense_pending,
+        "dl_foh_payable"               : dl_foh_payable,
         "total_business_worth"         : total_business_worth,
     }
 

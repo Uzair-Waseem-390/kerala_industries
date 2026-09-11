@@ -26,6 +26,7 @@ class OwnershipSplitSerializer(serializers.Serializer):
     sales_tax_outstanding        = serializers.DecimalField(max_digits=20, decimal_places=4)
     wht_outstanding              = serializers.DecimalField(max_digits=20, decimal_places=4)
     recurring_expense_pending    = serializers.DecimalField(max_digits=20, decimal_places=4)
+    dl_foh_payable                = serializers.DecimalField(max_digits=20, decimal_places=4)
     total_business_worth         = serializers.DecimalField(max_digits=20, decimal_places=4)
 
     # Ownership split

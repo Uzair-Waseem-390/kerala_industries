@@ -22,14 +22,26 @@ class MonthlyProfit(models.Model):
     row here — profits.selectors.get_current_month_profit() computes it
     live and marks it provisional.
 
-    net_profit = net_gross_profit minus every deduction below (including
-    direct_labor_paid/factory_overhead_paid — real cash paid to employees/
-    machines/rent/electricity, same cash-basis treatment as every other
-    deduction here), plus every addition, plus disposal_gain_loss (itself
-    signed — a loss is already negative, so it's ADDED, not subtracted).
-    Not floored at 0 — a month with heavy losses can legitimately show
-    negative net profit, same "not floored" convention as the Profit/Margin
-    Report.
+    net_profit = net_gross_profit minus every deduction below, plus every
+    addition, plus disposal_gain_loss (itself signed — a loss is already
+    negative, so it's ADDED, not subtracted). Not floored at 0 — a month
+    with heavy losses can legitimately show negative net profit, same
+    "not floored" convention as the Profit/Margin Report.
+
+    direct_labor_paid/factory_overhead_paid (real cash paid to employees/
+    machines/rent/electricity) are computed and stored here for visibility,
+    but deliberately NOT subtracted in net_profit (2026-09) — that cost is
+    already recognized exactly once, via COGS, when the FG/WIP it helped
+    produce is sold (production.services._shared.compute_labor_overhead_pool
+    capitalizes it into full_unit_cost_snapshot at production time, same as
+    raw-material cost already only hits net_profit via COGS on sale, never
+    as a separate "materials_paid" deduction). Subtracting the cash payment
+    here too would double-count the same labor rupee: once on payment,
+    again as COGS when the batch sold. See the matching formula in
+    profits.selectors._compute_current_month_figures and
+    profits.services._finalize_month, and
+    manufacturing_costs.selectors.get_dl_foh_payable_balance for the
+    reconciling Balance Sheet liability this creates.
 
     Lost/found cash and lost/found inventory are stored as four SEPARATE
     figures, not netted against each other before storage — each is an
