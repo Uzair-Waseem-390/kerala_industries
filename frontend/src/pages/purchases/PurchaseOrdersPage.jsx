@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Plus, SlidersHorizontal, X, PackageSearch, Loader2 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { SlidersHorizontal, X, PackageSearch, Loader2 } from 'lucide-react';
 import { purchasesApi } from '../../services/purchasesApi';
 import Table from '../../components/ui/Table';
 import Button from '../../components/ui/Button';
@@ -8,25 +7,19 @@ import Tabs from '../../components/ui/Tabs';
 import SearchBar from '../../components/ui/SearchBar';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import FilterBar from '../../components/ui/FilterBar';
-import PurchaseOrderFormModal from '../../components/purchases/PurchaseOrderFormModal';
 import OrderStatusBadge from '../../components/purchases/OrderStatusBadge';
 import OrderPaymentStatusBadge from '../../components/purchases/OrderPaymentStatusBadge';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
-import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { useNavigate } from 'react-router-dom';
 
 const PurchaseOrdersPage = () => {
-    const { user } = useAuth();
-    const isAdmin = user?.role === 'admin' || user?.role === 'superuser';
     const navigate = useNavigate();
-    const { toast } = useToast();
 
     const [activeTab, setActiveTab] = useState('all');
-    const [showCreateModal, setShowCreateModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [showFilters, setShowFilters] = useState(false);
 
@@ -52,18 +45,6 @@ const PurchaseOrdersPage = () => {
         { value: 'confirmed', label: 'Confirmed' },
         { value: 'outstanding', label: 'Outstanding' },
     ];
-
-    const searchProducts = async (query) => {
-        const res = await purchasesApi.products.getAll({ search: query, page_size: 25 });
-        const results = res?.results ?? res ?? [];
-        return results.map(p => ({ value: p.id, label: `${p.code} - ${p.name}` }));
-    };
-
-    const searchSuppliers = async (query) => {
-        const res = await purchasesApi.suppliers.getAll({ search: query });
-        const results = res?.results ?? res ?? [];
-        return results.map(s => ({ value: s.id, label: `${s.name} (${s.code})` }));
-    };
 
     const handleApplyFilters = (filterValues) => {
         setFilters(filterValues);
@@ -128,13 +109,6 @@ const PurchaseOrdersPage = () => {
         navigate(`/purchases/orders/${order.id}`);
     };
 
-    const handleCreateOrder = async (payload) => {
-        await purchasesApi.orders.create(payload);
-        setShowCreateModal(false);
-        toast.success('Purchase order draft created');
-        fetchOrders();
-    };
-
     const filterConfig = [
         { name: 'supplier_name', label: 'Supplier Name', type: 'text' },
         { name: 'supplier_code', label: 'Supplier Code', type: 'text' },
@@ -179,14 +153,6 @@ const PurchaseOrdersPage = () => {
                     <h1 className="text-3xl font-bold text-neutral-900">Purchase Orders</h1>
                     <p className="text-neutral-500 mt-1">Create and manage purchase orders</p>
                 </div>
-                {isAdmin && (
-                    <Button
-                        onClick={() => setShowCreateModal(true)}
-                        icon={Plus}
-                    >
-                        Create Order
-                    </Button>
-                )}
             </div>
 
             {error && (
@@ -265,16 +231,6 @@ const PurchaseOrdersPage = () => {
                     onPageChange={setPage}
                 />
             )}
-
-            <PurchaseOrderFormModal
-                isOpen={showCreateModal}
-                onClose={() => setShowCreateModal(false)}
-                onSubmit={handleCreateOrder}
-                onSearchProducts={searchProducts}
-                onSearchSuppliers={searchSuppliers}
-                title="Create Purchase Order"
-                submitLabel="Create Draft"
-            />
         </div>
     );
 };
