@@ -84,26 +84,41 @@ and `dl_foh_payable` (this reconciling figure) are always computed and
 stored — nothing here is optional at the data layer. What's optional is
 whether either one is *shown* on a given screen.
 
-## If the client doesn't want to see this line
+## Status (2026-09): excluded from both totals, per explicit client request
 
-The underlying math must stay — removing `dl_foh_payable` from the Balance
-Sheet/Business Worth totals would bring back the exact imbalance this fix
-was built to close. What can safely change is **display only**, the same
-"comment out, don't delete" approach already used for Sales Tax/WHT
-Outstanding in `how_to_restore_tax_outstanding_in_business_worth.md`:
+The client didn't just want the line hidden — they explicitly said they
+don't want `dl_foh_payable` factored into Business Worth or the Balance
+Sheet at all ("we don't need it here"). Current state:
 
-- Keep `dl_foh_payable` inside the `total_business_worth`/Balance Sheet
-  **arithmetic** (both `_assemble_balance_sheet` and `get_business_worth`) —
-  the totals must stay correct.
-- Optionally drop the standalone `<Line>`/`<StatBox>` line item from
-  `BalanceSheetPage.jsx`/`BusinessWorthPage.jsx` if a labeled "Accrued
-  DL/FOH" liability reads as more internal-accounting detail than a client
-  wants to see — the totals below it (`Total Liabilities`, `Total Business
-  Worth`) already have it folded in correctly either way, so hiding the
-  line loses explainability, not correctness.
-- Do **not** remove the field from either serializer
-  (`accounting.serializers.BalanceSheetLiabilitiesSerializer`,
-  `profits.serializers.OwnershipSplitSerializer`) even if the frontend line
-  is hidden — the API response staying complete costs nothing and keeps a
-  future frontend change (or a support investigation) from having to redo
-  the same plumbing work.
+- `accounting.selectors._assemble_balance_sheet`'s `total_liabilities` no
+  longer includes `dl_foh_payable` (the term is commented out, not
+  deleted).
+- `profits.selectors.get_business_worth`'s `total_business_worth` no
+  longer subtracts `dl_foh_payable` (same commented-out treatment already
+  used for `sales_tax_outstanding`/`wht_outstanding` there).
+- `dl_foh_payable` is still **computed and returned** in both dicts/
+  serializers (`accounting.serializers.BalanceSheetLiabilitiesSerializer`,
+  `profits.serializers.OwnershipSplitSerializer`) — nothing was removed at
+  the data layer, only from the two totals.
+- Both frontend lines (`BalanceSheetPage.jsx`, `BusinessWorthPage.jsx`) are
+  also commented out (display-only, was already done first before the
+  calculation exclusion was requested).
+
+**Known consequence, accepted by the client**: the Balance Sheet's
+`is_balanced`/`balance_check` will no longer be exactly zero whenever
+there's an outstanding accrued-vs-paid DL/FOH gap (a recipe finished with
+cost accrued into inventory but the wages/overhead not yet paid, or vice
+versa) — `balance_check` will land exactly on `dl_foh_payable`'s value in
+that scenario, since nothing else absorbs the gap anymore. This is the
+expected, understood trade-off of the exclusion, not a bug —
+`accounting.tests.DlFohPayableReconciliationTests` documents and asserts
+this exact behavior.
+
+## To fully reverse (restore both totals)
+
+Un-comment the `- dl_foh_payable` line in
+`profits.selectors.get_business_worth`'s `total_business_worth` formula,
+and restore `+ dl_foh_payable` to `accounting.selectors
+._assemble_balance_sheet`'s `total_liabilities` formula. The frontend
+display lines and `DlFohPayableReconciliationTests` would also need
+restoring to their pre-2026-09 form (see git history).

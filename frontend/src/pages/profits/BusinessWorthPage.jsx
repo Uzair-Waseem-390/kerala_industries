@@ -106,7 +106,12 @@ const BusinessWorthPage = () => {
             // { name: 'Sales Tax Outstanding', value: -parseFloat(data.sales_tax_outstanding), type: 'liability' },
             // { name: 'WHT Outstanding', value: -parseFloat(data.wht_outstanding), type: 'liability' },
             { name: 'Recurring Exp. Pending', value: -parseFloat(data.recurring_expense_pending), type: 'liability' },
-            { name: 'Manufacturing Cost Payable (Accrued DL/FOH)', value: -parseFloat(data.dl_foh_payable), type: 'liability' },
+            // Manufacturing Cost Payable (Accrued DL/FOH) hidden from client-facing
+            // screens per client request (2026-09) — see
+            // backend/profits/dl_foh_payable_explained.md to reverse. The
+            // underlying total_business_worth/ownership-split arithmetic still
+            // folds dl_foh_payable in correctly; only this display line is hidden.
+            // { name: 'Manufacturing Cost Payable (Accrued DL/FOH)', value: -parseFloat(data.dl_foh_payable), type: 'liability' },
         ];
     }, [data]);
 
@@ -254,11 +259,14 @@ const BusinessWorthPage = () => {
                             {/* <StatBox label="Sales Tax Outstanding" value={data.sales_tax_outstanding} tone="red" sign="−" subtitle="GST still owed to FBR" /> */}
                             {/* <StatBox label="WHT Outstanding" value={data.wht_outstanding} tone="red" sign="−" subtitle="Withheld from suppliers, not deposited" /> */}
                             <StatBox label="Recurring Exp. Pending" value={data.recurring_expense_pending} tone="red" sign="−" subtitle="Assigned dues, not yet paid" />
-                            {/* No fixed sign prop — unlike the others above, this can genuinely
+                            {/* Manufacturing Cost Payable (Accrued DL/FOH) hidden from
+                                client-facing screens per client request (2026-09) — see
+                                backend/profits/dl_foh_payable_explained.md to reverse.
+                                No fixed sign prop — unlike the others above, this can genuinely
                                 go negative (paid ahead of what's been accrued into production),
                                 in which case it behaves like a credit, not a liability; fmt()
                                 already prefixes "-" for a negative value on its own. */}
-                            <StatBox label="Manufacturing Cost Payable" value={data.dl_foh_payable} tone="red" subtitle="Accrued DL/FOH minus cash already paid" />
+                            {/* <StatBox label="Manufacturing Cost Payable" value={data.dl_foh_payable} tone="red" subtitle="Accrued DL/FOH minus cash already paid" /> */}
                         </div>
                     </div>
 

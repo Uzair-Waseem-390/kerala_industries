@@ -17,20 +17,21 @@ def get_business_worth() -> dict:
         + customer_outstanding          (CashFlow — accounts receivable)
     Liabilities (subtracted):
         - supplier_payable_outstanding  (CashFlow — accounts payable)
-        - sales_tax_outstanding         (TaxFlow — GST owed to FBR)
-        - wht_outstanding               (TaxFlow — WHT withheld from suppliers, not yet deposited)
+        - sales_tax_outstanding         (TaxFlow — GST owed to FBR — currently excluded
+                                          from the total, see profits/how_to_restore_tax
+                                          _outstanding_in_business_worth.md)
+        - wht_outstanding               (TaxFlow — same exclusion as above)
         - recurring_expense_pending     (RecurringExpenseFlow — assigned but unpaid dues)
-        - dl_foh_payable                (manufacturing_costs — accrued-minus-paid DL/FOH,
-                                          same reconciling liability accounting.selectors
-                                          ._assemble_balance_sheet adds; see
-                                          manufacturing_costs.selectors.get_dl_foh_payable_balance.
-                                          Without this, inventory_value's WIP/FG figures
-                                          already capitalize DL/FOH cost that may not be paid
-                                          yet, overstating total_business_worth — and since
-                                          get_ownership_split divides each investor's stake by
-                                          this total, that overstatement silently understates
-                                          every investor's share_percent, which then gets
-                                          snapshotted forever onto MonthlyProfitInvestorShare.)
+
+    dl_foh_payable (manufacturing_costs — accrued-minus-paid DL/FOH,
+    accounting.selectors._assemble_balance_sheet's matching reconciling
+    liability; see manufacturing_costs.selectors.get_dl_foh_payable_balance
+    and profits/dl_foh_payable_explained.md) is still computed and
+    returned below, but is NOT subtracted from total_business_worth —
+    excluded per explicit client request (2026-09). Its absence means
+    inventory_value's WIP/FG figures can capitalize DL/FOH cost that isn't
+    fully offset here, which the ownership split (dividing each investor's
+    stake by this total) inherits — accepted as intended, not a bug.
     """
     from assets.models import AssetFlow
     from cash_flow.models import CashFlow
@@ -60,6 +61,14 @@ def get_business_worth() -> dict:
     # 2026-07-29: Sales Tax Outstanding and WHT Outstanding temporarily
     # excluded from the total per explicit request — see
     # profits/how_to_restore_tax_outstanding_in_business_worth.md to reverse.
+    # 2026-09: dl_foh_payable excluded from the total per explicit client
+    # request ("we don't need it here") — see
+    # profits/dl_foh_payable_explained.md for what this reconciling figure
+    # represents. Since get_ownership_split divides every investor's
+    # current_worth by total_business_worth, excluding it means
+    # inventory_value's already-capitalized-but-not-yet-paid DL/FOH cost is
+    # no longer offset here — accepted as the intended new behavior, not a
+    # bug.
     total_business_worth = (
         cash_in_hand
         + inventory_value
@@ -69,7 +78,7 @@ def get_business_worth() -> dict:
         # - sales_tax_outstanding
         # - wht_outstanding
         - recurring_expense_pending
-        - dl_foh_payable
+        # - dl_foh_payable
     )
 
     return {

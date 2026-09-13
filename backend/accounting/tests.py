@@ -698,24 +698,33 @@ class IncomeStatementTests(AccountingTestBase):
 
 class DlFohPayableReconciliationTests(AccountingTestBase):
     """
-    Verifies the Accrued Manufacturing Cost Payable line (2026-09) actually
-    reconciles the Balance Sheet, since DL/FOH cash payment is no longer
-    subtracted directly from net_profit (see profits.selectors
+    Accrued Manufacturing Cost Payable (2026-09). DL/FOH cash payment is no
+    longer subtracted directly from net_profit (see profits.selectors
     ._compute_current_month_figures) — that cost is meant to hit the books
-    exactly once, via COGS when the batch it funded sells, with this
-    liability line covering the gap while it's unsold/unmatched. A full
-    recipe-finish pipeline (Rewinding/Cutting/Packing) isn't needed to prove
-    the reconciliation formula itself — this exercises
-    manufacturing_costs.selectors.get_dl_foh_payable_balance and the Balance
-    Sheet's use of it directly, the same way ProfitsCombinedQueryEquivalenceTests
-    exercises profits' figures without needing a full invoice/return pipeline
-    for every case.
+    exactly once, via COGS when the batch it funded sells. dl_foh_payable
+    is the reconciling figure for that gap, still computed and returned by
+    both get_balance_sheet_live and profits.selectors.get_business_worth,
+    but per explicit client request (2026-09) it is NO LONGER subtracted
+    from either total_liabilities or total_business_worth — see
+    profits/dl_foh_payable_explained.md. A full recipe-finish pipeline
+    (Rewinding/Cutting/Packing) isn't needed to prove the formula itself —
+    this exercises manufacturing_costs.selectors.get_dl_foh_payable_balance
+    and the Balance Sheet's (non-)use of it directly, the same way
+    ProfitsCombinedQueryEquivalenceTests exercises profits' figures without
+    needing a full invoice/return pipeline for every case.
     """
 
-    def test_balance_sheet_balances_when_cash_paid_exceeds_accrued(self):
-        """Cash paid ahead of what's been accrued into production — the
-        exact real-data scenario that first surfaced this gap (paid FOH
-        cash with no recipe finished yet to accrue it into)."""
+    def test_dl_foh_payable_reported_but_not_folded_into_balance_sheet_total(self):
+        """
+        Cash paid ahead of what's been accrued into production — the exact
+        real-data scenario that first surfaced this gap (paid FOH cash with
+        no recipe finished yet to accrue it into). Before the 2026-09
+        exclusion, dl_foh_payable being folded into total_liabilities kept
+        the sheet balanced despite this cash outflow having no matching
+        accrual/inventory movement; now that it's excluded, balance_check
+        is expected to land exactly on -dl_foh_payable (proving the figure
+        is still computed correctly — it's just no longer netted in).
+        """
         from manufacturing_costs.models import Machine, ManufacturingCostsStats
         from manufacturing_costs.selectors import get_dl_foh_payable_balance
         from manufacturing_costs.services import create_machine, create_payment
@@ -734,7 +743,10 @@ class DlFohPayableReconciliationTests(AccountingTestBase):
 
         data = get_balance_sheet_live()
         self.assertEqual(data["liabilities"]["dl_foh_payable"], Decimal("-500"))
-        self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
+        # No longer folded into liabilities.total — balance_check now shows
+        # the exact gap this figure used to absorb, on purpose.
+        self.assertEqual(data["balance_check"], Decimal("-500"))
+        self.assertFalse(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
 
     def test_dl_foh_payable_is_accrued_minus_paid(self):
         """
