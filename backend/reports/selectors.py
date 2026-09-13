@@ -394,6 +394,26 @@ def get_profit_margin_report_stats_all_time() -> dict:
 # ---------------------------------------------------------------------------
 # Inventory valuation report — live snapshot, no date filtering
 # ---------------------------------------------------------------------------
+# Module-level (not nested in get_inventory_valuation_report_data) so
+# get_product_avg_unit_cost — the single-product cost lookup rates' price
+# modal uses — can reuse the exact same batch-value math without
+# duplicating it.
+
+def _rm_value(batches):
+    total = Decimal("0")
+    for batch in batches:
+        unit_cost = batch.total_price / batch.quantity if batch.quantity else batch.unit_price
+        total += batch.remaining_quantity * unit_cost
+    return total
+
+
+def _snapshot_value(batches):
+    total = Decimal("0")
+    for batch in batches:
+        unit_cost = batch.full_unit_cost_snapshot if batch.full_unit_cost_snapshot is not None else batch.unit_cost_snapshot
+        total += batch.remaining_quantity * (unit_cost or Decimal("0"))
+    return total
+
 
 def get_inventory_valuation_report_data(*, search: str = None, type_filter: str = None) -> list[dict]:
     """
@@ -507,20 +527,6 @@ def get_inventory_valuation_report_data(*, search: str = None, type_filter: str 
         "fg_product_id",
     )
 
-    def _rm_value(batches):
-        total = Decimal("0")
-        for batch in batches:
-            unit_cost = batch.total_price / batch.quantity if batch.quantity else batch.unit_price
-            total += batch.remaining_quantity * unit_cost
-        return total
-
-    def _snapshot_value(batches):
-        total = Decimal("0")
-        for batch in batches:
-            unit_cost = batch.full_unit_cost_snapshot if batch.full_unit_cost_snapshot is not None else batch.unit_cost_snapshot
-            total += batch.remaining_quantity * (unit_cost or Decimal("0"))
-        return total
-
     rows = []
     for inv in rm_invs:
         total_value = _rm_value(rm_batches.get(inv.product_id, []))
@@ -560,6 +566,51 @@ def get_inventory_valuation_report_data(*, search: str = None, type_filter: str 
 
     rows.sort(key=lambda row: row["product_name"])
     return rows
+
+
+def get_product_avg_unit_cost(*, rm_product_id: int = None, fg_product_id: int = None) -> dict:
+    """
+    Single-product version of get_inventory_valuation_report_data's cost
+    math — current weighted-average unit cost for exactly one RM or FG
+    product, live from its remaining FIFO/snapshot batches. Used by
+    rates.views.ProductCostView (rates' "show COGS while setting/editing a
+    price" feature). Exactly one of rm_product_id/fg_product_id, mirroring
+    rates' own dual-nullable-FK convention
+    (rates.selectors.get_rate_by_product_id). No WIP path — rates never
+    prices a WIP product.
+
+    Two queries total (one Inventory/FgInventory row, one batch list) —
+    cheap and O(1) w.r.t. catalog size, unlike the bulk report this reuses
+    math from. has_stock=False (zero remaining batches — a fully sold/
+    consumed product) is a real, expected case the caller must handle
+    explicitly rather than showing a misleading Rs 0.00.
+    """
+    if rm_product_id:
+        inv = Inventory.objects.filter(product_id=rm_product_id).first()
+        quantity_on_hand = inv.quantity if inv else Decimal("0")
+        batches = PurchaseItem.objects.filter(
+            product_id=rm_product_id, is_deleted=False,
+            order__status=PurchaseOrder.Status.CONFIRMED, remaining_quantity__gt=0,
+        )
+        total_value = _rm_value(batches)
+    else:
+        from inventory.models import FgInventory
+        from production.models import PackingOutputItem
+
+        inv = FgInventory.objects.filter(product_id=fg_product_id).first()
+        quantity_on_hand = inv.quantity if inv else Decimal("0")
+        batches = PackingOutputItem.objects.filter(
+            fg_product_id=fg_product_id, is_deleted=False, remaining_quantity__gt=0,
+        )
+        total_value = _snapshot_value(batches)
+
+    avg_unit_cost = (total_value / quantity_on_hand) if quantity_on_hand else Decimal("0")
+    return {
+        "quantity_on_hand": quantity_on_hand,
+        "avg_unit_cost": avg_unit_cost,
+        "total_value": total_value,
+        "has_stock": quantity_on_hand > 0,
+    }
 
 
 def get_inventory_valuation_report_stats(rows: list) -> dict:

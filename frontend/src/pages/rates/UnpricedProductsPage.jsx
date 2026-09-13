@@ -134,6 +134,7 @@ const UnpricedProductsPage = () => {
                 }}
                 onSubmit={handleSubmit}
                 product={selectedProduct}
+                productType={selectedProductType}
                 existingRate={null}
                 loading={formLoading}
             />

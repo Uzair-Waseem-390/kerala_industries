@@ -102,3 +102,14 @@ class ProductRateCreateSerializer(ProductRateBaseWriteSerializer):
 class ProductRateUpdateSerializer(ProductRateBaseWriteSerializer):
     """Used for PATCH — only selling_price + note, product is immutable."""
     pass
+
+
+# ---------------------------------------------------------------------------
+# Product cost (COGS) — read-only, shown in the set/edit-price modal
+# ---------------------------------------------------------------------------
+
+class ProductCostSerializer(serializers.Serializer):
+    quantity_on_hand = serializers.DecimalField(max_digits=14, decimal_places=4)
+    avg_unit_cost    = serializers.DecimalField(max_digits=14, decimal_places=4)
+    total_value      = serializers.DecimalField(max_digits=18, decimal_places=4)
+    has_stock        = serializers.BooleanField()

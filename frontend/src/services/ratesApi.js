@@ -24,4 +24,7 @@ export const ratesApi = {
 
     // Get price history for a product. productType is 'rm' or 'fg'.
     getHistory: (productType, productId, params) => api.get(`/rates/history/${productType}/${productId}/`, { params }),
+
+    // Current COGS/avg-unit-cost for a product. productType is 'rm' or 'fg'.
+    getCost: (productType, productId) => api.get(`/rates/cost/${productType}/${productId}/`),
 };

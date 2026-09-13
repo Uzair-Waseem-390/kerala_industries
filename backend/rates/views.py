@@ -1,8 +1,9 @@
 from rest_framework import generics, serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from .permissions import IsAdminOrSuperuserOrReadOnly
+from .permissions import IsAdminOrSuperuser, IsAdminOrSuperuserOrReadOnly
 from .selectors import (
     get_all_rates,
     get_history_for_product,
@@ -10,6 +11,7 @@ from .selectors import (
     get_unpriced_products,
 )
 from .serializers import (
+    ProductCostSerializer,
     ProductRateCreateSerializer,
     ProductRateHistorySerializer,
     ProductRateReadSerializer,
@@ -159,3 +161,37 @@ class ProductRateHistoryView(generics.ListAPIView):
         if product_type == "fg":
             return get_history_for_product(fg_product_id=product_id)
         return get_history_for_product(rm_product_id=product_id)
+
+
+# ---------------------------------------------------------------------------
+# Product cost (COGS) — shown in the set/edit-price modal while an
+# admin/superuser is choosing a selling price. Read-only, no side effects.
+# ---------------------------------------------------------------------------
+
+class ProductCostView(APIView):
+    """
+    GET /rates/cost/<product_type>/<product_id>/
+    product_type is "rm" or "fg". Current weighted-average unit cost from
+    remaining FIFO/snapshot batches (reports.selectors
+    .get_product_avg_unit_cost) — same figure the Inventory Valuation
+    Report shows, just for one product. Admin/superuser only (stricter than
+    the price-history endpoint above): cost is more sensitive than price
+    history, and this is only ever called from the already-admin-only
+    price-editing modal.
+    """
+
+    permission_classes = [IsAdminOrSuperuser]
+
+    def get(self, request, product_type, product_id):
+        from reports.selectors import get_product_avg_unit_cost
+
+        if product_type == "fg":
+            from production.selectors import get_fg_product_by_id
+            get_fg_product_by_id(product_id)  # 404s if missing/deleted
+            data = get_product_avg_unit_cost(fg_product_id=product_id)
+        else:
+            from purchases.selectors import get_product_by_id
+            get_product_by_id(product_id)  # 404s if missing/deleted
+            data = get_product_avg_unit_cost(rm_product_id=product_id)
+
+        return Response(ProductCostSerializer(data).data)

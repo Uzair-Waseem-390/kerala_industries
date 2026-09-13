@@ -14,7 +14,7 @@ from users.models import User
 from .models import ProductRate, ProductRateHistory
 from .selectors import get_price_at_date
 from .services import create_rate, update_rate
-from .views import ProductRateHistoryView, ProductRateListCreateView
+from .views import ProductCostView, ProductRateHistoryView, ProductRateListCreateView
 
 
 def make_admin(email="admin@example.com"):
@@ -162,6 +162,76 @@ class PriceAtDateTests(RatesTestBase):
         self.assertIsNone(get_price_at_date(rm_product_id=product.id, at=before_any))
         self.assertEqual(get_price_at_date(rm_product_id=product.id, at=between).selling_price, Decimal("100"))
         self.assertEqual(get_price_at_date(rm_product_id=product.id, at=now).selling_price, Decimal("150"))
+
+
+class ProductCostEndpointTests(RatesTestBase):
+    """
+    GET /rates/cost/<product_type>/<product_id>/ — the COGS figure shown in
+    RateFormModal while setting/editing a price (reports.selectors
+    .get_product_avg_unit_cost). Admin/superuser only — stricter than the
+    price-history endpoint above.
+    """
+
+    def make_stocked_product(self, code="P001", quantity=10, unit_price="50"):
+        from purchases.services import (
+            confirm_purchase_order, create_purchase_order, create_supplier,
+            set_purchase_item_shelf_allocations,
+        )
+
+        product = self.make_product(code=code)
+        supplier = create_supplier(name="Test Supplier", code=f"SUP-{code}", user=self.admin)
+        order = create_purchase_order(
+            supplier_id=supplier.id,
+            items=[{"product_id": product.id, "quantity": quantity, "unit_price": Decimal(unit_price)}],
+            user=self.admin,
+        )
+        for item in order.items.all():
+            set_purchase_item_shelf_allocations(
+                purchase_item_id=item.id,
+                allocations=[{"shelf_id": self.shelf.id, "quantity": item.quantity}],
+                user=self.admin,
+            )
+        confirm_purchase_order(order_id=order.id, user=self.admin)
+        return product
+
+    def test_returns_avg_unit_cost_for_stocked_product(self):
+        product = self.make_stocked_product(quantity=10, unit_price="50")
+
+        request = self.factory.get(f"/rates/cost/rm/{product.id}/")
+        force_authenticate(request, user=self.admin)
+        response = ProductCostView.as_view()(request, product_type="rm", product_id=product.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["avg_unit_cost"], "50.0000")
+        self.assertEqual(response.data["quantity_on_hand"], "10.0000")
+        self.assertTrue(response.data["has_stock"])
+
+    def test_zero_stock_product_reports_no_cost_data(self):
+        product = self.make_product(code="P002")
+
+        request = self.factory.get(f"/rates/cost/rm/{product.id}/")
+        force_authenticate(request, user=self.admin)
+        response = ProductCostView.as_view()(request, product_type="rm", product_id=product.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["has_stock"])
+        self.assertEqual(response.data["avg_unit_cost"], "0.0000")
+
+    def test_normal_user_cannot_view_cost(self):
+        product = self.make_stocked_product(code="P003")
+
+        request = self.factory.get(f"/rates/cost/rm/{product.id}/")
+        force_authenticate(request, user=make_normal_user())
+        response = ProductCostView.as_view()(request, product_type="rm", product_id=product.id)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_unknown_product_returns_404(self):
+        request = self.factory.get("/rates/cost/rm/999999/")
+        force_authenticate(request, user=self.admin)
+        response = ProductCostView.as_view()(request, product_type="rm", product_id=999999)
+
+        self.assertEqual(response.status_code, 404)
 
 
 class RateHistoryEndpointTests(RatesTestBase):

@@ -163,6 +163,7 @@ const RatesPage = () => {
                 }}
                 onSubmit={handleSubmit}
                 product={selectedProduct}
+                productType={selectedProductType}
                 existingRate={selectedRate}
                 loading={formLoading}
             />
