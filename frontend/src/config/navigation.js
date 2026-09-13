@@ -7,15 +7,18 @@ import {
     Repeat, Tag, Send, Calendar, Receipt, Banknote, PackageX, RotateCcw,
     LineChart, TrendingDown, IdCard, ArrowDownCircle, Handshake, Trash2,
     Gem, Archive, CreditCard, History, Landmark, ArrowLeftRight, FileBarChart, Scale,
-    Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Layers, Scissors, PackageCheck,
+    Wallet2, SlidersHorizontal, PackagePlus, Boxes, FlaskConical, Scissors,
     PackageOpen, HardHat, Cog, ListChecks,
 } from 'lucide-react';
 
 export const mainNavigation = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
-    // Rates is viewable by every role. Inventory moved to navGroups below —
-    // it's now a collection (Raw Material / WIP / Finished Goods) instead
-    // of a single flat link.
+    // Sole inventory nav entry (2026-09) — client wants just this page, not
+    // the separate Raw Material/WIP/Finished Goods sub-tabs the old
+    // 'inventory' navGroup offered; AllInventoryPage already covers all
+    // three in one place. Those routes/pages still exist, just unlinked.
+    { name: 'All Inventory', path: '/inventory/all', icon: Boxes, adminOnly: true },
+    // Rates is viewable by every role.
     { name: 'Rates', path: '/rates', icon: DollarSign },
     // Cash Calculator — available to all authenticated roles
     { name: 'Cash Calculator', path: '/cash-calculator', icon: Calculator },
@@ -24,21 +27,6 @@ export const mainNavigation = [
 ];
 
 export const navGroups = [
-    {
-        // Not adminOnly — matches Inventory's old universal visibility as a
-        // flat mainNavigation link. WIP/Finished Goods stay admin-only
-        // (WIP inventory previously lived under the admin-only Production
-        // group; Finished Goods is new and follows the same default).
-        key: 'inventory',
-        label: 'Inventory',
-        icon: Store,
-        items: [
-            { name: 'All Inventory', path: '/inventory/all', icon: Boxes, adminOnly: true },
-            { name: 'Raw Material', path: '/purchases/inventory', icon: Package },
-            { name: 'WIP', path: '/production/wip-inventory', icon: Layers, adminOnly: true },
-            { name: 'Finished Goods', path: '/inventory/finished-goods', icon: PackageCheck, adminOnly: true },
-        ],
-    },
     {
         // Ledger app is admin/superuser-only end to end
         key: 'ledger',
