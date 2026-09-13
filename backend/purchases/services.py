@@ -393,40 +393,54 @@ def move_shelf_stock(*, from_shelf_id: int, to_shelf_id: int, product_id: int, q
 # Jumbo Name / Core Name / Packing Size / Carton Size ONLY: the moment one
 # of these four is added, its Product variant is created immediately
 # (reusing get_or_create_product_variant, so variant_key computation, the
-# IntegrityError/soft-delete-race handling, the ProductRegistryEntry, and
-# the rates unpriced-queue side effect all stay in the single place that
-# already owns them), keyed on that one attribute alone (Core Name's
-# variant leaves core_length/core_thickness unset, same shape as Jumbo's
-# single-attribute variant) — plus an Inventory row at 0 quantity, via
-# sync_inventory(quantity_delta=0), so the new product shows up in the
-# Inventory list immediately instead of only after a first purchase
-# creates the row. Core Length and Core Thickness do NOT auto-generate —
-# per explicit user request, those stay on the original "created lazily by
-# an actual purchase" behavior (get_or_create_product_variant, called from
-# create_core_purchase with the full name+length+thickness combination).
+# IntegrityError/soft-delete-race handling, and the ProductRegistryEntry
+# all stay in the single place that already owns them), keyed on that one
+# attribute alone (Core Name's variant leaves core_length/core_thickness
+# unset, same shape as Jumbo's single-attribute variant). Core Length and
+# Core Thickness do NOT auto-generate — per explicit user request, those
+# stay on the original "created lazily by an actual purchase" behavior
+# (get_or_create_product_variant, called from create_core_purchase with the
+# full name+length+thickness combination).
+#
+# Deliberately NOT done here (per explicit user request, 2026-09): no
+# Inventory row and no rates-unpriced-queue entry. The Product itself
+# exists (so it's a real, selectable catalog row the moment the attribute
+# is added), but it must not show up in the Inventory list or the Rates
+# "needs a price" queue until real stock actually exists for it — a
+# purchase (get_or_create_product_variant's normal purchase-time callers,
+# which still create the Inventory row via sync_inventory and still queue
+# it for pricing) or a data_entry opening-stock bootstrap. This is a
+# "does a row exist" gate, not a quantity threshold — a product that WAS
+# purchased and is legitimately out of stock (qty 0) still has its
+# Inventory row from that purchase and correctly keeps showing up; nothing
+# here filters by quantity.
 
 def _generate_jumbo_variant_for_new_name(*, jumbo_name_id: int, user) -> None:
     jumbo_anchor = get_product_by_code(JUMBO_PRODUCT_CODE)
-    variant = get_or_create_product_variant(base_product_id=jumbo_anchor.id, jumbo_name_id=jumbo_name_id, user=user)
-    sync_inventory(product=variant, quantity_delta=0, user=user)
+    get_or_create_product_variant(
+        base_product_id=jumbo_anchor.id, jumbo_name_id=jumbo_name_id, user=user, skip_unpriced_queue=True,
+    )
 
 
 def _generate_core_variant_for_new_name(*, core_name_id: int, user) -> None:
     cores_anchor = get_product_by_code(CORES_PRODUCT_CODE)
-    variant = get_or_create_product_variant(base_product_id=cores_anchor.id, core_name_id=core_name_id, user=user)
-    sync_inventory(product=variant, quantity_delta=0, user=user)
+    get_or_create_product_variant(
+        base_product_id=cores_anchor.id, core_name_id=core_name_id, user=user, skip_unpriced_queue=True,
+    )
 
 
 def _generate_packing_variant_for_new_size(*, packing_size_id: int, user) -> None:
     packing_anchor = get_product_by_code(PACKING_PRODUCT_CODE)
-    variant = get_or_create_product_variant(base_product_id=packing_anchor.id, packing_size_id=packing_size_id, user=user)
-    sync_inventory(product=variant, quantity_delta=0, user=user)
+    get_or_create_product_variant(
+        base_product_id=packing_anchor.id, packing_size_id=packing_size_id, user=user, skip_unpriced_queue=True,
+    )
 
 
 def _generate_carton_variant_for_new_size(*, carton_size_id: int, user) -> None:
     cartons_anchor = get_product_by_code(CARTONS_PRODUCT_CODE)
-    variant = get_or_create_product_variant(base_product_id=cartons_anchor.id, carton_size_id=carton_size_id, user=user)
-    sync_inventory(product=variant, quantity_delta=0, user=user)
+    get_or_create_product_variant(
+        base_product_id=cartons_anchor.id, carton_size_id=carton_size_id, user=user, skip_unpriced_queue=True,
+    )
 
 
 @transaction.atomic
@@ -667,19 +681,29 @@ def get_or_create_product_variant(
     jumbo_name_id: int = None, core_name_id: int = None,
     core_length_id: int = None, core_thickness_id: int = None,
     packing_size_id: int = None, carton_size_id: int = None,
+    skip_unpriced_queue: bool = False,
 ) -> Product:
     """
     Finds the Product row for this exact (base anchor + attribute
     combination), creating it if this is the first time it's been
-    purchased. This is the ONLY place attribute-bearing Product rows get
-    created — never a direct API, always a side effect of recording a
-    purchase. "A different attribute combination is a different trackable
-    inventory line" per the client's own instruction.
+    purchased — or, for Jumbo Name/Core Name/Packing Size/Carton Size, the
+    first time that attribute value was added (see the
+    _generate_*_variant_for_new_* helpers below). "A different attribute
+    combination is a different trackable inventory line" per the client's
+    own instruction.
 
     base_product_id is the id of one of the 4 canonical anchor rows (the
     Jumbo/Cores/Packing/Cartons row itself) — identifies which "line" this
     variant belongs to, since Family alone can't (every anchor shares
     family="Raw Material"). The variant inherits its base's family.
+
+    skip_unpriced_queue: the attribute-triggered auto-generation helpers
+    pass True — an attribute-only auto-created product has no real stock
+    yet and shouldn't nag anyone to price it until it's actually purchased
+    (or bootstrapped via data_entry opening stock), matching the "don't
+    show up in Inventory/Rates until real stock exists" rule those helpers
+    already follow for the Inventory side. Every real purchase-time caller
+    leaves this False (default), preserving today's behavior exactly.
     """
     base_product = get_product_by_id(base_product_id)
     attribute_ids = {
@@ -748,8 +772,9 @@ def get_or_create_product_variant(
             })
         return existing
 
-    from rates.services import add_to_unpriced_queue
-    add_to_unpriced_queue(product)
+    if not skip_unpriced_queue:
+        from rates.services import add_to_unpriced_queue
+        add_to_unpriced_queue(product)
     return product
 
 
