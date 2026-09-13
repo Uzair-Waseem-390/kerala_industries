@@ -735,3 +735,15 @@ class SavePDFRequestSerializer(serializers.Serializer):
 
     def validate_file_name(self, value):
         return value.strip() if value else value
+
+
+# ---------------------------------------------------------------------------
+# Available quantity (2026-09) — shown while picking a product in a draft
+# invoice's Line Items, mirroring how Credit Score is shown on customer
+# selection. See billing.selectors.get_reserved_quantity_for_product.
+# ---------------------------------------------------------------------------
+
+class AvailableQuantitySerializer(serializers.Serializer):
+    physical_quantity      = serializers.DecimalField(max_digits=14, decimal_places=4)
+    reserved_by_other_drafts = serializers.DecimalField(max_digits=14, decimal_places=4)
+    available_quantity     = serializers.DecimalField(max_digits=14, decimal_places=4)

@@ -292,6 +292,39 @@ def get_sellable_cartons_products(*, search: str = None) -> QuerySet:
 
 
 # ---------------------------------------------------------------------------
+# Cross-draft stock reservation (2026-09) — a DRAFT invoice never touches
+# real Inventory/FgInventory.quantity (that only happens at confirm), so two
+# drafts could otherwise both "promise" the same physical units with no
+# visibility into each other. This sums what OTHER drafts have already
+# committed for one product, feeding both the available-quantity display
+# endpoint and services._validate_stock's cross-draft enforcement.
+# ---------------------------------------------------------------------------
+
+def get_reserved_quantity_for_product(
+    *, rm_product_id: int = None, fg_product_id: int = None, exclude_invoice_id: int = None,
+):
+    """
+    Total quantity of this product committed to OTHER draft invoices right
+    now. exclude_invoice_id lets a draft being edited exclude its own
+    existing reservation from the sum, so editing an invoice you already
+    own never falsely counts against itself. Exactly one of
+    rm_product_id/fg_product_id, mirroring InvoiceItem's own dual-nullable
+    product convention.
+    """
+    from decimal import Decimal
+
+    from django.db.models import Sum
+
+    qs = InvoiceItem.objects.filter(
+        invoice__status=Invoice.Status.DRAFT, invoice__is_deleted=False,
+    )
+    qs = qs.filter(fg_product_id=fg_product_id) if fg_product_id else qs.filter(rm_product_id=rm_product_id)
+    if exclude_invoice_id:
+        qs = qs.exclude(invoice_id=exclude_invoice_id)
+    return qs.aggregate(total=Sum("quantity"))["total"] or Decimal("0")
+
+
+# ---------------------------------------------------------------------------
 # Payment summary selectors
 # ---------------------------------------------------------------------------
 

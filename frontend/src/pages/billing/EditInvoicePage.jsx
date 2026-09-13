@@ -408,6 +408,7 @@ const EditInvoicePage = () => {
                                         onRemove={handleRemoveItem}
                                         canEdit={true}
                                         errors={itemErrors[index] || undefined}
+                                        excludeInvoiceId={parseInt(id)}
                                     />
                                 ))}
                             </AnimatePresence>

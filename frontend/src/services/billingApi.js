@@ -69,6 +69,14 @@ export const billingApi = {
         },
     },
 
+    // Available quantity for one product — physical stock minus what other
+    // draft invoices already reserve. excludeInvoiceId (optional) is the
+    // invoice being edited, so its own reservation isn't counted against it.
+    getAvailableQuantity: (productType, productId, excludeInvoiceId) => {
+        const query = excludeInvoiceId ? `?exclude_invoice_id=${excludeInvoiceId}` : '';
+        return api.get(`/billing/available-quantity/${productType}/${productId}/${query}`);
+    },
+
     // Shelves (for invoice-line/return shelf allocation)
     shelves: {
         // Shelves that currently hold stock (qty > 0) of a given product —

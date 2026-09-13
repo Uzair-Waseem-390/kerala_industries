@@ -970,3 +970,57 @@ class SetReturnItemShelfAllocationsView(APIView):
         )
         return_item = get_return_item_by_id(pk)
         return Response(ReturnItemReadSerializer(return_item, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+from .serializers import AvailableQuantitySerializer
+
+
+# ---------------------------------------------------------------------------
+# Available quantity — shown while picking a product in a draft invoice's
+# Line Items (2026-09), mirroring the Credit Score display on customer
+# selection. Read-only, no side effects. Same shape as
+# rates.views.ProductCostView.
+# ---------------------------------------------------------------------------
+
+class AvailableQuantityView(APIView):
+    """
+    GET /billing/available-quantity/<product_type>/<product_id>/?exclude_invoice_id=<id>
+    product_type is "rm" or "fg". exclude_invoice_id (optional) is the
+    invoice currently being edited — its own existing reservation for this
+    product is excluded from reserved_by_other_drafts so editing a draft
+    never falsely counts against itself (used by the Edit Invoice page;
+    Create Invoice never passes it, nothing to exclude yet).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, product_type, product_id):
+        from .selectors import get_reserved_quantity_for_product
+
+        exclude_invoice_id = request.query_params.get("exclude_invoice_id")
+        exclude_invoice_id = int(exclude_invoice_id) if exclude_invoice_id else None
+
+        if product_type == "fg":
+            from inventory.models import FgInventory
+            from production.selectors import get_fg_product_by_id
+            get_fg_product_by_id(product_id)  # 404s if missing/deleted
+            physical = (
+                FgInventory.objects.filter(product_id=product_id)
+                .values_list("quantity", flat=True).first() or 0
+            )
+            reserved = get_reserved_quantity_for_product(fg_product_id=product_id, exclude_invoice_id=exclude_invoice_id)
+        else:
+            from inventory.models import Inventory
+            from purchases.selectors import get_product_by_id
+            get_product_by_id(product_id)  # 404s if missing/deleted
+            physical = (
+                Inventory.objects.filter(product_id=product_id)
+                .values_list("quantity", flat=True).first() or 0
+            )
+            reserved = get_reserved_quantity_for_product(rm_product_id=product_id, exclude_invoice_id=exclude_invoice_id)
+
+        data = {
+            "physical_quantity": physical,
+            "reserved_by_other_drafts": reserved,
+            "available_quantity": physical - reserved,
+        }
+        return Response(AvailableQuantitySerializer(data).data)

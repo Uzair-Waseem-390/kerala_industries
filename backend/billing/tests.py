@@ -20,6 +20,7 @@ from rates.services import create_rate
 from users.models import User
 
 from .models import Invoice, Payment, Return
+from .selectors import get_reserved_quantity_for_product
 from .services import (
     DEFAULT_DUE_DATE_DAYS, accept_return, cancel_return, confirm_invoice,
     create_customer, create_invoice, create_payment, create_return,
@@ -28,9 +29,9 @@ from .services import (
     update_invoice_items, update_return_items,
 )
 from .views import (
-    AllInvoicePaymentsView, CustomerListCreateView, DraftInvoiceListView,
-    DueInvoiceListView, InvoiceAutoAllocateShelvesView, InvoiceConfirmView,
-    InvoiceDueDateUpdateView, InvoiceListCreateView,
+    AllInvoicePaymentsView, AvailableQuantityView, CustomerListCreateView,
+    DraftInvoiceListView, DueInvoiceListView, InvoiceAutoAllocateShelvesView,
+    InvoiceConfirmView, InvoiceDueDateUpdateView, InvoiceListCreateView,
     InvoicePaymentSummaryView, InvoiceRetrieveUpdateDestroyView,
     PaymentListCreateView, ReturnAcceptView, ReturnListCreateView,
     ReturnRetrieveUpdateDestroyView,
@@ -122,6 +123,103 @@ class BillingTestBase(TestCase):
         )
         self.allocate_invoice_items(invoice)
         return confirm_invoice(invoice_id=invoice.id, user=self.admin)
+
+
+class DraftStockReservationTests(BillingTestBase):
+    """
+    Cross-draft stock reservation (2026-09) — a DRAFT invoice never touches
+    real Inventory.quantity, so two drafts could otherwise jointly promise
+    more stock than physically exists. See billing.selectors
+    .get_reserved_quantity_for_product and services._validate_stock's
+    check_draft_reservations param.
+    """
+
+    def test_reserved_quantity_sums_other_drafts_and_excludes_self(self):
+        product = self.make_stocked_product(stock=100)
+        invoice_a = create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 30}], user=self.admin,
+        )
+
+        self.assertEqual(get_reserved_quantity_for_product(rm_product_id=product.id), 30)
+        self.assertEqual(
+            get_reserved_quantity_for_product(rm_product_id=product.id, exclude_invoice_id=invoice_a.id), 0,
+        )
+
+    def test_create_invoice_rejects_overselling_across_drafts(self):
+        product = self.make_stocked_product(stock=100)
+        create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 30}], user=self.admin,
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            create_invoice(
+                customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 71}], user=self.admin,
+            )
+        message = str(ctx.exception.detail["quantity"])
+        self.assertIn("70", message)
+        self.assertIn("already reserved by other draft invoices", message)
+
+        # Exactly the remaining amount still succeeds.
+        invoice_b = create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 70}], user=self.admin,
+        )
+        self.assertEqual(invoice_b.status, Invoice.Status.DRAFT)
+
+    def test_editing_own_draft_does_not_count_against_itself(self):
+        product = self.make_stocked_product(stock=100)
+        invoice = create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 30}], user=self.admin,
+        )
+        # Bumping this same draft up to the full 100 must succeed — its own
+        # existing 30-unit reservation must not count against itself.
+        updated = update_invoice_items(invoice_id=invoice.id, items=[{"rm_product_id": product.id, "quantity": 100}], user=self.admin)
+        self.assertEqual(updated.items.get(rm_product=product).quantity, 100)
+
+    def test_confirm_ignores_other_drafts_checks_only_real_stock(self):
+        """
+        confirm_invoice deliberately never passes check_draft_reservations —
+        confirming is real physical consumption, gated only by real stock,
+        never by another draft's mere reservation.
+        """
+        product = self.make_stocked_product(stock=100)
+        # Another draft "reserves" 90 units — must have zero effect on this
+        # invoice's ability to confirm, since confirm only checks real stock.
+        create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 90}], user=self.admin,
+        )
+        invoice = create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 10}], user=self.admin,
+        )
+        self.allocate_invoice_items(invoice)
+        confirmed = confirm_invoice(invoice_id=invoice.id, user=self.admin)
+        self.assertEqual(confirmed.status, Invoice.Status.CONFIRMED)
+
+    def test_available_quantity_endpoint(self):
+        product = self.make_stocked_product(stock=100)
+        invoice = create_invoice(
+            customer_id=self.customer.id, items=[{"rm_product_id": product.id, "quantity": 30}], user=self.admin,
+        )
+
+        request = self.factory.get(f"/billing/available-quantity/rm/{product.id}/")
+        force_authenticate(request, user=self.admin)
+        response = AvailableQuantityView.as_view()(request, product_type="rm", product_id=product.id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["physical_quantity"], "100.0000")
+        self.assertEqual(response.data["reserved_by_other_drafts"], "30.0000")
+        self.assertEqual(response.data["available_quantity"], "70.0000")
+
+        # Excluding the invoice that made the reservation: full stock available.
+        request2 = self.factory.get(f"/billing/available-quantity/rm/{product.id}/?exclude_invoice_id={invoice.id}")
+        force_authenticate(request2, user=self.admin)
+        response2 = AvailableQuantityView.as_view()(request2, product_type="rm", product_id=product.id)
+        self.assertEqual(response2.data["available_quantity"], "100.0000")
+
+    def test_available_quantity_endpoint_requires_auth(self):
+        product = self.make_stocked_product(stock=100)
+        request = self.factory.get(f"/billing/available-quantity/rm/{product.id}/")
+        response = AvailableQuantityView.as_view()(request, product_type="rm", product_id=product.id)
+        self.assertEqual(response.status_code, 401)
 
 
 class BillingReferenceTests(BillingTestBase):

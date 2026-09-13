@@ -204,10 +204,25 @@ def _get_current_selling_price(product) -> Decimal:
         )
 
 
-def _validate_stock(product, requested_qty: int, exclude_invoice_id: int = None) -> None:
+def _validate_stock(
+    product, requested_qty: int, exclude_invoice_id: int = None, check_draft_reservations: bool = False,
+) -> None:
     """
     Validates that enough stock is available in inventory.
     Raises ValidationError with a clear message if stock is insufficient.
+
+    check_draft_reservations=True (create_invoice/update_invoice_items only
+    — never confirm_invoice) additionally subtracts what OTHER draft
+    invoices have already committed for this product (2026-09) — a draft
+    never touches real Inventory/FgInventory.quantity, so without this two
+    drafts could otherwise jointly promise more stock than physically
+    exists with neither one's creator ever seeing a warning.
+    exclude_invoice_id excludes the invoice currently being edited from
+    that "other drafts" sum, so editing a draft never falsely counts
+    against its own existing reservation. confirm_invoice deliberately
+    never passes this — the moment stock is actually consumed, only real
+    physical availability matters; if two drafts both claimed the same
+    units, whichever confirms first correctly wins, exactly like today.
     """
     from rest_framework.exceptions import ValidationError
 
@@ -231,7 +246,25 @@ def _validate_stock(product, requested_qty: int, exclude_invoice_id: int = None)
             .values_list("quantity", flat=True).first() or 0
         )
 
-    if available < requested_qty:
+    reserved = 0
+    if check_draft_reservations:
+        from .selectors import get_reserved_quantity_for_product
+        reserved = get_reserved_quantity_for_product(
+            rm_product_id=None if _is_fg(product) else product.id,
+            fg_product_id=product.id if _is_fg(product) else None,
+            exclude_invoice_id=exclude_invoice_id,
+        )
+    net_available = available - reserved
+
+    if net_available < requested_qty:
+        if reserved:
+            raise ValidationError({
+                "quantity": (
+                    f"Insufficient stock for '{product.name}'. "
+                    f"Requested: {requested_qty}, Available: {net_available} "
+                    f"(physical stock: {available}, {reserved} already reserved by other draft invoices)."
+                )
+            })
         raise ValidationError({
             "quantity": (
                 f"Insufficient stock for '{product.name}'. "
@@ -552,7 +585,7 @@ def create_invoice(
             raise ValidationError({"items": f"Duplicate product '{product.name}' in items."})
         seen_products.add(key)
         _get_current_selling_price(product)      # raises if no rate
-        _validate_stock(product, item["quantity"])
+        _validate_stock(product, item["quantity"], check_draft_reservations=True)
         validated_items.append((
             product,
             item["quantity"],
@@ -654,7 +687,7 @@ def update_invoice_items(
             raise ValidationError({"items": f"Duplicate product '{product.name}' in items."})
         seen_products.add(key)
         _get_current_selling_price(product)
-        _validate_stock(product, item["quantity"])
+        _validate_stock(product, item["quantity"], exclude_invoice_id=invoice_id, check_draft_reservations=True)
         validated_items.append((
             product,
             item["quantity"],

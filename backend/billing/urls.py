@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     AllInvoicePaymentsView,
     AllOutstandingInvoicesView,
+    AvailableQuantityView,
     ConfirmedInvoiceListView,
     CustomerListCreateView,
     CustomerOutstandingListView,
@@ -81,6 +82,9 @@ urlpatterns = [
 
     # Sellable products — the invoice-item picker (FG + RM Cartons-family)
     path("products/sellable/", SellableProductListView.as_view(), name="sellable-product-list"),
+
+    # Available quantity — shown while picking a product in a draft invoice's Line Items
+    path("available-quantity/<str:product_type>/<int:product_id>/", AvailableQuantityView.as_view(), name="available-quantity"),
 
     # Shelf allocations — sale line consumption / return line put-away
     path("shelves/candidates/", InvoiceCandidateShelvesView.as_view(), name="invoice-candidate-shelves"),
