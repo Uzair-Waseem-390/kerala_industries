@@ -50,6 +50,27 @@ TRACKED_MODELS = {
     ("profits", "ownerprofitpayout"),
     ("backups", "backuphistory"),
     ("users", "user"),
+    # Added 2026-09-15 — production/manufacturing_costs had zero tracked
+    # models, and a few models in other apps were missing despite matching
+    # the shape of an already-tracked sibling (see the app-wide audit that
+    # found these).
+    ("production", "recipe"),               # like purchaseorder/invoice: number + status lifecycle
+    ("production", "wipproduct"),           # like purchases.product
+    ("production", "fgproduct"),            # like purchases.product
+    ("manufacturing_costs", "payment"),     # like supplierpayment/billing.payment
+    ("manufacturing_costs", "payableentity"),  # like cash_management.investor
+    ("manufacturing_costs", "employee"),    # like purchases.supplier/billing.customer
+    # NOT machine / factoryoverheadsetting — internal costing inputs, not
+    # headline business actions. FactoryOverheadSetting is a singleton
+    # (same get_instance() pattern as CashFlow), same exclusion as every
+    # other *Flow counter; Machine.rate_per_hour is a derived internal
+    # cost-allocation figure, not a customer/vendor-facing entity.
+    ("payment_methods", "accounttransfer"),  # real cash movement, like cashadjustment
+    ("payment_methods", "paymentmethod"),   # like cash_flow.expensecategory/assets.assetcategory
+    ("assets", "assetdisposal"),            # like purchasereturn/return
+    ("assets", "assetpayment"),             # like recurring_expenses.recurringexpenseassignmentpayment
+    ("purchases", "savedpurchaseorderpdf"), # ledger's equivalent SavedLedgerPDF is tracked; this wasn't
+    ("billing", "savedinvoicepdf"),         # same inconsistency as above
 }
 
 # Tried in order against the instance; the first present+truthy value wins
