@@ -1,3 +1,5 @@
+from decimal import ROUND_HALF_UP, Decimal
+
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -149,7 +151,40 @@ def _stats_deltas_for_transition(old_bucket: str | None, new_bucket: str) -> dic
     return deltas
 
 
-def sync_inventory(*, product: Product, quantity_delta: int, user=None) -> None:
+def _apply_avg_unit_cost(inventory, *, old_quantity, quantity_delta, unit_cost, update_fields: list) -> None:
+    """
+    Shared by sync_inventory/sync_wip_inventory/sync_fg_inventory. Moves
+    avg_unit_cost ONLY when the caller passes a real unit_cost — which
+    should be ONLY a genuine confirmed purchase (or WIP/FG's own
+    equivalent: a recipe finishing) and a purchase return being accepted.
+    Every other quantity-moving event (a sale, a customer return, a
+    lost/found event, WIP/FG being consumed downstream) must call
+    sync_*_inventory with unit_cost=None, leaving this untouched.
+
+    One formula handles both directions — algebraically identical whether
+    quantity_delta is positive (a purchase/production event, unit_cost is
+    that event's own cost) or negative (a purchase return, unit_cost is
+    the specific returned batch's own cost): it adds/subtracts that
+    event's exact value contribution and re-divides by the new quantity.
+    Not floored at 0 like inventory.quantity itself — a return that would
+    push the reconstructed quantity negative is a real data problem and
+    should surface as a ZeroDivisionError-shaped bug report, not be
+    silently masked.
+    """
+    if unit_cost is None or quantity_delta == 0:
+        return
+    new_quantity = old_quantity + quantity_delta
+    if new_quantity > 0:
+        inventory.avg_unit_cost = (
+            (inventory.avg_unit_cost * Decimal(old_quantity)) + (Decimal(unit_cost) * Decimal(quantity_delta))
+        ) / Decimal(new_quantity)
+    else:
+        inventory.avg_unit_cost = Decimal("0")
+    inventory.avg_unit_cost = inventory.avg_unit_cost.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    update_fields.append("avg_unit_cost")
+
+
+def sync_inventory(*, product: Product, quantity_delta: int, user=None, unit_cost: Decimal = None) -> None:
     """
     THE single writer for Inventory.quantity — purchases AND billing must go
     through here (billing used to write quantity directly, which would let
@@ -157,6 +192,10 @@ def sync_inventory(*, product: Product, quantity_delta: int, user=None) -> None:
     Floored at 0 — inventory never goes negative. user=None leaves
     last_updated_by untouched (matches billing's return path, which never
     recorded a user).
+
+    unit_cost: pass this ONLY when quantity_delta represents a real
+    confirmed purchase (or the opening-stock bootstrap, treated as one) or
+    a purchase return being accepted — see _apply_avg_unit_cost.
 
     Also keeps InventoryStatsFlow in sync: when the new quantity crosses a
     low-stock/out-of-stock threshold, the singleton counters are adjusted in
@@ -172,6 +211,10 @@ def sync_inventory(*, product: Product, quantity_delta: int, user=None) -> None:
 
         inventory.quantity = max(0, inventory.quantity + quantity_delta)
         update_fields = ["quantity", "last_updated_at"]
+        _apply_avg_unit_cost(
+            inventory, old_quantity=old_quantity, quantity_delta=quantity_delta,
+            unit_cost=unit_cost, update_fields=update_fields,
+        )
         if user is not None:
             inventory.last_updated_by = user
             update_fields.append("last_updated_by")
@@ -312,12 +355,18 @@ def validate_wip_shelf_consumption(*, product, allocations: list[dict]) -> None:
             })
 
 
-def sync_wip_inventory(*, product, quantity_delta, user=None) -> None:
+def sync_wip_inventory(*, product, quantity_delta, user=None, unit_cost: Decimal = None) -> None:
     """
     THE single writer for WipInventory.quantity. Floored at 0. Keeps
     WipInventoryStatsFlow in sync exactly like sync_inventory keeps
     InventoryStatsFlow in sync (same bucket/threshold rules apply to WIP —
     project decision) — see that function's docstring for the reasoning.
+
+    unit_cost: pass this ONLY when quantity_delta is a Rewinding/Cutting
+    recipe finishing (WIP's equivalent of "a real purchase") or the
+    opening-stock bootstrap — never when WIP is consumed into a downstream
+    recipe. See _apply_avg_unit_cost. WIP has no "return to supplier"
+    event, so this is naturally forward-only in practice.
     """
     with transaction.atomic():
         inventory, created = WipInventory.objects.select_for_update().get_or_create(product=product)
@@ -326,6 +375,10 @@ def sync_wip_inventory(*, product, quantity_delta, user=None) -> None:
 
         inventory.quantity = max(0, inventory.quantity + quantity_delta)
         update_fields = ["quantity", "last_updated_at"]
+        _apply_avg_unit_cost(
+            inventory, old_quantity=old_quantity, quantity_delta=quantity_delta,
+            unit_cost=unit_cost, update_fields=update_fields,
+        )
         if user is not None:
             inventory.last_updated_by = user
             update_fields.append("last_updated_by")
@@ -426,8 +479,13 @@ def validate_fg_shelf_consumption(*, product, allocations: list[dict]) -> None:
             })
 
 
-def sync_fg_inventory(*, product, quantity_delta, user=None) -> None:
-    """THE single writer for FgInventory.quantity. Mirrors sync_wip_inventory exactly."""
+def sync_fg_inventory(*, product, quantity_delta, user=None, unit_cost: Decimal = None) -> None:
+    """
+    THE single writer for FgInventory.quantity. Mirrors sync_wip_inventory
+    exactly, including unit_cost: pass it ONLY when a Packing recipe
+    finishes or the opening-stock bootstrap — never on an FG sale or
+    customer return. See _apply_avg_unit_cost.
+    """
     with transaction.atomic():
         inventory, created = FgInventory.objects.select_for_update().get_or_create(product=product)
         old_quantity = 0 if created else inventory.quantity
@@ -435,6 +493,10 @@ def sync_fg_inventory(*, product, quantity_delta, user=None) -> None:
 
         inventory.quantity = max(0, inventory.quantity + quantity_delta)
         update_fields = ["quantity", "last_updated_at"]
+        _apply_avg_unit_cost(
+            inventory, old_quantity=old_quantity, quantity_delta=quantity_delta,
+            unit_cost=unit_cost, update_fields=update_fields,
+        )
         if user is not None:
             inventory.last_updated_by = user
             update_fields.append("last_updated_by")

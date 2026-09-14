@@ -450,7 +450,8 @@ def finish_packing_recipe(*, recipe_id: int, shelf_allocations: list[dict], user
     from manufacturing_costs.services import record_dl_foh_accrued
     record_dl_foh_accrued(pool)
 
-    sync_fg_inventory(product=fg_product, quantity_delta=total_pieces, user=user)
+    # Real produced batch at a real computed cost — moves avg_unit_cost.
+    sync_fg_inventory(product=fg_product, quantity_delta=total_pieces, user=user, unit_cost=full_fg_unit_cost)
     apply_fg_shelf_allocations(
         product=fg_product,
         allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],

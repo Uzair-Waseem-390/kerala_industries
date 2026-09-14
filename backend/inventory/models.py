@@ -17,6 +17,12 @@ class Inventory(models.Model):
     # Indexed — the low-stock / out-of-stock breakdown endpoints filter on
     # quantity thresholds.
     quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
+    # Weighted-average cost, moved ONLY by a real confirmed purchase or a
+    # purchase return being accepted — both are genuine changes to what was
+    # actually paid/kept from suppliers. Deliberately untouched by a sale,
+    # a customer return, or a lost/found event — those don't change what
+    # we paid. See inventory.services.sync_inventory's unit_cost param.
+    avg_unit_cost   = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at = models.DateTimeField(auto_now=True)
     last_updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
@@ -210,6 +216,11 @@ class FgProductStockMovement(models.Model):
 class WipInventory(models.Model):
     product         = models.OneToOneField("production.WipProduct", on_delete=models.PROTECT, related_name="inventory")
     quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
+    # Weighted-average cost, moved ONLY when a Rewinding/Cutting recipe
+    # finishes (WIP's equivalent of "a real purchase") or an opening-stock
+    # bootstrap — never by WIP being consumed into a downstream recipe.
+    # Same rule/mechanism as purchases.models.Inventory.avg_unit_cost.
+    avg_unit_cost   = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at = models.DateTimeField(auto_now=True)
     last_updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
@@ -325,6 +336,11 @@ class InventoryStatsFlow(models.Model):
 class FgInventory(models.Model):
     product         = models.OneToOneField("production.FgProduct", on_delete=models.PROTECT, related_name="inventory")
     quantity        = models.DecimalField(max_digits=14, decimal_places=4, default=0, db_index=True)
+    # Weighted-average cost, moved ONLY when a Packing recipe finishes (FG's
+    # equivalent of "a real purchase") or an opening-stock bootstrap —
+    # never by an FG sale or a customer return. Same rule/mechanism as
+    # purchases.models.Inventory.avg_unit_cost.
+    avg_unit_cost   = models.DecimalField(max_digits=14, decimal_places=4, default=0)
     last_updated_at = models.DateTimeField(auto_now=True)
     last_updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,

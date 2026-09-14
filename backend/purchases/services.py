@@ -1538,7 +1538,11 @@ def confirm_purchase_order(*, order_id: int, user) -> PurchaseOrder:
     for item in items:
         item.remaining_quantity = item.quantity
         item.save(update_fields=["remaining_quantity"])
-        sync_inventory(product=item.product, quantity_delta=item.quantity, user=user)
+        # Real confirmed purchase at a real cost — moves avg_unit_cost.
+        # Same tax-inclusive formula used everywhere else this batch's cost
+        # is read (FIFO consumption, return valuation).
+        item_unit_cost = item.total_price / item.quantity if item.quantity else item.unit_price
+        sync_inventory(product=item.product, quantity_delta=item.quantity, user=user, unit_cost=item_unit_cost)
         apply_shelf_allocations(
             product=item.product,
             allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()],
@@ -1670,7 +1674,10 @@ def create_opening_stock_order(*, supplier, items: list[dict], user) -> Purchase
         )  # .save() auto-computes gross/gst/wht/total
         pi.remaining_quantity = pi.quantity
         pi.save(update_fields=["remaining_quantity"])
-        sync_inventory(product=pi.product, quantity_delta=pi.quantity, user=user)
+        # A real bootstrap purchase at a real historical cost — same
+        # treatment as a genuine confirmed purchase for avg_unit_cost.
+        pi_unit_cost = pi.total_price / pi.quantity if pi.quantity else pi.unit_price
+        sync_inventory(product=pi.product, quantity_delta=pi.quantity, user=user, unit_cost=pi_unit_cost)
         apply_shelf_delta(
             shelf=shelf, product=pi.product, delta=pi.quantity,
             reason=ShelfStockMovement.Reason.PURCHASE_PUTAWAY,
@@ -1995,8 +2002,15 @@ def accept_purchase_return(*, return_id: int, user) -> PurchaseReturn:
         locked_item.returned_quantity = purchase_item.returned_quantity + qty
         locked_item.save(update_fields=["remaining_quantity", "returned_quantity"])
 
-        # Decrease inventory (global) and the specific shelf(s) it's pulled from
-        sync_inventory(product=purchase_item.product, quantity_delta=-qty, user=user)
+        # Decrease inventory (global) and the specific shelf(s) it's pulled from.
+        # A purchase return reverses part of a real purchase — the specific
+        # returned batch's own cost moves avg_unit_cost, same formula as a
+        # purchase applies in the opposite direction (see
+        # inventory.services._apply_avg_unit_cost).
+        return_unit_cost = (
+            purchase_item.total_price / purchase_item.quantity if purchase_item.quantity else purchase_item.unit_price
+        )
+        sync_inventory(product=purchase_item.product, quantity_delta=-qty, user=user, unit_cost=return_unit_cost)
         apply_shelf_allocations(
             product=purchase_item.product,
             allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in return_item.shelf_allocations.all()],

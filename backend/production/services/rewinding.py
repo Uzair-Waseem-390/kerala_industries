@@ -352,13 +352,18 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
         created_by=user, updated_by=user,
     )
 
-    sync_wip_inventory(product=wip_product, quantity_delta=quantity, user=user)
-    apply_wip_shelf_allocations(
-        product=wip_product,
-        allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],
-        sign=1, reason=WipShelfStockMovement.Reason.RECIPE_BREAKDOWN_PUTAWAY,
-        reference=recipe.recipe_number, user=user,
-    )
+    # WipInventory.quantity/shelf stock are NOT touched here (2026-09) —
+    # this batch's cost isn't known yet (unit_cost_snapshot/
+    # full_unit_cost_snapshot are only computed in finish_recipe, once
+    # labor/machines/the DL+FOH pool are known). Adding stock before its
+    # cost exists would force avg_unit_cost to either skip this batch's
+    # cost forever or be patched in after the fact against a moving
+    # target — moved the whole put-away (sync_wip_inventory +
+    # apply_wip_shelf_allocations) to finish_recipe instead, right after
+    # cost is stamped, so quantity and cost land together in one place,
+    # same shape as a real purchase. RecipeBreakdownItemShelfAllocation
+    # rows are still recorded now (the chosen shelf split), just not
+    # applied to real ShelfStock until finish.
     RecipeBreakdownItemShelfAllocation.objects.bulk_create([
         RecipeBreakdownItemShelfAllocation(breakdown_item=item, shelf_id=sid, quantity=qty)
         for sid, qty in merged.items() if qty > 0
@@ -376,7 +381,7 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
     if not recipe.description or not recipe.description.strip():
         raise ValidationError({"description": "Description is required before finishing this recipe."})
 
-    breakdown_items = list(recipe.breakdown_items.all())
+    breakdown_items = list(recipe.breakdown_items.prefetch_related("shelf_allocations").all())
     # (issued materials/consumptions below are read fresh off the now-locked
     # recipe — not the cached prefetch from get_recipe_by_id — so the cost
     # calc reflects state as of this lock, not an earlier snapshot.)
@@ -421,6 +426,21 @@ def finish_recipe(*, recipe_id: int, user) -> Recipe:
     for item in breakdown_items:
         item.full_unit_cost_snapshot = (item.unit_cost_snapshot + shares[item]).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
     RecipeBreakdownItem.objects.bulk_update(breakdown_items, ["unit_cost_snapshot", "full_unit_cost_snapshot"])
+
+    # Put away each item's stock now that its cost is known — quantity and
+    # cost land together, same shape as a real purchase (see
+    # add_breakdown_item's docstring above for why this moved here).
+    for item in breakdown_items:
+        sync_wip_inventory(
+            product=item.wip_product, quantity_delta=item.quantity, user=user,
+            unit_cost=item.full_unit_cost_snapshot,
+        )
+        apply_wip_shelf_allocations(
+            product=item.wip_product,
+            allocations=[{"shelf": a.shelf, "quantity": a.quantity} for a in item.shelf_allocations.all()],
+            sign=1, reason=WipShelfStockMovement.Reason.RECIPE_BREAKDOWN_PUTAWAY,
+            reference=recipe.recipe_number, user=user,
+        )
 
     from manufacturing_costs.services import record_dl_foh_accrued
     record_dl_foh_accrued(pool)

@@ -148,7 +148,9 @@ def create_opening_wip_stock(*, items: list, user) -> Recipe:
                 )
                 reason = WipShelfStockMovement.Reason.CUTTING_BREAKDOWN_PUTAWAY
 
-            sync_wip_inventory(product=wip_product, quantity_delta=quantity, user=user)
+            # Bootstrap at a real given cost — same treatment as a genuine
+            # produced batch for avg_unit_cost.
+            sync_wip_inventory(product=wip_product, quantity_delta=quantity, user=user, unit_cost=unit_cost)
             apply_wip_shelf_allocations(
                 product=wip_product, allocations=[{"shelf": shelf, "quantity": quantity}],
                 sign=1, reason=reason, reference=recipe.recipe_number, user=user,
@@ -200,7 +202,9 @@ def create_opening_fg_stock(*, items: list, user) -> list[Recipe]:
                 unit_cost_snapshot=unit_cost, full_unit_cost_snapshot=unit_cost,
                 created_by=user, updated_by=user,
             )
-            sync_fg_inventory(product=fg_product, quantity_delta=quantity, user=user)
+            # Bootstrap at a real given cost — same treatment as a genuine
+            # produced batch for avg_unit_cost.
+            sync_fg_inventory(product=fg_product, quantity_delta=quantity, user=user, unit_cost=unit_cost)
             apply_fg_shelf_allocations(
                 product=fg_product, allocations=[{"shelf": shelf, "quantity": quantity}],
                 sign=1, reason=FgShelfStockMovement.Reason.PACKING_OUTPUT_PUTAWAY,

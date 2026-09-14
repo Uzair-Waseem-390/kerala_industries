@@ -536,7 +536,13 @@ def get_inventory_valuation_report_data(*, search: str = None, type_filter: str 
             "product_name": inv.product.name,
             "product_code": inv.product.code,
             "quantity_on_hand": inv.quantity,
-            "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
+            # Stored, purchase/purchase-return-driven weighted average
+            # (2026-09) — NOT total_value/quantity_on_hand. See
+            # inventory.services._apply_avg_unit_cost: this figure is
+            # deliberately immune to sales/customer-returns/lost-found, so
+            # it can legitimately disagree with total_value/quantity_on_hand
+            # (the live FIFO figure below) — that's intentional, not a bug.
+            "avg_unit_cost": inv.avg_unit_cost,
             "total_value": total_value,
         })
     for inv in wip_invs:
@@ -549,7 +555,7 @@ def get_inventory_valuation_report_data(*, search: str = None, type_filter: str 
             "product_name": inv.product.name,
             "product_code": inv.product.code,
             "quantity_on_hand": inv.quantity,
-            "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
+            "avg_unit_cost": inv.avg_unit_cost,
             "total_value": total_value,
         })
     for inv in fg_invs:
@@ -560,7 +566,7 @@ def get_inventory_valuation_report_data(*, search: str = None, type_filter: str 
             "product_name": inv.product.name,
             "product_code": inv.product.code,
             "quantity_on_hand": inv.quantity,
-            "avg_unit_cost": (total_value / inv.quantity) if inv.quantity else Decimal("0"),
+            "avg_unit_cost": inv.avg_unit_cost,
             "total_value": total_value,
         })
 
@@ -604,7 +610,10 @@ def get_product_avg_unit_cost(*, rm_product_id: int = None, fg_product_id: int =
         )
         total_value = _snapshot_value(batches)
 
-    avg_unit_cost = (total_value / quantity_on_hand) if quantity_on_hand else Decimal("0")
+    # Stored, purchase/purchase-return-driven weighted average (2026-09) —
+    # same field get_inventory_valuation_report_data now reads, not a live
+    # recompute. See inventory.services._apply_avg_unit_cost.
+    avg_unit_cost = inv.avg_unit_cost if inv else Decimal("0")
     return {
         "quantity_on_hand": quantity_on_hand,
         "avg_unit_cost": avg_unit_cost,
