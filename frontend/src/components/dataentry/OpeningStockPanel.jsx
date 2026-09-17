@@ -16,6 +16,15 @@ import Tabs from '../ui/Tabs';
 
 const fmt = (v) => Number(v || 0).toFixed(2);
 
+// The 4 anchor rows purchases.management.commands.seed_fixed_products
+// seeds (Jumbo/Cores/Packing/Cartons) — templates every real variant
+// traces back to via Product.base_product, never purchased/stocked
+// directly themselves. Excluded here only (RM opening stock is for
+// real, already-attribute-bearing stock) — ProductsPage/MoveStockModal/
+// PurchaseOrderDetailPage still show them via the same shared
+// purchasesApi.products.getAll, since those legitimately need to.
+const FIXED_ANCHOR_PRODUCT_CODES = new Set(['PRO-1000', 'PRO-1001', 'PRO-1002', 'PRO-1003']);
+
 const TYPE_TABS = [
     { value: 'rm', label: 'Raw Material' },
     { value: 'wip_core', label: 'WIP — Core' },
@@ -86,7 +95,9 @@ const OpeningStockPanel = () => {
     const searchProducts = useCallback(async (query) => {
         const res = await purchasesApi.products.getAll({ search: query, page_size: 25 });
         const results = res?.results ?? res ?? [];
-        return results.map(p => ({ value: p.id, label: `${p.name} (${p.code})` }));
+        return results
+            .filter(p => !FIXED_ANCHOR_PRODUCT_CODES.has(p.code))
+            .map(p => ({ value: p.id, label: `${p.name} (${p.code})` }));
     }, []);
 
     const searchShelves = useCallback(async (query) => {
