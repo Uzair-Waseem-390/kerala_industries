@@ -1,13 +1,13 @@
 import PropTypes from 'prop-types';
-import Select from '../../ui/Select';
+import SearchableSelect from '../../ui/SearchableSelect';
 import Input from '../../ui/Input';
 import { purchasesApi } from '../../../services/purchasesApi';
-import { useLookupOptions } from '../../../hooks/usePurchases';
 
 const YARDS_PER_METER = 1.09361;
 
 export const initialJumboData = {
     jumbo_name_id: '',
+    jumbo_name_label: '',
     rate_per_kg: '',
     weight_kg: '',
     freight_cost: '',
@@ -33,9 +33,13 @@ export const buildJumboPayload = (f) => ({
 // Jumbo intake fields — rate/weight/freight drive a live total-cost preview,
 // expected_length_m drives a live meters->yards preview using the same
 // 1.09361 conversion factor the backend applies.
-const JumboFields = ({ data, onChange }) => {
-    const { options: jumboNameOptions, loading: loadingJumboNames } = useLookupOptions(purchasesApi.jumboNames);
+const searchJumboNames = async (query) => {
+    const res = await purchasesApi.jumboNames.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
 
+const JumboFields = ({ data, onChange }) => {
     const rate = parseFloat(data.rate_per_kg) || 0;
     const weight = parseFloat(data.weight_kg) || 0;
     const freight = parseFloat(data.freight_cost) || 0;
@@ -48,13 +52,13 @@ const JumboFields = ({ data, onChange }) => {
         <div className="space-y-4">
             <h3 className="font-semibold text-neutral-900">Jumbo Purchase</h3>
 
-            <Select
+            <SearchableSelect
                 label="Jumbo Name"
                 value={data.jumbo_name_id}
-                onChange={(e) => onChange({ ...data, jumbo_name_id: e.target.value })}
-                options={jumboNameOptions}
-                placeholder={loadingJumboNames ? 'Loading...' : 'Select jumbo name'}
-                disabled={loadingJumboNames}
+                selectedLabel={data.jumbo_name_label}
+                onChange={(val, option) => onChange({ ...data, jumbo_name_id: val, jumbo_name_label: option?.label ?? '' })}
+                onSearch={searchJumboNames}
+                placeholder="Search jumbo name..."
                 required
             />
 

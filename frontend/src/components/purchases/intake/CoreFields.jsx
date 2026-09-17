@@ -1,15 +1,17 @@
 import PropTypes from 'prop-types';
-import Select from '../../ui/Select';
+import SearchableSelect from '../../ui/SearchableSelect';
 import Input from '../../ui/Input';
 import { purchasesApi } from '../../../services/purchasesApi';
-import { useLookupOptions } from '../../../hooks/usePurchases';
 
 export const initialCoreData = {
     quantity: '',
     unit_price: '',
     core_name_id: '',
+    core_name_label: '',
     core_length_id: '',
+    core_length_label: '',
     core_thickness_id: '',
+    core_thickness_label: '',
 };
 
 export const validateCore = (f) => {
@@ -26,13 +28,27 @@ export const buildCorePayload = (f) => ({
     ...(f.core_thickness_id ? { core_thickness_id: parseInt(f.core_thickness_id, 10) } : {}),
 });
 
+const searchCoreNames = async (query) => {
+    const res = await purchasesApi.coreNames.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
+const searchCoreLengths = async (query) => {
+    const res = await purchasesApi.coreLengths.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
+const searchCoreThicknesses = async (query) => {
+    const res = await purchasesApi.coreThicknesses.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
 // Core intake — simplest form: pick optional attribute tags, enter
 // quantity + unit price. Total is quantity * unit_price.
 const CoreFields = ({ data, onChange }) => {
-    const { options: coreNameOptions, loading: loadingNames } = useLookupOptions(purchasesApi.coreNames);
-    const { options: coreLengthOptions, loading: loadingLengths } = useLookupOptions(purchasesApi.coreLengths);
-    const { options: coreThicknessOptions, loading: loadingThicknesses } = useLookupOptions(purchasesApi.coreThicknesses);
-
     const quantity = parseFloat(data.quantity) || 0;
     const unitPrice = parseFloat(data.unit_price) || 0;
     const total = quantity * unitPrice;
@@ -42,29 +58,29 @@ const CoreFields = ({ data, onChange }) => {
             <h3 className="font-semibold text-neutral-900">Core Purchase</h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Select
+                <SearchableSelect
                     label="Core Name (optional)"
                     value={data.core_name_id}
-                    onChange={(e) => onChange({ ...data, core_name_id: e.target.value })}
-                    options={coreNameOptions}
-                    placeholder={loadingNames ? 'Loading...' : 'Select core name'}
-                    disabled={loadingNames}
+                    selectedLabel={data.core_name_label}
+                    onChange={(val, option) => onChange({ ...data, core_name_id: val, core_name_label: option?.label ?? '' })}
+                    onSearch={searchCoreNames}
+                    placeholder="Search core name..."
                 />
-                <Select
+                <SearchableSelect
                     label="Core Length (optional)"
                     value={data.core_length_id}
-                    onChange={(e) => onChange({ ...data, core_length_id: e.target.value })}
-                    options={coreLengthOptions}
-                    placeholder={loadingLengths ? 'Loading...' : 'Select core length'}
-                    disabled={loadingLengths}
+                    selectedLabel={data.core_length_label}
+                    onChange={(val, option) => onChange({ ...data, core_length_id: val, core_length_label: option?.label ?? '' })}
+                    onSearch={searchCoreLengths}
+                    placeholder="Search core length..."
                 />
-                <Select
+                <SearchableSelect
                     label="Core Thickness (optional)"
                     value={data.core_thickness_id}
-                    onChange={(e) => onChange({ ...data, core_thickness_id: e.target.value })}
-                    options={coreThicknessOptions}
-                    placeholder={loadingThicknesses ? 'Loading...' : 'Select core thickness'}
-                    disabled={loadingThicknesses}
+                    selectedLabel={data.core_thickness_label}
+                    onChange={(val, option) => onChange({ ...data, core_thickness_id: val, core_thickness_label: option?.label ?? '' })}
+                    onSearch={searchCoreThicknesses}
+                    placeholder="Search core thickness..."
                 />
             </div>
 

@@ -65,36 +65,51 @@ def get_jumbo_name_by_id(pk: int) -> JumboName:
     return get_object_or_404(JumboName, pk=pk, is_deleted=False)
 
 
-def get_all_core_names():
-    return CoreName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_core_names(*, search: str = None):
+    qs = CoreName.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_core_name_by_id(pk: int) -> CoreName:
     return get_object_or_404(CoreName, pk=pk, is_deleted=False)
 
 
-def get_all_core_lengths():
-    return CoreLength.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_core_lengths(*, search: str = None):
+    qs = CoreLength.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_core_length_by_id(pk: int) -> CoreLength:
     return get_object_or_404(CoreLength, pk=pk, is_deleted=False)
 
 
-def get_all_core_thicknesses():
-    return CoreThickness.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_core_thicknesses(*, search: str = None):
+    qs = CoreThickness.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_core_thickness_by_id(pk: int) -> CoreThickness:
     return get_object_or_404(CoreThickness, pk=pk, is_deleted=False)
 
 
-def get_all_packing_sizes():
-    return PackingSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_packing_sizes(*, search: str = None):
+    qs = PackingSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_packing_size_by_id(pk: int) -> PackingSize:
     return get_object_or_404(PackingSize, pk=pk, is_deleted=False)
 
 
-def get_all_carton_sizes():
-    return CartonSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+def get_all_carton_sizes(*, search: str = None):
+    qs = CartonSize.objects.select_related("created_by", "updated_by").filter(is_deleted=False)
+    if search:
+        qs = qs.filter(search_q(search, "value"))
+    return qs
 
 def get_carton_size_by_id(pk: int) -> CartonSize:
     return get_object_or_404(CartonSize, pk=pk, is_deleted=False)

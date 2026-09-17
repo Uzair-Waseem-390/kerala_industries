@@ -1,11 +1,11 @@
 import PropTypes from 'prop-types';
-import Select from '../../ui/Select';
+import SearchableSelect from '../../ui/SearchableSelect';
 import Input from '../../ui/Input';
 import { purchasesApi } from '../../../services/purchasesApi';
-import { useLookupOptions } from '../../../hooks/usePurchases';
 
 export const initialCartonData = {
     carton_size_id: '',
+    carton_size_label: '',
     quantity: '',
     unit_price: '',
 };
@@ -23,10 +23,14 @@ export const buildCartonPayload = (f) => ({
     unit_price: parseFloat(f.unit_price) || 0,
 });
 
+const searchCartonSizes = async (query) => {
+    const res = await purchasesApi.cartonSizes.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
 // Carton intake — unit_price is price per piece; total = quantity * unit_price.
 const CartonFields = ({ data, onChange }) => {
-    const { options: cartonSizeOptions, loading: loadingSizes } = useLookupOptions(purchasesApi.cartonSizes);
-
     const quantity = parseFloat(data.quantity) || 0;
     const unitPrice = parseFloat(data.unit_price) || 0;
     const total = quantity * unitPrice;
@@ -35,13 +39,13 @@ const CartonFields = ({ data, onChange }) => {
         <div className="space-y-4">
             <h3 className="font-semibold text-neutral-900">Carton Purchase</h3>
 
-            <Select
+            <SearchableSelect
                 label="Carton Size"
                 value={data.carton_size_id}
-                onChange={(e) => onChange({ ...data, carton_size_id: e.target.value })}
-                options={cartonSizeOptions}
-                placeholder={loadingSizes ? 'Loading...' : 'Select carton size'}
-                disabled={loadingSizes}
+                selectedLabel={data.carton_size_label}
+                onChange={(val, option) => onChange({ ...data, carton_size_id: val, carton_size_label: option?.label ?? '' })}
+                onSearch={searchCartonSizes}
+                placeholder="Search carton size..."
                 required
             />
 

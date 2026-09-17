@@ -1,11 +1,11 @@
 import PropTypes from 'prop-types';
-import Select from '../../ui/Select';
+import SearchableSelect from '../../ui/SearchableSelect';
 import Input from '../../ui/Input';
 import { purchasesApi } from '../../../services/purchasesApi';
-import { useLookupOptions } from '../../../hooks/usePurchases';
 
 export const initialPackingData = {
     packing_size_id: '',
+    packing_size_label: '',
     rate_per_kg: '',
     weight_kg: '',
 };
@@ -23,12 +23,16 @@ export const buildPackingPayload = (f) => ({
     weight_kg: parseFloat(f.weight_kg) || 0,
 });
 
+const searchPackingSizes = async (query) => {
+    const res = await purchasesApi.packingSizes.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
 // Packing intake — total = rate_per_kg * weight_kg. The stored quantity IS
 // the weight in kg, no unit conversion — called out explicitly since that's
 // easy to misread as a piece count.
 const PackingFields = ({ data, onChange }) => {
-    const { options: packingSizeOptions, loading: loadingSizes } = useLookupOptions(purchasesApi.packingSizes);
-
     const rate = parseFloat(data.rate_per_kg) || 0;
     const weight = parseFloat(data.weight_kg) || 0;
     const total = rate * weight;
@@ -37,13 +41,13 @@ const PackingFields = ({ data, onChange }) => {
         <div className="space-y-4">
             <h3 className="font-semibold text-neutral-900">Packing Purchase</h3>
 
-            <Select
+            <SearchableSelect
                 label="Packing Size"
                 value={data.packing_size_id}
-                onChange={(e) => onChange({ ...data, packing_size_id: e.target.value })}
-                options={packingSizeOptions}
-                placeholder={loadingSizes ? 'Loading...' : 'Select packing size'}
-                disabled={loadingSizes}
+                selectedLabel={data.packing_size_label}
+                onChange={(val, option) => onChange({ ...data, packing_size_id: val, packing_size_label: option?.label ?? '' })}
+                onSearch={searchPackingSizes}
+                placeholder="Search packing size..."
                 required
             />
 

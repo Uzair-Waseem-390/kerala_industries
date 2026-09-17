@@ -188,7 +188,7 @@ class CoreNameListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIVie
     write_serializer_class = CoreNameWriteSerializer
 
     def get_queryset(self):
-        return get_all_core_names()
+        return get_all_core_names(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -223,7 +223,7 @@ class CoreLengthListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIV
     write_serializer_class = CoreLengthWriteSerializer
 
     def get_queryset(self):
-        return get_all_core_lengths()
+        return get_all_core_lengths(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -258,7 +258,7 @@ class CoreThicknessListCreateView(ReadWriteSerializerMixin, generics.ListCreateA
     write_serializer_class = CoreThicknessWriteSerializer
 
     def get_queryset(self):
-        return get_all_core_thicknesses()
+        return get_all_core_thicknesses(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -293,7 +293,7 @@ class PackingSizeListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPI
     write_serializer_class = PackingSizeWriteSerializer
 
     def get_queryset(self):
-        return get_all_packing_sizes()
+        return get_all_packing_sizes(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -328,7 +328,7 @@ class CartonSizeListCreateView(ReadWriteSerializerMixin, generics.ListCreateAPIV
     write_serializer_class = CartonSizeWriteSerializer
 
     def get_queryset(self):
-        return get_all_carton_sizes()
+        return get_all_carton_sizes(search=self.request.query_params.get("search"))
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
