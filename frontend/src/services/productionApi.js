@@ -33,10 +33,27 @@ export const productionApi = {
         // shelf_allocations must sum to `quantity`, putaway-style (any
         // shelf) — destination for the newly-produced WIP quantity.
         addBreakdownItem: (id, data) => api.post(`/production/recipes/${id}/breakdown-items/`, data),
+        // Only while under_processing — yard_value/quantity/shelf_allocations,
+        // same shape as addBreakdownItem. Re-derives the WIP product if
+        // yard_value changed; nothing to reverse in real inventory (the
+        // breakdown item never put anything into WIP stock pre-finish).
+        updateBreakdownItem: (id, itemId, data) =>
+            api.patch(`/production/recipes/${id}/breakdown-items/${itemId}/`, data),
+        // Only while under_processing — soft delete, no inventory reversal.
+        deleteBreakdownItem: (id, itemId) => api.delete(`/production/recipes/${id}/breakdown-items/${itemId}/`),
         finish: (id) => api.post(`/production/recipes/${id}/finish/`),
         // Description is optional at creation, editable any time the recipe
         // is still under_processing, and required before finish.
         updateDescription: (id, data) => api.patch(`/production/recipes/${id}/description/`, data),
+        // Name is editable any time the recipe is still under_processing.
+        updateName: (id, data) => api.patch(`/production/recipes/${id}/name/`, data),
+        // Only while under_processing. data: { jumbo_shelf_allocations,
+        // cores_shelf_allocations } — each required (summing to that
+        // material's full issued quantity) only if it was actually issued;
+        // omit/empty-array a kind that was never issued. Reverses every
+        // issued material back to RM inventory at the shelves you choose,
+        // then soft-deletes the recipe.
+        delete: (id, data) => api.delete(`/production/recipes/${id}/`, { data }),
         // Time taken + Direct Labor/Factory Overhead assignment — all
         // required before finish (server-enforced) so the DL+FOH cost pool
         // can be spread into full_cost_per_unit alongside the material-only
@@ -72,6 +89,12 @@ export const productionApi = {
         getById: (id) => api.get(`/production/cutting-recipes/${id}/`),
         create: (data) => api.post('/production/cutting-recipes/', data),
         updateDescription: (id, data) => api.patch(`/production/cutting-recipes/${id}/description/`, data),
+        updateName: (id, data) => api.patch(`/production/cutting-recipes/${id}/name/`, data),
+        // Only while under_processing. data: { shelf_allocations } —
+        // required (summing to the issued core's full quantity) only if a
+        // core was actually issued. Reverses it to WIP inventory, then
+        // soft-deletes the recipe.
+        delete: (id, data) => api.delete(`/production/cutting-recipes/${id}/`, { data }),
         // shelf_allocations: which shelves to pull the issued WIP core
         // quantity from — sourced from wipShelfCandidates below, same
         // consumption-style picker Rewinding's own issue-material uses.
@@ -83,6 +106,11 @@ export const productionApi = {
         // One output line per call: a cut length (length_mm) + how many
         // pieces of that length (quantity), plus put-away shelf_allocations.
         addBreakdownItem: (id, data) => api.post(`/production/cutting-recipes/${id}/breakdown-items/`, data),
+        // Only while under_processing — length_mm/quantity/shelf_allocations,
+        // same shape as addBreakdownItem. Mirrors recipes.updateBreakdownItem.
+        updateBreakdownItem: (id, itemId, data) =>
+            api.patch(`/production/cutting-recipes/${id}/breakdown-items/${itemId}/`, data),
+        deleteBreakdownItem: (id, itemId) => api.delete(`/production/cutting-recipes/${id}/breakdown-items/${itemId}/`),
         finish: (id) => api.post(`/production/cutting-recipes/${id}/finish/`),
         // Time taken + Direct Labor/Factory Overhead assignment — same
         // shape as Rewinding's own recipes.setTime/addLabor/addMachine.
@@ -155,6 +183,12 @@ export const productionApi = {
         getById: (id) => api.get(`/production/packing-recipes/${id}/`),
         create: (data) => api.post('/production/packing-recipes/', data),
         updateDescription: (id, data) => api.patch(`/production/packing-recipes/${id}/description/`, data),
+        updateName: (id, data) => api.patch(`/production/packing-recipes/${id}/name/`, data),
+        // Only while under_processing. data: { piece_shelf_allocations,
+        // material_shelf_allocations } — each required (summing to that
+        // material's full issued quantity) only if it was actually issued.
+        // Packing has no breakdown stage, so nothing else to reverse.
+        delete: (id, data) => api.delete(`/production/packing-recipes/${id}/`, { data }),
         // shelf_allocations: consumption-style — which shelves (holding this
         // Cut Piece) to draw `quantity` from. Same picker as Cutting's own
         // issue-material, sourced from wipShelfCandidates below.

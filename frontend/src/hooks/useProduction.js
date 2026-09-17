@@ -53,8 +53,18 @@ export const useRecipeDetail = (id) => {
     const [addingBreakdown, setAddingBreakdown] = useState(false);
     const [addBreakdownError, setAddBreakdownError] = useState(null);
 
+    const [updatingBreakdownItemId, setUpdatingBreakdownItemId] = useState(null);
+    const [deletingBreakdownItemId, setDeletingBreakdownItemId] = useState(null);
+    const [breakdownItemError, setBreakdownItemError] = useState(null);
+
     const [updatingDescription, setUpdatingDescription] = useState(false);
     const [updateDescriptionError, setUpdateDescriptionError] = useState(null);
+
+    const [updatingName, setUpdatingName] = useState(false);
+    const [updateNameError, setUpdateNameError] = useState(null);
+
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState(null);
 
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
@@ -151,6 +161,69 @@ export const useRecipeDetail = (id) => {
         }
     };
 
+    // Name is editable any time the recipe is still under_processing.
+    const updateName = async (name) => {
+        setUpdatingName(true);
+        setUpdateNameError(null);
+        try {
+            await productionApi.recipes.updateName(id, { name });
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setUpdateNameError(extractErrorMessage(err, 'Failed to update name'));
+            throw err;
+        } finally {
+            setUpdatingName(false);
+        }
+    };
+
+    // Only while under_processing — yard_value/quantity/shelf_allocations,
+    // same shape as addBreakdownItem's payload.
+    const updateBreakdownItem = async (itemId, payload) => {
+        setUpdatingBreakdownItemId(itemId);
+        setBreakdownItemError(null);
+        try {
+            await productionApi.recipes.updateBreakdownItem(id, itemId, payload);
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setBreakdownItemError(extractErrorMessage(err, 'Failed to update breakdown item'));
+            throw err;
+        } finally {
+            setUpdatingBreakdownItemId(null);
+        }
+    };
+
+    // Only while under_processing — soft delete, no inventory reversal
+    // (the breakdown item never put anything into WIP stock pre-finish).
+    const deleteBreakdownItem = async (itemId) => {
+        setDeletingBreakdownItemId(itemId);
+        setBreakdownItemError(null);
+        try {
+            await productionApi.recipes.deleteBreakdownItem(id, itemId);
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setBreakdownItemError(extractErrorMessage(err, 'Failed to delete breakdown item'));
+            throw err;
+        } finally {
+            setDeletingBreakdownItemId(null);
+        }
+    };
+
+    // Only while under_processing. payload: { jumbo_shelf_allocations,
+    // cores_shelf_allocations } — no refetch on success, the recipe no
+    // longer exists; the page navigates away.
+    const deleteRecipe = async (payload) => {
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+            await productionApi.recipes.delete(id, payload);
+        } catch (err) {
+            setDeleteError(extractErrorMessage(err, 'Failed to delete recipe'));
+            throw err;
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     const finish = async () => {
         setFinishing(true);
         setFinishError(null);
@@ -240,7 +313,11 @@ export const useRecipeDetail = (id) => {
         issueMaterial, issuing, issueError,
         updateIssuedMaterial, updatingMaterial, updateMaterialError,
         addBreakdownItem, addingBreakdown, addBreakdownError,
+        updateBreakdownItem, updatingBreakdownItemId,
+        deleteBreakdownItem, deletingBreakdownItemId, breakdownItemError,
         updateDescription, updatingDescription, updateDescriptionError,
+        updateName, updatingName, updateNameError,
+        deleteRecipe, deleting, deleteError,
         finish, finishing, finishError,
         setTime, settingTime, setTimeError,
         addLabor, addingLabor, addLaborError,
@@ -298,8 +375,18 @@ export const useCuttingRecipeDetail = (id) => {
     const [addingBreakdown, setAddingBreakdown] = useState(false);
     const [addBreakdownError, setAddBreakdownError] = useState(null);
 
+    const [updatingBreakdownItemId, setUpdatingBreakdownItemId] = useState(null);
+    const [deletingBreakdownItemId, setDeletingBreakdownItemId] = useState(null);
+    const [breakdownItemError, setBreakdownItemError] = useState(null);
+
     const [updatingDescription, setUpdatingDescription] = useState(false);
     const [updateDescriptionError, setUpdateDescriptionError] = useState(null);
+
+    const [updatingName, setUpdatingName] = useState(false);
+    const [updateNameError, setUpdateNameError] = useState(null);
+
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState(null);
 
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
@@ -386,6 +473,61 @@ export const useCuttingRecipeDetail = (id) => {
             throw err;
         } finally {
             setUpdatingDescription(false);
+        }
+    };
+
+    const updateName = async (name) => {
+        setUpdatingName(true);
+        setUpdateNameError(null);
+        try {
+            await productionApi.cuttingRecipes.updateName(id, { name });
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setUpdateNameError(extractErrorMessage(err, 'Failed to update name'));
+            throw err;
+        } finally {
+            setUpdatingName(false);
+        }
+    };
+
+    const updateBreakdownItem = async (itemId, payload) => {
+        setUpdatingBreakdownItemId(itemId);
+        setBreakdownItemError(null);
+        try {
+            await productionApi.cuttingRecipes.updateBreakdownItem(id, itemId, payload);
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setBreakdownItemError(extractErrorMessage(err, 'Failed to update breakdown item'));
+            throw err;
+        } finally {
+            setUpdatingBreakdownItemId(null);
+        }
+    };
+
+    const deleteBreakdownItem = async (itemId) => {
+        setDeletingBreakdownItemId(itemId);
+        setBreakdownItemError(null);
+        try {
+            await productionApi.cuttingRecipes.deleteBreakdownItem(id, itemId);
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setBreakdownItemError(extractErrorMessage(err, 'Failed to delete breakdown item'));
+            throw err;
+        } finally {
+            setDeletingBreakdownItemId(null);
+        }
+    };
+
+    const deleteRecipe = async (payload) => {
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+            await productionApi.cuttingRecipes.delete(id, payload);
+        } catch (err) {
+            setDeleteError(extractErrorMessage(err, 'Failed to delete recipe'));
+            throw err;
+        } finally {
+            setDeleting(false);
         }
     };
 
@@ -478,7 +620,11 @@ export const useCuttingRecipeDetail = (id) => {
         issueMaterial, issuing, issueError,
         updateIssuedMaterial, updatingMaterial, updateMaterialError,
         addBreakdownItem, addingBreakdown, addBreakdownError,
+        updateBreakdownItem, updatingBreakdownItemId,
+        deleteBreakdownItem, deletingBreakdownItemId, breakdownItemError,
         updateDescription, updatingDescription, updateDescriptionError,
+        updateName, updatingName, updateNameError,
+        deleteRecipe, deleting, deleteError,
         finish, finishing, finishError,
         setTime, settingTime, setTimeError,
         addLabor, addingLabor, addLaborError,
@@ -542,6 +688,12 @@ export const usePackingRecipeDetail = (id) => {
 
     const [updatingDescription, setUpdatingDescription] = useState(false);
     const [updateDescriptionError, setUpdateDescriptionError] = useState(null);
+
+    const [updatingName, setUpdatingName] = useState(false);
+    const [updateNameError, setUpdateNameError] = useState(null);
+
+    const [deleting, setDeleting] = useState(false);
+    const [deleteError, setDeleteError] = useState(null);
 
     const [finishing, setFinishing] = useState(false);
     const [finishError, setFinishError] = useState(null);
@@ -645,6 +797,35 @@ export const usePackingRecipeDetail = (id) => {
         }
     };
 
+    const updateName = async (name) => {
+        setUpdatingName(true);
+        setUpdateNameError(null);
+        try {
+            await productionApi.packingRecipes.updateName(id, { name });
+            await fetchRecipe({ background: true });
+        } catch (err) {
+            setUpdateNameError(extractErrorMessage(err, 'Failed to update name'));
+            throw err;
+        } finally {
+            setUpdatingName(false);
+        }
+    };
+
+    // payload: { piece_shelf_allocations, material_shelf_allocations } — no
+    // refetch on success, the recipe no longer exists.
+    const deleteRecipe = async (payload) => {
+        setDeleting(true);
+        setDeleteError(null);
+        try {
+            await productionApi.packingRecipes.delete(id, payload);
+        } catch (err) {
+            setDeleteError(extractErrorMessage(err, 'Failed to delete recipe'));
+            throw err;
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     const finish = async (shelfAllocations) => {
         setFinishing(true);
         setFinishError(null);
@@ -736,6 +917,8 @@ export const usePackingRecipeDetail = (id) => {
         issueMaterial, issuingMaterial, issueMaterialError,
         updateIssuedMaterial, updatingMaterial, updateMaterialError,
         updateDescription, updatingDescription, updateDescriptionError,
+        updateName, updatingName, updateNameError,
+        deleteRecipe, deleting, deleteError,
         finish, finishing, finishError,
         setTime, settingTime, setTimeError,
         addLabor, addingLabor, addLaborError,

@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Pencil, CheckCircle2, Plus, Layers } from 'lucide-react';
+import React, { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Pencil, CheckCircle2, Plus, Layers, Trash2, X } from 'lucide-react';
 import { useRecipeDetail } from '../../hooks/useProduction';
 import { productionApi } from '../../services/productionApi';
 import { purchasesApi } from '../../services/purchasesApi';
@@ -371,14 +371,209 @@ const BreakdownForm = ({ onAdd }) => {
     );
 };
 
+// Inline edit form for one existing breakdown item — same fields as
+// BreakdownForm, pre-filled, PATCHes in place instead of creating a new row.
+const BreakdownItemEditForm = ({ item, onSave, onCancel }) => {
+    const { toast } = useToast();
+    const [yardValue, setYardValue] = useState(String(item.wip_product?.yard?.value ?? ''));
+    const [quantity, setQuantity] = useState(String(item.quantity));
+    const [allocations, setAllocations] = useState(
+        (item.shelf_allocations || []).map((a) => ({ shelf_id: String(a.shelf_id), quantity: String(a.quantity) })),
+    );
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState('');
+
+    const qty = parseFloat(quantity) || 0;
+    const canSubmit = parseFloat(yardValue) > 0 && qty > 0 && closeEnough(sumAlloc(allocations), qty);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSubmitting(true);
+        try {
+            await onSave({
+                yard_value: parseFloat(yardValue),
+                quantity: qty,
+                shelf_allocations: toShelfPayload(allocations),
+            });
+            toast.success('Breakdown item updated');
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to update breakdown item'));
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-4 p-4 bg-neutral-50 rounded-lg border border-neutral-200">
+            {error && <InlineAlert variant="error" message={error} />}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input
+                    label="Yard value"
+                    type="number" min="0.0001" step="0.0001"
+                    value={yardValue}
+                    onChange={(e) => setYardValue(e.target.value)}
+                    required
+                />
+                <Input
+                    label="Core quantity"
+                    type="number" min="0.0001" step="0.0001"
+                    value={quantity}
+                    onChange={(e) => { setQuantity(e.target.value); setAllocations([]); }}
+                    required
+                />
+            </div>
+            <ShelfAllocationEditor
+                value={allocations}
+                onChange={setAllocations}
+                onSearchShelves={searchShelvesForPutAway}
+                requiredQuantity={qty}
+                mode="putaway"
+            />
+            <div className="flex justify-end gap-3">
+                <Button type="button" variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
+                <Button type="submit" size="sm" loading={submitting} disabled={!canSubmit}>Save</Button>
+            </div>
+        </form>
+    );
+};
+
+// Only while under_processing — reverses every issued material back to RM
+// inventory at the shelves the user picks, then soft-deletes the recipe.
+// An inline panel (not a modal) so the ShelfAllocationEditor has room and
+// matches this page's own established "edit inline" pattern (description,
+// quantity) rather than introducing a new modal shape.
+const DeleteRecipeSection = ({ jumboMaterial, coresMaterial, onDelete, deleting, onDeleted }) => {
+    const { toast } = useToast();
+    const [open, setOpen] = useState(false);
+    const [jumboAllocations, setJumboAllocations] = useState([]);
+    const [coresAllocations, setCoresAllocations] = useState([]);
+    const [jumboShelves, setJumboShelves] = useState([]);
+    const [coresShelves, setCoresShelves] = useState([]);
+    const [shelvesLoading, setShelvesLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const loadCandidateShelves = async (productId) => {
+        const res = await purchasesApi.shelves.getCandidates(productId);
+        return Array.isArray(res) ? res : (res?.results ?? []);
+    };
+
+    const handleOpen = async () => {
+        setOpen(true);
+        setError('');
+        setJumboAllocations([]);
+        setCoresAllocations([]);
+        setShelvesLoading(true);
+        try {
+            const [j, c] = await Promise.all([
+                jumboMaterial ? loadCandidateShelves(jumboMaterial.product_id) : Promise.resolve([]),
+                coresMaterial ? loadCandidateShelves(coresMaterial.product_id) : Promise.resolve([]),
+            ]);
+            setJumboShelves(j);
+            setCoresShelves(c);
+        } catch (err) {
+            toast.error(extractErrorMessage(err, 'Failed to load candidate shelves'));
+        } finally {
+            setShelvesLoading(false);
+        }
+    };
+
+    const jumboOk = !jumboMaterial || closeEnough(sumAlloc(jumboAllocations), jumboMaterial.quantity);
+    const coresOk = !coresMaterial || closeEnough(sumAlloc(coresAllocations), coresMaterial.quantity);
+    const canDelete = jumboOk && coresOk;
+
+    const handleConfirm = async () => {
+        setError('');
+        try {
+            await onDelete({
+                jumbo_shelf_allocations: toShelfPayload(jumboAllocations),
+                cores_shelf_allocations: toShelfPayload(coresAllocations),
+            });
+            toast.success('Recipe deleted');
+            onDeleted();
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to delete recipe'));
+        }
+    };
+
+    if (!open) {
+        return (
+            <Card className="p-6 border-error-200" hover={false}>
+                <h3 className="font-semibold text-error-700 mb-1">Danger Zone</h3>
+                <p className="text-sm text-neutral-500 mb-3">
+                    Deleting this recipe reverses every issued material back to raw material inventory. Breakdown items are discarded — none of them have entered stock yet.
+                </p>
+                <Button variant="danger" size="sm" icon={Trash2} onClick={handleOpen}>Delete Recipe</Button>
+            </Card>
+        );
+    }
+
+    return (
+        <Card className="p-6 border-error-200" hover={false}>
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-error-700">Delete Recipe</h3>
+                <Button variant="secondary" size="sm" icon={X} onClick={() => setOpen(false)}>Cancel</Button>
+            </div>
+            {error && <InlineAlert variant="error" message={error} />}
+            {shelvesLoading ? (
+                <div className="flex items-center py-2"><LoadingSpinner size="sm" /></div>
+            ) : (
+                <div className="space-y-4">
+                    {jumboMaterial && (
+                        <div>
+                            <p className="text-sm font-medium text-neutral-700 mb-2">
+                                Return {jumboMaterial.quantity} Jumbo ({jumboMaterial.product_name}) to —
+                            </p>
+                            <ShelfAllocationEditor
+                                value={jumboAllocations}
+                                onChange={setJumboAllocations}
+                                shelves={jumboShelves}
+                                onSearchShelves={searchShelvesForPutAway}
+                                requiredQuantity={jumboMaterial.quantity}
+                                mode="putaway"
+                            />
+                        </div>
+                    )}
+                    {coresMaterial && (
+                        <div>
+                            <p className="text-sm font-medium text-neutral-700 mb-2">
+                                Return {coresMaterial.quantity} Cores ({coresMaterial.product_name}) to —
+                            </p>
+                            <ShelfAllocationEditor
+                                value={coresAllocations}
+                                onChange={setCoresAllocations}
+                                shelves={coresShelves}
+                                onSearchShelves={searchShelvesForPutAway}
+                                requiredQuantity={coresMaterial.quantity}
+                                mode="putaway"
+                            />
+                        </div>
+                    )}
+                    {!jumboMaterial && !coresMaterial && (
+                        <p className="text-sm text-neutral-500 italic">No material has been issued — nothing to return.</p>
+                    )}
+                    <div className="flex justify-end">
+                        <Button variant="danger" size="sm" icon={Trash2} loading={deleting} disabled={!canDelete} onClick={handleConfirm}>
+                            Confirm Delete
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </Card>
+    );
+};
+
 const RecipeDetailPage = () => {
     const { id } = useParams();
+    const navigate = useNavigate();
     const { toast } = useToast();
     const {
         recipe, loading, error, refetch,
         issueMaterial, updateIssuedMaterial,
-        addBreakdownItem,
+        addBreakdownItem, updateBreakdownItem, deleteBreakdownItem,
         updateDescription, updatingDescription,
+        updateName, updatingName,
+        deleteRecipe, deleting,
         finish, finishing,
         setTime, settingTime,
         addLabor, addingLabor,
@@ -395,6 +590,15 @@ const RecipeDetailPage = () => {
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState('');
     const [descriptionError, setDescriptionError] = useState('');
+
+    const [editingName, setEditingName] = useState(false);
+    const [nameDraft, setNameDraft] = useState('');
+    const [nameError, setNameError] = useState('');
+
+    const [confirmDeleteItemId, setConfirmDeleteItemId] = useState(null);
+    const [editingItemId, setEditingItemId] = useState(null);
+    const [deletingItem, setDeletingItem] = useState(false);
+    const [itemActionError, setItemActionError] = useState('');
 
     if (loading) {
         return (
@@ -446,6 +650,45 @@ const RecipeDetailPage = () => {
         }
     };
 
+    const startEditName = () => {
+        setNameDraft(recipe.name || '');
+        setNameError('');
+        setEditingName(true);
+    };
+
+    const handleSaveName = async (e) => {
+        e.preventDefault();
+        setNameError('');
+        try {
+            await updateName(nameDraft);
+            toast.success('Name updated');
+            setEditingName(false);
+        } catch (err) {
+            setNameError(extractErrorMessage(err, 'Failed to update name'));
+        }
+    };
+
+    const handleUpdateBreakdownItem = async (itemId, payload) => {
+        await updateBreakdownItem(itemId, payload);
+        setEditingItemId(null);
+    };
+
+    const handleDeleteBreakdownItem = async () => {
+        setItemActionError('');
+        setDeletingItem(true);
+        try {
+            await deleteBreakdownItem(confirmDeleteItemId);
+            toast.success('Breakdown item deleted');
+            setConfirmDeleteItemId(null);
+        } catch (err) {
+            const msg = extractErrorMessage(err, 'Failed to delete breakdown item');
+            setItemActionError(msg);
+            toast.error(msg);
+        } finally {
+            setDeletingItem(false);
+        }
+    };
+
     const handleFinish = async () => {
         setFinishError('');
         try {
@@ -465,7 +708,24 @@ const RecipeDetailPage = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <BackLink to="/production/recipes">Back to Rewinding Recipes</BackLink>
-                    <h1 className="text-3xl font-bold text-neutral-900 mt-1">{recipe.recipe_number} — {recipe.name}</h1>
+                    {!isFinished && editingName ? (
+                        <form onSubmit={handleSaveName} className="flex items-center gap-2 mt-1">
+                            {nameError && <span className="text-xs text-error-600">{nameError}</span>}
+                            <span className="text-3xl font-bold text-neutral-900">{recipe.recipe_number} —</span>
+                            <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} autoFocus required className="text-lg" />
+                            <Button type="submit" size="sm" loading={updatingName}>Save</Button>
+                            <Button type="button" variant="secondary" size="sm" onClick={() => setEditingName(false)}>Cancel</Button>
+                        </form>
+                    ) : (
+                        <h1 className="text-3xl font-bold text-neutral-900 mt-1 flex items-center gap-2">
+                            {recipe.recipe_number} — {recipe.name}
+                            {!isFinished && (
+                                <button type="button" onClick={startEditName} className="text-neutral-400 hover:text-neutral-600" title="Edit name">
+                                    <Pencil className="w-4 h-4" />
+                                </button>
+                            )}
+                        </h1>
+                    )}
                     <div className="flex gap-2 mt-1 flex-wrap items-center">
                         <RecipeStatusBadge status={recipe.status} />
                         {isFinished && recipe.cost_per_unit != null && (
@@ -608,6 +868,8 @@ const RecipeDetailPage = () => {
                     <Layers className="w-4 h-4" /> Breakdown Items
                 </h3>
 
+                {itemActionError && <InlineAlert variant="error" message={itemActionError} />}
+
                 {breakdownItems.length === 0 ? (
                     <EmptyState
                         title="No breakdown items yet"
@@ -626,28 +888,66 @@ const RecipeDetailPage = () => {
                                     {isFinished && (
                                         <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Full Cost</th>
                                     )}
+                                    {!isFinished && (
+                                        <th className="px-3 py-2 text-right text-xs font-medium text-neutral-500">Actions</th>
+                                    )}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-100">
                                 {breakdownItems.map((item) => (
-                                    <tr key={item.id} className="hover:bg-neutral-50">
-                                        <td className="px-3 py-2 text-sm">{item.wip_product?.name || 'N/A'}</td>
-                                        <td className="px-3 py-2 text-sm">{item.quantity}</td>
-                                        <td className="px-3 py-2 text-sm">{item.remaining_quantity}</td>
-                                        <td className="px-3 py-2 text-sm text-neutral-500">
-                                            {item.shelf_allocations?.length > 0
-                                                ? item.shelf_allocations.map((a) => `${a.shelf_name} (${a.quantity})`).join(', ')
-                                                : '—'}
-                                        </td>
-                                        <td className="px-3 py-2 text-sm text-right font-medium">
-                                            {item.unit_cost_snapshot != null ? parseFloat(item.unit_cost_snapshot).toFixed(2) : '—'}
-                                        </td>
-                                        {isFinished && (
-                                            <td className="px-3 py-2 text-sm text-right font-medium">
-                                                {item.full_unit_cost_snapshot != null ? parseFloat(item.full_unit_cost_snapshot).toFixed(2) : '—'}
+                                    <React.Fragment key={item.id}>
+                                        <tr className="hover:bg-neutral-50">
+                                            <td className="px-3 py-2 text-sm">{item.wip_product?.name || 'N/A'}</td>
+                                            <td className="px-3 py-2 text-sm">{item.quantity}</td>
+                                            <td className="px-3 py-2 text-sm">{item.remaining_quantity}</td>
+                                            <td className="px-3 py-2 text-sm text-neutral-500">
+                                                {item.shelf_allocations?.length > 0
+                                                    ? item.shelf_allocations.map((a) => `${a.shelf_name} (${a.quantity})`).join(', ')
+                                                    : '—'}
                                             </td>
+                                            <td className="px-3 py-2 text-sm text-right font-medium">
+                                                {item.unit_cost_snapshot != null ? parseFloat(item.unit_cost_snapshot).toFixed(2) : '—'}
+                                            </td>
+                                            {isFinished && (
+                                                <td className="px-3 py-2 text-sm text-right font-medium">
+                                                    {item.full_unit_cost_snapshot != null ? parseFloat(item.full_unit_cost_snapshot).toFixed(2) : '—'}
+                                                </td>
+                                            )}
+                                            {!isFinished && (
+                                                <td className="px-3 py-2 text-right">
+                                                    <div className="flex justify-end gap-1">
+                                                        <button
+                                                            type="button"
+                                                            title="Edit"
+                                                            onClick={() => setEditingItemId(editingItemId === item.id ? null : item.id)}
+                                                            className="p-1.5 text-neutral-400 hover:text-primary-600 rounded"
+                                                        >
+                                                            <Pencil className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            title="Delete"
+                                                            onClick={() => setConfirmDeleteItemId(item.id)}
+                                                            className="p-1.5 text-neutral-400 hover:text-error-600 rounded"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            )}
+                                        </tr>
+                                        {editingItemId === item.id && (
+                                            <tr>
+                                                <td colSpan={isFinished ? 6 : 6} className="px-3 pb-3">
+                                                    <BreakdownItemEditForm
+                                                        item={item}
+                                                        onSave={(payload) => handleUpdateBreakdownItem(item.id, payload)}
+                                                        onCancel={() => setEditingItemId(null)}
+                                                    />
+                                                </td>
+                                            </tr>
                                         )}
-                                    </tr>
+                                    </React.Fragment>
                                 ))}
                             </tbody>
                         </table>
@@ -656,6 +956,26 @@ const RecipeDetailPage = () => {
 
                 {!isFinished && <BreakdownForm onAdd={addBreakdownItem} />}
             </Card>
+
+            {!isFinished && (
+                <DeleteRecipeSection
+                    jumboMaterial={jumboMaterial}
+                    coresMaterial={coresMaterial}
+                    onDelete={deleteRecipe}
+                    deleting={deleting}
+                    onDeleted={() => navigate('/production/recipes')}
+                />
+            )}
+
+            <ConfirmDialog
+                isOpen={confirmDeleteItemId != null}
+                onClose={() => setConfirmDeleteItemId(null)}
+                onConfirm={handleDeleteBreakdownItem}
+                title="Delete Breakdown Item"
+                message="This item hasn't entered WIP stock yet (put-away only happens when the recipe finishes), so nothing needs to be reversed. This cannot be undone."
+                confirmText="Delete"
+                loading={deletingItem}
+            />
 
             <ConfirmDialog
                 isOpen={confirmFinishOpen}

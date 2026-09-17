@@ -25,8 +25,8 @@ from ..selectors import get_available_cutting_batches_for_fifo, get_packing_issu
 from ..utils import compute_fg_variant_key
 from ._shared import (
     _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
-    next_fg_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
-    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
+    next_fg_product_code, normalize_shelf_allocations, require_not_data_entry, require_under_processing,
+    return_fifo, soft_delete_recipe, spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -322,6 +322,63 @@ def update_packing_issued_material(*, recipe_id: int, new_quantity: Decimal, she
     issued.quantity = new_quantity
     issued.save(update_fields=["quantity"])
     return issued
+
+
+@transaction.atomic
+def delete_packing_recipe(*, recipe_id: int, piece_shelf_allocations: list[dict] = None, material_shelf_allocations: list[dict] = None, user) -> None:
+    """
+    Soft-deletes an under_processing Packing recipe, reversing its issued
+    piece (WIP, if any — via return_fifo against CuttingBreakdownItem
+    batches, same source/lock order as update_packing_issued_piece's
+    decrease branch) and issued packing material (RM, if any — via
+    return_fifo against PurchaseItem batches, same as
+    update_packing_issued_material's decrease branch). Packing has no
+    breakdown stage (see finish_packing_recipe) — nothing else to reverse.
+    """
+    recipe = get_locked_recipe(recipe_id)
+    _require_packing_recipe(recipe)
+    require_under_processing(recipe)
+    require_not_data_entry(recipe)
+
+    issued_piece = PackingIssuedPiece.objects.select_for_update().select_related("wip_product").filter(recipe_id=recipe_id).first()
+    if issued_piece is not None:
+        product = issued_piece.wip_product
+        merged, shelves_by_id = normalize_shelf_allocations(piece_shelf_allocations or [], required_total=issued_piece.quantity)
+        from ..models import CuttingBreakdownItem
+        return_fifo(
+            issued_material=issued_piece, quantity=issued_piece.quantity,
+            batch_model=CuttingBreakdownItem, batch_field="piece_batch",
+            batch_lock_order_by=("recipe__finished_at", "pk"),
+        )
+        sync_wip_inventory(product=product, quantity_delta=issued_piece.quantity, user=user)
+        apply_wip_shelf_allocations(
+            product=product,
+            allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],
+            sign=1, reason=WipShelfStockMovement.Reason.PACKING_ISSUE_CONSUMPTION,
+            reference=recipe.recipe_number, user=user,
+        )
+        _record_piece_shelf_draws(issued_piece=issued_piece, merged=merged, direction=PackingPieceShelfDraw.Direction.RETURN)
+
+    issued_material = PackingIssuedMaterial.objects.select_for_update().select_related("product").filter(recipe_id=recipe_id).first()
+    if issued_material is not None:
+        product = issued_material.product
+        merged, shelves_by_id = normalize_shelf_allocations(material_shelf_allocations or [], required_total=issued_material.quantity)
+        from purchases.models import PurchaseItem
+        return_fifo(
+            issued_material=issued_material, quantity=issued_material.quantity,
+            batch_model=PurchaseItem, batch_field="purchase_item",
+            batch_lock_order_by=("order__confirmed_at", "pk"),
+        )
+        sync_rm_inventory(product=product, quantity_delta=issued_material.quantity, user=user)
+        apply_rm_shelf_allocations(
+            product=product,
+            allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],
+            sign=1, reason=ShelfStockMovement.Reason.RECIPE_ISSUE_CONSUMPTION,
+            reference=recipe.recipe_number, user=user,
+        )
+        _record_material_shelf_draws(issued_material=issued_material, merged=merged, direction=PackingMaterialShelfDraw.Direction.RETURN)
+
+    soft_delete_recipe(recipe, user)
 
 
 # ---------------------------------------------------------------------------

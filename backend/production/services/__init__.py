@@ -5,27 +5,31 @@
 # import X` still works unchanged after the split — keep this list in sync
 # with rewinding.py's public functions.
 from .rewinding import (
-    add_breakdown_item, create_recipe, finish_recipe, issue_material,
-    update_issued_material, update_recipe_description,
+    add_breakdown_item, create_recipe, delete_breakdown_item, delete_recipe, finish_recipe,
+    issue_material, update_breakdown_item, update_issued_material, update_recipe_description,
 )
 from .cutting import (
-    add_cutting_breakdown_item, create_cutting_recipe, finish_cutting_recipe,
-    issue_cutting_material, update_cutting_issued_material,
+    add_cutting_breakdown_item, create_cutting_recipe, delete_cutting_breakdown_item,
+    delete_cutting_recipe, finish_cutting_recipe, issue_cutting_material,
+    update_cutting_breakdown_item, update_cutting_issued_material,
 )
 from .packing import (
-    create_packing_recipe, finish_packing_recipe, issue_packing_material, issue_packing_piece,
-    update_packing_issued_material, update_packing_issued_piece,
+    create_packing_recipe, delete_packing_recipe, finish_packing_recipe, issue_packing_material,
+    issue_packing_piece, update_packing_issued_material, update_packing_issued_piece,
 )
 from ._shared import (
-    add_recipe_labor, add_recipe_machine, remove_recipe_labor, remove_recipe_machine, set_recipe_time,
+    add_recipe_labor, add_recipe_machine, remove_recipe_labor, remove_recipe_machine,
+    set_recipe_time, update_recipe_name,
 )
 
 __all__ = [
-    "add_breakdown_item", "create_recipe", "finish_recipe", "issue_material",
-    "update_issued_material", "update_recipe_description",
-    "add_cutting_breakdown_item", "create_cutting_recipe", "finish_cutting_recipe",
-    "issue_cutting_material", "update_cutting_issued_material",
-    "create_packing_recipe", "finish_packing_recipe", "issue_packing_material",
+    "add_breakdown_item", "create_recipe", "delete_breakdown_item", "delete_recipe", "finish_recipe",
+    "issue_material", "update_breakdown_item", "update_issued_material", "update_recipe_description",
+    "add_cutting_breakdown_item", "create_cutting_recipe", "delete_cutting_breakdown_item",
+    "delete_cutting_recipe", "finish_cutting_recipe", "issue_cutting_material",
+    "update_cutting_breakdown_item", "update_cutting_issued_material",
+    "create_packing_recipe", "delete_packing_recipe", "finish_packing_recipe", "issue_packing_material",
     "issue_packing_piece", "update_packing_issued_material", "update_packing_issued_piece",
-    "add_recipe_labor", "add_recipe_machine", "remove_recipe_labor", "remove_recipe_machine", "set_recipe_time",
+    "add_recipe_labor", "add_recipe_machine", "remove_recipe_labor", "remove_recipe_machine",
+    "set_recipe_time", "update_recipe_name",
 ]

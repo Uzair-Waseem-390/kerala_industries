@@ -103,6 +103,32 @@ class UpdateRecipeDescriptionSerializer(serializers.Serializer):
     description = serializers.CharField(allow_blank=True)
 
 
+class UpdateRecipeNameSerializer(serializers.Serializer):
+    """Reused across all 3 recipe-type views — same pattern as UpdateRecipeDescriptionSerializer."""
+    name = serializers.CharField(max_length=255)
+
+
+class DeleteRecipeSerializer(serializers.Serializer):
+    """
+    Reversal shelf picks for Rewinding's delete — each optional (only
+    required if that material was actually issued; the service skips a
+    kind with no RecipeIssuedMaterial row). ShelfAllocationInputSerializer
+    is purchases.serializers' shared shape, same one every issue/update
+    endpoint here already uses.
+    """
+    jumbo_shelf_allocations = ShelfAllocationInputSerializer(many=True, required=False, default=list)
+    cores_shelf_allocations = ShelfAllocationInputSerializer(many=True, required=False, default=list)
+
+
+class DeleteCuttingRecipeSerializer(serializers.Serializer):
+    shelf_allocations = ShelfAllocationInputSerializer(many=True, required=False, default=list)
+
+
+class DeletePackingRecipeSerializer(serializers.Serializer):
+    piece_shelf_allocations    = ShelfAllocationInputSerializer(many=True, required=False, default=list)
+    material_shelf_allocations = ShelfAllocationInputSerializer(many=True, required=False, default=list)
+
+
 class RecipeMaterialShelfDrawReadSerializer(serializers.ModelSerializer):
     shelf_id   = serializers.IntegerField(source="shelf.id", read_only=True)
     shelf_name = serializers.CharField(source="shelf.name", read_only=True)

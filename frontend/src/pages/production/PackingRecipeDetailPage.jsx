@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Pencil, CheckCircle2, Plus, PackageCheck } from 'lucide-react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Pencil, CheckCircle2, Plus, PackageCheck, Trash2, X } from 'lucide-react';
 import { usePackingRecipeDetail } from '../../hooks/useProduction';
 import { productionApi } from '../../services/productionApi';
 import { purchasesApi } from '../../services/purchasesApi';
@@ -610,14 +610,136 @@ const FinishPackingModal = ({ isOpen, onClose, requiredQuantity, onFinish, finis
     );
 };
 
+// Only while under_processing — reverses the issued piece (WIP) and issued
+// packing material (RM) back to their inventories at the shelves the user
+// picks, then soft-deletes the recipe. Packing has no breakdown stage, so
+// nothing else needs reversing. Mirrors Rewinding's DeleteRecipeSection.
+const DeletePackingRecipeSection = ({ issuedPiece, issuedMaterial, onDelete, deleting, onDeleted }) => {
+    const { toast } = useToast();
+    const [open, setOpen] = useState(false);
+    const [pieceAllocations, setPieceAllocations] = useState([]);
+    const [materialAllocations, setMaterialAllocations] = useState([]);
+    const [pieceShelves, setPieceShelves] = useState([]);
+    const [materialShelves, setMaterialShelves] = useState([]);
+    const [shelvesLoading, setShelvesLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleOpen = async () => {
+        setOpen(true);
+        setError('');
+        setPieceAllocations([]);
+        setMaterialAllocations([]);
+        setShelvesLoading(true);
+        try {
+            const [p, m] = await Promise.all([
+                issuedPiece ? loadWipCandidateShelves(issuedPiece.wip_product?.id) : Promise.resolve([]),
+                issuedMaterial ? loadRmCandidateShelves(issuedMaterial.product_id) : Promise.resolve([]),
+            ]);
+            setPieceShelves(p);
+            setMaterialShelves(m);
+        } catch (err) {
+            toast.error(extractErrorMessage(err, 'Failed to load candidate shelves'));
+        } finally {
+            setShelvesLoading(false);
+        }
+    };
+
+    const pieceOk = !issuedPiece || closeEnough(sumAlloc(pieceAllocations), issuedPiece.quantity);
+    const materialOk = !issuedMaterial || closeEnough(sumAlloc(materialAllocations), issuedMaterial.quantity);
+    const canDelete = pieceOk && materialOk;
+
+    const handleConfirm = async () => {
+        setError('');
+        try {
+            await onDelete({
+                piece_shelf_allocations: toShelfPayload(pieceAllocations),
+                material_shelf_allocations: toShelfPayload(materialAllocations),
+            });
+            toast.success('Recipe deleted');
+            onDeleted();
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to delete recipe'));
+        }
+    };
+
+    if (!open) {
+        return (
+            <Card className="p-6 border-error-200" hover={false}>
+                <h3 className="font-semibold text-error-700 mb-1">Danger Zone</h3>
+                <p className="text-sm text-neutral-500 mb-3">
+                    Deleting this recipe reverses the issued piece and packing material back to inventory.
+                </p>
+                <Button variant="danger" size="sm" icon={Trash2} onClick={handleOpen}>Delete Recipe</Button>
+            </Card>
+        );
+    }
+
+    return (
+        <Card className="p-6 border-error-200" hover={false}>
+            <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-error-700">Delete Recipe</h3>
+                <Button variant="secondary" size="sm" icon={X} onClick={() => setOpen(false)}>Cancel</Button>
+            </div>
+            {error && <InlineAlert variant="error" message={error} />}
+            {shelvesLoading ? (
+                <div className="flex items-center py-2"><LoadingSpinner size="sm" /></div>
+            ) : (
+                <div className="space-y-4">
+                    {issuedPiece && (
+                        <div>
+                            <p className="text-sm font-medium text-neutral-700 mb-2">
+                                Return {issuedPiece.quantity} {issuedPiece.wip_product?.name} to —
+                            </p>
+                            <ShelfAllocationEditor
+                                value={pieceAllocations}
+                                onChange={setPieceAllocations}
+                                shelves={pieceShelves}
+                                onSearchShelves={searchShelvesForPutAway}
+                                requiredQuantity={issuedPiece.quantity}
+                                mode="putaway"
+                            />
+                        </div>
+                    )}
+                    {issuedMaterial && (
+                        <div>
+                            <p className="text-sm font-medium text-neutral-700 mb-2">
+                                Return {issuedMaterial.quantity} {issuedMaterial.product_name} to —
+                            </p>
+                            <ShelfAllocationEditor
+                                value={materialAllocations}
+                                onChange={setMaterialAllocations}
+                                shelves={materialShelves}
+                                onSearchShelves={searchShelvesForPutAway}
+                                requiredQuantity={issuedMaterial.quantity}
+                                mode="putaway"
+                            />
+                        </div>
+                    )}
+                    {!issuedPiece && !issuedMaterial && (
+                        <p className="text-sm text-neutral-500 italic">Nothing has been issued — nothing to return.</p>
+                    )}
+                    <div className="flex justify-end">
+                        <Button variant="danger" size="sm" icon={Trash2} loading={deleting} disabled={!canDelete} onClick={handleConfirm}>
+                            Confirm Delete
+                        </Button>
+                    </div>
+                </div>
+            )}
+        </Card>
+    );
+};
+
 const PackingRecipeDetailPage = () => {
     const { id } = useParams();
+    const navigate = useNavigate();
     const { toast } = useToast();
     const {
         recipe, loading, error, refetch,
         issuePiece, updateIssuedPiece,
         issueMaterial, updateIssuedMaterial,
         updateDescription, updatingDescription,
+        updateName, updatingName,
+        deleteRecipe, deleting,
         finish, finishing,
         setTime, settingTime,
         addLabor, addingLabor,
@@ -631,6 +753,10 @@ const PackingRecipeDetailPage = () => {
     const [editingDescription, setEditingDescription] = useState(false);
     const [descriptionDraft, setDescriptionDraft] = useState('');
     const [descriptionError, setDescriptionError] = useState('');
+
+    const [editingName, setEditingName] = useState(false);
+    const [nameDraft, setNameDraft] = useState('');
+    const [nameError, setNameError] = useState('');
 
     if (loading) {
         return (
@@ -689,12 +815,47 @@ const PackingRecipeDetailPage = () => {
         setShowFinishModal(false);
     };
 
+    const startEditName = () => {
+        setNameDraft(recipe.name || '');
+        setNameError('');
+        setEditingName(true);
+    };
+
+    const handleSaveName = async (e) => {
+        e.preventDefault();
+        setNameError('');
+        try {
+            await updateName(nameDraft);
+            toast.success('Name updated');
+            setEditingName(false);
+        } catch (err) {
+            setNameError(extractErrorMessage(err, 'Failed to update name'));
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <BackLink to="/production/packing-recipes">Back to Packing Recipes</BackLink>
-                    <h1 className="text-3xl font-bold text-neutral-900 mt-1">{recipe.recipe_number} — {recipe.name}</h1>
+                    {!isFinished && editingName ? (
+                        <form onSubmit={handleSaveName} className="flex items-center gap-2 mt-1">
+                            {nameError && <span className="text-xs text-error-600">{nameError}</span>}
+                            <span className="text-3xl font-bold text-neutral-900">{recipe.recipe_number} —</span>
+                            <Input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} autoFocus required className="text-lg" />
+                            <Button type="submit" size="sm" loading={updatingName}>Save</Button>
+                            <Button type="button" variant="secondary" size="sm" onClick={() => setEditingName(false)}>Cancel</Button>
+                        </form>
+                    ) : (
+                        <h1 className="text-3xl font-bold text-neutral-900 mt-1 flex items-center gap-2">
+                            {recipe.recipe_number} — {recipe.name}
+                            {!isFinished && (
+                                <button type="button" onClick={startEditName} className="text-neutral-400 hover:text-neutral-600" title="Edit name">
+                                    <Pencil className="w-4 h-4" />
+                                </button>
+                            )}
+                        </h1>
+                    )}
                     <div className="flex gap-2 mt-1 flex-wrap items-center">
                         <RecipeStatusBadge status={recipe.status} />
                         {isFinished && recipe.cost_per_unit != null && (
@@ -870,6 +1031,16 @@ const PackingRecipeDetailPage = () => {
                         </div>
                     </div>
                 </Card>
+            )}
+
+            {!isFinished && (
+                <DeletePackingRecipeSection
+                    issuedPiece={issuedPiece}
+                    issuedMaterial={issuedMaterial}
+                    onDelete={deleteRecipe}
+                    deleting={deleting}
+                    onDeleted={() => navigate('/production/packing-recipes')}
+                />
             )}
 
             <FinishPackingModal

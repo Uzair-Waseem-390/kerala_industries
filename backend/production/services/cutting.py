@@ -19,8 +19,8 @@ from ..selectors import get_available_wip_batches_for_fifo, get_cutting_issued_m
 from ..utils import compute_wip_variant_key
 from ._shared import (
     _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
-    next_wip_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
-    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
+    next_wip_product_code, normalize_shelf_allocations, require_not_data_entry, require_under_processing,
+    return_fifo, soft_delete_recipe, spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -186,6 +186,101 @@ def update_cutting_issued_material(*, recipe_id: int, new_quantity: Decimal, she
 
 
 @transaction.atomic
+def delete_cutting_recipe(*, recipe_id: int, shelf_allocations: list[dict] = None, user) -> None:
+    """
+    Soft-deletes an under_processing Cutting recipe, reversing its issued
+    WIP core material (if any) back to WIP inventory via return_fifo at
+    FULL issued quantity — same batch source (RecipeBreakdownItem) and
+    lock order update_cutting_issued_material's decrease branch already
+    uses. Breakdown items need no reversal — see delete_recipe's docstring
+    (rewinding.py), same reasoning.
+    """
+    recipe = get_locked_recipe(recipe_id)
+    _require_cutting_recipe(recipe)
+    require_under_processing(recipe)
+    require_not_data_entry(recipe)
+
+    issued = CuttingIssuedMaterial.objects.select_for_update().select_related("wip_product").filter(recipe_id=recipe_id).first()
+    if issued is not None:
+        product = issued.wip_product
+        merged, shelves_by_id = normalize_shelf_allocations(shelf_allocations or [], required_total=issued.quantity)
+        return_fifo(
+            issued_material=issued, quantity=issued.quantity,
+            batch_model=RecipeBreakdownItem, batch_field="wip_batch",
+            batch_lock_order_by=("recipe__finished_at", "pk"),
+        )
+        sync_wip_inventory(product=product, quantity_delta=issued.quantity, user=user)
+        apply_wip_shelf_allocations(
+            product=product,
+            allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],
+            sign=1, reason=WipShelfStockMovement.Reason.CUTTING_ISSUE_CONSUMPTION,
+            reference=recipe.recipe_number, user=user,
+        )
+        _record_cutting_shelf_draws(issued_material=issued, merged=merged, direction=CuttingMaterialShelfDraw.Direction.RETURN)
+
+    soft_delete_recipe(recipe, user)
+
+
+def _resolve_or_create_cut_wip_product(*, core_product, length_mm: Decimal, user) -> WipProduct:
+    """
+    Resolves (binding+yard from the issued core, length_mm given) to a
+    WipProduct, creating the lookup and/or the WipProduct itself if this
+    exact combination has never been seen before. Factored out of
+    add_cutting_breakdown_item (2026-09-17) so update_cutting_breakdown_item
+    can re-derive the WipProduct when length_mm changes without duplicating
+    the get-or-create/IntegrityError-race handling.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    if core_product.binding_id is None or core_product.yard_id is None:
+        raise ValidationError({"issued_material": f"'{core_product.name}' is missing binding/yard attributes."})
+
+    from ..models import RewoundCoreLengthMm
+    length_lookup, _ = RewoundCoreLengthMm.objects.get_or_create(
+        value=length_mm, defaults={"created_by": user, "updated_by": user},
+    )
+
+    variant_key = compute_wip_variant_key(
+        binding_id=core_product.binding_id, yard_id=core_product.yard_id, length_mm_id=length_lookup.id,
+        stage=WipProduct.Stage.CUTTING,
+    )
+    wip_product = WipProduct.objects.filter(variant_key=variant_key).first()
+    if wip_product is not None:
+        return wip_product
+
+    name = f"{core_product.binding.value} {_fmt(core_product.yard.value)} yard {_fmt(length_lookup.value)}"
+    try:
+        with transaction.atomic():
+            wip_product = WipProduct.objects.create(
+                name=name, code=next_wip_product_code(), family=core_product.family, binding=core_product.binding,
+                yard=core_product.yard, length_mm=length_lookup,
+                stage=WipProduct.Stage.CUTTING, variant_key=variant_key,
+                created_by=user, updated_by=user,
+            )
+            create_registry_entry(
+                type=ProductRegistryEntry.Type.WIP_PIECE, wip_product=wip_product,
+                name=wip_product.name, code=wip_product.code, category="WIP",
+            )
+    except IntegrityError:
+        # Lost a create race against a concurrent identical breakdown —
+        # OR the row occupying variant_key is soft-deleted, in which
+        # case the pre-check above (soft-delete-filtered manager)
+        # wouldn't have found it either. Mirrors
+        # rewinding.add_breakdown_item's identical fix for the same race.
+        wip_product = WipProduct.all_objects.filter(variant_key=variant_key).first()
+        if wip_product is None:
+            raise
+        if wip_product.is_deleted:
+            raise ValidationError({
+                "wip_product": (
+                    f"A previously deleted WIP product ('{wip_product.name}') already used this "
+                    f"exact attribute combination. Restore it before adding this breakdown item."
+                )
+            })
+    return wip_product
+
+
+@transaction.atomic
 def add_cutting_breakdown_item(*, recipe_id: int, length_mm: Decimal, quantity: Decimal, shelf_allocations: list[dict], user) -> CuttingBreakdownItem:
     from django.http import Http404
     from rest_framework.exceptions import ValidationError
@@ -204,50 +299,7 @@ def add_cutting_breakdown_item(*, recipe_id: int, length_mm: Decimal, quantity: 
     except Http404:
         raise ValidationError({"issued_material": "Cores must be issued before adding a breakdown item."})
 
-    core_product = issued.wip_product
-    if core_product.binding_id is None or core_product.yard_id is None:
-        raise ValidationError({"issued_material": f"'{core_product.name}' is missing binding/yard attributes."})
-
-    from ..models import RewoundCoreLengthMm
-    length_lookup, _ = RewoundCoreLengthMm.objects.get_or_create(
-        value=length_mm, defaults={"created_by": user, "updated_by": user},
-    )
-
-    variant_key = compute_wip_variant_key(
-        binding_id=core_product.binding_id, yard_id=core_product.yard_id, length_mm_id=length_lookup.id,
-        stage=WipProduct.Stage.CUTTING,
-    )
-    wip_product = WipProduct.objects.filter(variant_key=variant_key).first()
-    if wip_product is None:
-        name = f"{core_product.binding.value} {_fmt(core_product.yard.value)} yard {_fmt(length_lookup.value)}"
-        try:
-            with transaction.atomic():
-                wip_product = WipProduct.objects.create(
-                    name=name, code=next_wip_product_code(), family=core_product.family, binding=core_product.binding,
-                    yard=core_product.yard, length_mm=length_lookup,
-                    stage=WipProduct.Stage.CUTTING, variant_key=variant_key,
-                    created_by=user, updated_by=user,
-                )
-                create_registry_entry(
-                    type=ProductRegistryEntry.Type.WIP_PIECE, wip_product=wip_product,
-                    name=wip_product.name, code=wip_product.code, category="WIP",
-                )
-        except IntegrityError:
-            # Lost a create race against a concurrent identical breakdown —
-            # OR the row occupying variant_key is soft-deleted, in which
-            # case the pre-check above (soft-delete-filtered manager)
-            # wouldn't have found it either. Mirrors
-            # rewinding.add_breakdown_item's identical fix for the same race.
-            wip_product = WipProduct.all_objects.filter(variant_key=variant_key).first()
-            if wip_product is None:
-                raise
-            if wip_product.is_deleted:
-                raise ValidationError({
-                    "wip_product": (
-                        f"A previously deleted WIP product ('{wip_product.name}') already used this "
-                        f"exact attribute combination. Restore it before adding this breakdown item."
-                    )
-                })
+    wip_product = _resolve_or_create_cut_wip_product(core_product=issued.wip_product, length_mm=length_mm, user=user)
 
     merged, shelves_by_id = normalize_shelf_allocations(shelf_allocations, required_total=quantity)
 
@@ -270,6 +322,69 @@ def add_cutting_breakdown_item(*, recipe_id: int, length_mm: Decimal, quantity: 
         for sid, qty in merged.items() if qty > 0
     ])
     return item
+
+
+@transaction.atomic
+def update_cutting_breakdown_item(*, recipe_id: int, item_id: int, length_mm: Decimal, quantity: Decimal, shelf_allocations: list[dict], user) -> CuttingBreakdownItem:
+    """Re-derives wip_product from the (possibly changed) length_mm via the same resolver add_cutting_breakdown_item uses, then replaces quantity + shelf allocations in place."""
+    from rest_framework.exceptions import ValidationError
+
+    recipe = get_locked_recipe(recipe_id)
+    _require_cutting_recipe(recipe)
+    require_under_processing(recipe)
+
+    if length_mm <= 0:
+        raise ValidationError({"length_mm": "Length (mm) must be greater than zero."})
+    if quantity <= 0:
+        raise ValidationError({"quantity": "Quantity must be greater than zero."})
+
+    item = get_object_or_404(
+        CuttingBreakdownItem.objects.select_for_update().select_related("recipe"),
+        pk=item_id, recipe_id=recipe_id, is_deleted=False,
+    )
+
+    from django.http import Http404
+    try:
+        issued = get_cutting_issued_material(recipe_id=recipe_id)
+    except Http404:
+        raise ValidationError({"issued_material": "Cores must be issued before editing a breakdown item."})
+
+    wip_product = _resolve_or_create_cut_wip_product(core_product=issued.wip_product, length_mm=length_mm, user=user)
+
+    merged, shelves_by_id = normalize_shelf_allocations(shelf_allocations, required_total=quantity)
+
+    item.shelf_allocations.all().delete()
+    CuttingBreakdownItemShelfAllocation.objects.bulk_create([
+        CuttingBreakdownItemShelfAllocation(breakdown_item=item, shelf_id=sid, quantity=qty)
+        for sid, qty in merged.items() if qty > 0
+    ])
+
+    # remaining_quantity == quantity always, while under_processing — same
+    # reasoning as rewinding.update_breakdown_item.
+    item.wip_product = wip_product
+    item.length_mm = length_mm
+    item.quantity = quantity
+    item.remaining_quantity = quantity
+    item.updated_by = user
+    item.save(update_fields=["wip_product", "length_mm", "quantity", "remaining_quantity", "updated_by", "updated_at"])
+    return item
+
+
+@transaction.atomic
+def delete_cutting_breakdown_item(*, recipe_id: int, item_id: int, user) -> None:
+    """Soft-delete only — no inventory reversal needed (see delete_breakdown_item's docstring, same reasoning)."""
+    recipe = get_locked_recipe(recipe_id)
+    _require_cutting_recipe(recipe)
+    require_under_processing(recipe)
+
+    item = get_object_or_404(
+        CuttingBreakdownItem.objects.select_for_update(),
+        pk=item_id, recipe_id=recipe_id, is_deleted=False,
+    )
+    item.is_deleted = True
+    item.deleted_at = timezone.now()
+    item.deleted_by = user
+    item.save(update_fields=["is_deleted", "deleted_at", "deleted_by"])
 
 
 @transaction.atomic

@@ -6,6 +6,8 @@ discussion on not repeating purchases/billing's file-growth mistake).
 """
 from decimal import ROUND_HALF_UP, Decimal
 
+from django.utils import timezone
+
 from purchases.services import _validate_shelf_ids_exist, next_reference
 
 from ..models import Recipe, RecipeLabor, RecipeMachine
@@ -161,6 +163,49 @@ def require_under_processing(recipe: Recipe) -> None:
     from rest_framework.exceptions import ValidationError
     if recipe.status != Recipe.Status.UNDER_PROCESSING:
         raise ValidationError({"status": "This recipe is finished and can no longer be edited."})
+
+
+def require_not_data_entry(recipe: Recipe) -> None:
+    """
+    Delete is out of scope for the synthetic opening-stock bootstrap
+    recipes (production.services.opening_stock, is_data_entry=True) — that
+    data has its own separate lifecycle, not the manufacturing workflow
+    this action is for.
+    """
+    from rest_framework.exceptions import ValidationError
+    if recipe.is_data_entry:
+        raise ValidationError({"recipe": "This recipe cannot be deleted."})
+
+
+def update_recipe_name(*, recipe_id: int, name: str, user) -> Recipe:
+    """Fixed 2026-09-17 — mirrors update_recipe_description exactly, just the other editable-while-under-processing field."""
+    from rest_framework.exceptions import ValidationError
+
+    recipe = get_locked_recipe(recipe_id)
+    require_under_processing(recipe)
+    if not name or not name.strip():
+        raise ValidationError({"name": "Name is required."})
+    recipe.name = name.strip()
+    recipe.updated_by = user
+    recipe.save(update_fields=["name", "updated_by", "updated_at"])
+    return recipe
+
+
+def soft_delete_recipe(recipe: Recipe, user) -> None:
+    """
+    Same shape as purchases.services._soft_delete / billing.services
+    ._soft_delete — only the Recipe row itself is marked; every child
+    detail row (RecipeIssuedMaterial, RecipeBreakdownItem, RecipeLabor,
+    RecipeMachine, and the Cutting/Packing equivalents) becomes
+    unreachable automatically since get_locked_recipe/get_recipe_by_id
+    already filter is_deleted=False and every child is only ever queried
+    through recipe_id. Called by each stage's own delete_*_recipe AFTER
+    that stage's own issued-material reversal.
+    """
+    recipe.is_deleted = True
+    recipe.deleted_at = timezone.now()
+    recipe.deleted_by = user
+    recipe.save(update_fields=["is_deleted", "deleted_at", "deleted_by"])
 
 
 def normalize_shelf_allocations(allocations: list[dict], *, required_total: Decimal, field_label: str = "shelf_allocations"):

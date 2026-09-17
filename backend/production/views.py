@@ -17,23 +17,26 @@ from .selectors import (
 from .serializers import (
     AddBreakdownItemSerializer, AddCuttingBreakdownItemSerializer, AddRecipeLaborSerializer,
     AddRecipeMachineSerializer, CandidateShelfSerializer, CreateCuttingRecipeSerializer,
-    CreatePackingRecipeSerializer, CuttingRecipeReadSerializer,
+    CreatePackingRecipeSerializer, CuttingRecipeReadSerializer, DeleteCuttingRecipeSerializer,
+    DeletePackingRecipeSerializer, DeleteRecipeSerializer,
     FgInventoryReadSerializer, FgShelfStockReadSerializer, FinishPackingRecipeSerializer,
     IssuableCuttingPieceSerializer, IssuableProductSerializer, IssuableWipCoreSerializer,
     IssueCuttingMaterialSerializer, IssueMaterialSerializer, IssuePackingMaterialSerializer,
     IssuePackingPieceSerializer, PackingRecipeReadSerializer, RecipeCreateSerializer,
     RecipeReadSerializer, RewoundCoreBindingReadSerializer, RewoundCoreLengthMmReadSerializer,
     RewoundCoreYardReadSerializer, SetRecipeTimeSerializer, UpdateIssuedMaterialSerializer,
-    UpdateRecipeDescriptionSerializer, WipInventoryReadSerializer, WipProductReadSerializer,
-    WipShelfStockReadSerializer,
+    UpdateRecipeDescriptionSerializer, UpdateRecipeNameSerializer, WipInventoryReadSerializer,
+    WipProductReadSerializer, WipShelfStockReadSerializer,
 )
 from .services import (
     add_breakdown_item, add_cutting_breakdown_item, add_recipe_labor, add_recipe_machine,
-    create_cutting_recipe, create_packing_recipe, create_recipe, finish_cutting_recipe,
-    finish_packing_recipe, finish_recipe, issue_cutting_material, issue_material,
-    issue_packing_material, issue_packing_piece, remove_recipe_labor, remove_recipe_machine,
-    set_recipe_time, update_cutting_issued_material, update_issued_material,
-    update_packing_issued_material, update_packing_issued_piece, update_recipe_description,
+    create_cutting_recipe, create_packing_recipe, create_recipe, delete_breakdown_item,
+    delete_cutting_breakdown_item, delete_cutting_recipe, delete_packing_recipe, delete_recipe,
+    finish_cutting_recipe, finish_packing_recipe, finish_recipe, issue_cutting_material,
+    issue_material, issue_packing_material, issue_packing_piece, remove_recipe_labor,
+    remove_recipe_machine, set_recipe_time, update_breakdown_item, update_cutting_breakdown_item,
+    update_cutting_issued_material, update_issued_material, update_packing_issued_material,
+    update_packing_issued_piece, update_recipe_description, update_recipe_name,
 )
 
 
@@ -207,12 +210,31 @@ class RecipeListCreateView(generics.ListCreateAPIView):
         return Response(RecipeReadSerializer(recipe).data, status=status.HTTP_201_CREATED)
 
 
-class RecipeRetrieveView(generics.RetrieveAPIView):
+class RecipeRetrieveView(generics.RetrieveDestroyAPIView):
+    """
+    DELETE reads a body (DeleteRecipeSerializer's shelf allocations for
+    whichever materials were actually issued) — DRF parses a request body
+    on DELETE the same as any other method, no framework limitation. Same
+    destroy() override pattern as purchases.views
+    .PurchaseOrderDetailView.destroy().
+    """
     permission_classes = [IsAdminOrSuperuser]
     serializer_class    = RecipeReadSerializer
 
     def get_object(self):
         return get_recipe_by_id(self.kwargs["pk"])
+
+    def destroy(self, request, *args, **kwargs):
+        serializer = DeleteRecipeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        delete_recipe(
+            recipe_id=self.kwargs["pk"],
+            jumbo_shelf_allocations=d.get("jumbo_shelf_allocations"),
+            cores_shelf_allocations=d.get("cores_shelf_allocations"),
+            user=request.user,
+        )
+        return Response({"detail": "Recipe deleted."}, status=status.HTTP_200_OK)
 
 
 class UpdateRecipeDescriptionView(APIView):
@@ -223,6 +245,17 @@ class UpdateRecipeDescriptionView(APIView):
         serializer = UpdateRecipeDescriptionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         update_recipe_description(recipe_id=pk, description=serializer.validated_data["description"], user=request.user)
+        return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class UpdateRecipeNameView(APIView):
+    """PATCH /production/recipes/<pk>/name/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateRecipeNameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        update_recipe_name(recipe_id=pk, name=serializer.validated_data["name"], user=request.user)
         return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
 
 
@@ -271,6 +304,25 @@ class AddBreakdownItemView(APIView):
         return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_201_CREATED)
 
 
+class BreakdownItemDetailView(APIView):
+    """PATCH/DELETE /production/recipes/<pk>/breakdown-items/<item_id>/ — reuses AddBreakdownItemSerializer for PATCH, identical shape."""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk, item_id):
+        serializer = AddBreakdownItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        update_breakdown_item(
+            recipe_id=pk, item_id=item_id, yard_value=d["yard_value"], quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk, item_id):
+        delete_breakdown_item(recipe_id=pk, item_id=item_id, user=request.user)
+        return Response(RecipeReadSerializer(get_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
 class FinishRecipeView(APIView):
     """POST /production/recipes/<pk>/finish/"""
     permission_classes = [IsAdminOrSuperuser]
@@ -304,12 +356,23 @@ class CuttingRecipeListCreateView(generics.ListCreateAPIView):
         return Response(CuttingRecipeReadSerializer(recipe).data, status=status.HTTP_201_CREATED)
 
 
-class CuttingRecipeRetrieveView(generics.RetrieveAPIView):
+class CuttingRecipeRetrieveView(generics.RetrieveDestroyAPIView):
+    """See RecipeRetrieveView's docstring — same destroy()-reads-a-body pattern."""
     permission_classes = [IsAdminOrSuperuser]
     serializer_class    = CuttingRecipeReadSerializer
 
     def get_object(self):
         return get_cutting_recipe_by_id(self.kwargs["pk"])
+
+    def destroy(self, request, *args, **kwargs):
+        serializer = DeleteCuttingRecipeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        delete_cutting_recipe(
+            recipe_id=self.kwargs["pk"],
+            shelf_allocations=serializer.validated_data.get("shelf_allocations"),
+            user=request.user,
+        )
+        return Response({"detail": "Recipe deleted."}, status=status.HTTP_200_OK)
 
 
 class UpdateCuttingRecipeDescriptionView(APIView):
@@ -320,6 +383,17 @@ class UpdateCuttingRecipeDescriptionView(APIView):
         serializer = UpdateRecipeDescriptionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         update_recipe_description(recipe_id=pk, description=serializer.validated_data["description"], user=request.user)
+        return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class UpdateCuttingRecipeNameView(APIView):
+    """PATCH /production/cutting-recipes/<pk>/name/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateRecipeNameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        update_recipe_name(recipe_id=pk, name=serializer.validated_data["name"], user=request.user)
         return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
 
 
@@ -366,6 +440,25 @@ class AddCuttingBreakdownItemView(APIView):
             shelf_allocations=d["shelf_allocations"], user=request.user,
         )
         return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_201_CREATED)
+
+
+class CuttingBreakdownItemDetailView(APIView):
+    """PATCH/DELETE /production/cutting-recipes/<pk>/breakdown-items/<item_id>/ — reuses AddCuttingBreakdownItemSerializer for PATCH, identical shape."""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk, item_id):
+        serializer = AddCuttingBreakdownItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        update_cutting_breakdown_item(
+            recipe_id=pk, item_id=item_id, length_mm=d["length_mm"], quantity=d["quantity"],
+            shelf_allocations=d["shelf_allocations"], user=request.user,
+        )
+        return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk, item_id):
+        delete_cutting_breakdown_item(recipe_id=pk, item_id=item_id, user=request.user)
+        return Response(CuttingRecipeReadSerializer(get_cutting_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
 
 
 class FinishCuttingRecipeView(APIView):
@@ -447,12 +540,25 @@ class PackingRecipeListCreateView(generics.ListCreateAPIView):
         return Response(PackingRecipeReadSerializer(recipe).data, status=status.HTTP_201_CREATED)
 
 
-class PackingRecipeRetrieveView(generics.RetrieveAPIView):
+class PackingRecipeRetrieveView(generics.RetrieveDestroyAPIView):
+    """See RecipeRetrieveView's docstring — same destroy()-reads-a-body pattern."""
     permission_classes = [IsAdminOrSuperuser]
     serializer_class    = PackingRecipeReadSerializer
 
     def get_object(self):
         return get_packing_recipe_by_id(self.kwargs["pk"])
+
+    def destroy(self, request, *args, **kwargs):
+        serializer = DeletePackingRecipeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+        delete_packing_recipe(
+            recipe_id=self.kwargs["pk"],
+            piece_shelf_allocations=d.get("piece_shelf_allocations"),
+            material_shelf_allocations=d.get("material_shelf_allocations"),
+            user=request.user,
+        )
+        return Response({"detail": "Recipe deleted."}, status=status.HTTP_200_OK)
 
 
 class UpdatePackingRecipeDescriptionView(APIView):
@@ -463,6 +569,17 @@ class UpdatePackingRecipeDescriptionView(APIView):
         serializer = UpdateRecipeDescriptionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         update_recipe_description(recipe_id=pk, description=serializer.validated_data["description"], user=request.user)
+        return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
+
+
+class UpdatePackingRecipeNameView(APIView):
+    """PATCH /production/packing-recipes/<pk>/name/"""
+    permission_classes = [IsAdminOrSuperuser]
+
+    def patch(self, request, pk):
+        serializer = UpdateRecipeNameSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        update_recipe_name(recipe_id=pk, name=serializer.validated_data["name"], user=request.user)
         return Response(PackingRecipeReadSerializer(get_packing_recipe_by_id(pk)).data, status=status.HTTP_200_OK)
 
 

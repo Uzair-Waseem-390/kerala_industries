@@ -24,8 +24,8 @@ from ..selectors import get_issued_material
 from ..utils import compute_wip_variant_key, inches_to_mm
 from ._shared import (
     _fmt, compute_labor_overhead_pool, draw_fifo, get_locked_recipe, get_recipe_labor_and_machines,
-    next_wip_product_code, normalize_shelf_allocations, require_under_processing, return_fifo,
-    spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
+    next_wip_product_code, normalize_shelf_allocations, require_not_data_entry, require_under_processing,
+    return_fifo, soft_delete_recipe, spread_pool_flat, validate_labor_and_machines, validate_manufacturing_resources,
 )
 
 
@@ -98,6 +98,73 @@ def update_recipe_description(*, recipe_id: int, description: str, user) -> Reci
 _get_locked_recipe = get_locked_recipe
 _require_under_processing = require_under_processing
 _normalize_shelf_allocations = normalize_shelf_allocations
+
+
+def _require_rewinding_recipe(recipe: Recipe) -> None:
+    """
+    Recipe is one shared table across all 3 stages, with no recipe_type
+    filter in get_locked_recipe — issue_material/add_breakdown_item/etc.
+    all rely on the URL prefix alone to imply the right type (a pre-
+    existing gap across this file, out of scope to fix everywhere here).
+    delete_recipe specifically needs this explicit check: without it, a
+    Cutting/Packing recipe id passed to DELETE /recipes/<pk>/ would pass
+    every type-agnostic guard, find no RecipeIssuedMaterial rows (wrong
+    model for those stages), skip reversal entirely, and still soft-delete
+    the recipe — silently leaking real CuttingIssuedMaterial/
+    PackingIssuedPiece/PackingIssuedMaterial stock with no way to recover
+    it (found by audit, fixed 2026-09-17). Mirrors cutting.py's
+    _require_cutting_recipe / packing.py's _require_packing_recipe, which
+    delete_cutting_recipe/delete_packing_recipe already correctly use.
+    """
+    from rest_framework.exceptions import ValidationError
+    if recipe.recipe_type != Recipe.RecipeType.REWINDING:
+        raise ValidationError({"recipe": "This is not a Rewinding recipe."})
+
+
+@transaction.atomic
+def delete_recipe(*, recipe_id: int, jumbo_shelf_allocations: list[dict] = None, cores_shelf_allocations: list[dict] = None, user) -> None:
+    """
+    Soft-deletes an under_processing recipe, reversing every issued
+    material back to RM inventory first (return_fifo at FULL issued
+    quantity, same mechanism update_issued_material's decrease branch
+    already uses — see its docstring). Breakdown items need no reversal:
+    they never put anything into WipInventory (see add_breakdown_item's
+    docstring) — they simply become unreachable once the recipe itself is
+    soft-deleted.
+
+    jumbo_shelf_allocations/cores_shelf_allocations: required (summing to
+    that material's full issued quantity) ONLY if that material was
+    actually issued — a kind never issued is skipped entirely, no input
+    needed for it.
+    """
+    recipe = _get_locked_recipe(recipe_id)
+    _require_rewinding_recipe(recipe)
+    _require_under_processing(recipe)
+    require_not_data_entry(recipe)
+
+    from django.http import Http404
+    for kind, allocations in (
+        (RecipeIssuedMaterial.MaterialKind.JUMBO, jumbo_shelf_allocations),
+        (RecipeIssuedMaterial.MaterialKind.CORES, cores_shelf_allocations),
+    ):
+        try:
+            issued = get_issued_material(recipe_id=recipe_id, kind=kind)
+        except Http404:
+            continue
+
+        product = issued.product
+        merged, shelves_by_id = _normalize_shelf_allocations(allocations or [], required_total=issued.quantity)
+        _return_fifo(issued_material=issued, quantity=issued.quantity)
+        sync_rm_inventory(product=product, quantity_delta=issued.quantity, user=user)
+        apply_rm_shelf_allocations(
+            product=product,
+            allocations=[{"shelf": shelves_by_id[sid], "quantity": qty} for sid, qty in merged.items() if qty > 0],
+            sign=1, reason=ShelfStockMovement.Reason.RECIPE_ISSUE_CONSUMPTION,
+            reference=recipe.recipe_number, user=user,
+        )
+        _record_shelf_draws(issued_material=issued, merged=merged, direction=RecipeMaterialShelfDraw.Direction.RETURN)
+
+    soft_delete_recipe(recipe, user)
 
 
 def _validate_material_kind_matches_product(*, kind: str, product) -> None:
@@ -267,27 +334,18 @@ def update_issued_material(*, recipe_id: int, kind: str, new_quantity: Decimal, 
 # Breakdown (output)
 # ---------------------------------------------------------------------------
 
-@transaction.atomic
-def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal, shelf_allocations: list[dict], user) -> RecipeBreakdownItem:
+def _resolve_or_create_rewound_wip_product(*, jumbo_product, cores_product, yard_value: Decimal, user) -> WipProduct:
+    """
+    Resolves (binding from the issued Jumbo, yard_value given, length_mm
+    derived from the issued Cores) to a WipProduct, creating the lookups
+    and/or the WipProduct itself if this exact combination has never been
+    seen before. Factored out of add_breakdown_item (2026-09-17) so
+    update_breakdown_item can re-derive the WipProduct when yard_value
+    changes without duplicating the get-or-create/IntegrityError-race
+    handling.
+    """
     from rest_framework.exceptions import ValidationError
 
-    recipe = _get_locked_recipe(recipe_id)
-    _require_under_processing(recipe)
-
-    if yard_value <= 0:
-        raise ValidationError({"yard_value": "Yard value must be greater than zero."})
-    if quantity <= 0:
-        raise ValidationError({"quantity": "Quantity must be greater than zero."})
-
-    from django.http import Http404
-    try:
-        jumbo_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.JUMBO)
-        cores_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.CORES)
-    except Http404:
-        raise ValidationError({"issued_materials": "Both Jumbo and Cores must be issued before adding a breakdown item."})
-
-    jumbo_product = jumbo_material.product
-    cores_product = cores_material.product
     if jumbo_product.jumbo_name_id is None:
         raise ValidationError({"issued_materials": f"'{jumbo_product.name}' has no Jumbo Name attribute set."})
     if cores_product.core_length_id is None:
@@ -313,37 +371,65 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
         stage=WipProduct.Stage.REWINDING,
     )
     wip_product = WipProduct.objects.filter(variant_key=variant_key).first()
-    if wip_product is None:
-        wip_family = Family.objects.get(name="WIP")
-        name = f"{binding.value} {_fmt(yard_lookup.value)} yard {_fmt(length_lookup.value)}"
-        try:
-            with transaction.atomic():
-                wip_product = WipProduct.objects.create(
-                    name=name, code=next_wip_product_code(), family=wip_family, binding=binding,
-                    yard=yard_lookup, length_mm=length_lookup,
-                    stage=WipProduct.Stage.REWINDING, variant_key=variant_key, created_by=user, updated_by=user,
+    if wip_product is not None:
+        return wip_product
+
+    wip_family = Family.objects.get(name="WIP")
+    name = f"{binding.value} {_fmt(yard_lookup.value)} yard {_fmt(length_lookup.value)}"
+    try:
+        with transaction.atomic():
+            wip_product = WipProduct.objects.create(
+                name=name, code=next_wip_product_code(), family=wip_family, binding=binding,
+                yard=yard_lookup, length_mm=length_lookup,
+                stage=WipProduct.Stage.REWINDING, variant_key=variant_key, created_by=user, updated_by=user,
+            )
+            create_registry_entry(
+                type=ProductRegistryEntry.Type.WIP_CORE, wip_product=wip_product,
+                name=wip_product.name, code=wip_product.code, category="WIP",
+            )
+    except IntegrityError:
+        # Lost a create race against a concurrent identical breakdown —
+        # OR the row occupying variant_key is soft-deleted, in which
+        # case the pre-check above (soft-delete-filtered manager)
+        # wouldn't have found it either. Mirrors
+        # purchases.services.get_or_create_product_variant's identical
+        # fix for the same race.
+        wip_product = WipProduct.all_objects.filter(variant_key=variant_key).first()
+        if wip_product is None:
+            raise
+        if wip_product.is_deleted:
+            raise ValidationError({
+                "wip_product": (
+                    f"A previously deleted WIP product ('{wip_product.name}') already used this "
+                    f"exact attribute combination. Restore it before adding this breakdown item."
                 )
-                create_registry_entry(
-                    type=ProductRegistryEntry.Type.WIP_CORE, wip_product=wip_product,
-                    name=wip_product.name, code=wip_product.code, category="WIP",
-                )
-        except IntegrityError:
-            # Lost a create race against a concurrent identical breakdown —
-            # OR the row occupying variant_key is soft-deleted, in which
-            # case the pre-check above (soft-delete-filtered manager)
-            # wouldn't have found it either. Mirrors
-            # purchases.services.get_or_create_product_variant's identical
-            # fix for the same race.
-            wip_product = WipProduct.all_objects.filter(variant_key=variant_key).first()
-            if wip_product is None:
-                raise
-            if wip_product.is_deleted:
-                raise ValidationError({
-                    "wip_product": (
-                        f"A previously deleted WIP product ('{wip_product.name}') already used this "
-                        f"exact attribute combination. Restore it before adding this breakdown item."
-                    )
-                })
+            })
+    return wip_product
+
+
+@transaction.atomic
+def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal, shelf_allocations: list[dict], user) -> RecipeBreakdownItem:
+    from rest_framework.exceptions import ValidationError
+
+    recipe = _get_locked_recipe(recipe_id)
+    _require_under_processing(recipe)
+
+    if yard_value <= 0:
+        raise ValidationError({"yard_value": "Yard value must be greater than zero."})
+    if quantity <= 0:
+        raise ValidationError({"quantity": "Quantity must be greater than zero."})
+
+    from django.http import Http404
+    try:
+        jumbo_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.JUMBO)
+        cores_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.CORES)
+    except Http404:
+        raise ValidationError({"issued_materials": "Both Jumbo and Cores must be issued before adding a breakdown item."})
+
+    wip_product = _resolve_or_create_rewound_wip_product(
+        jumbo_product=jumbo_material.product, cores_product=cores_material.product,
+        yard_value=yard_value, user=user,
+    )
 
     merged, shelves_by_id = _normalize_shelf_allocations(shelf_allocations, required_total=quantity)
 
@@ -369,6 +455,83 @@ def add_breakdown_item(*, recipe_id: int, yard_value: Decimal, quantity: Decimal
         for sid, qty in merged.items() if qty > 0
     ])
     return item
+
+
+@transaction.atomic
+def update_breakdown_item(*, recipe_id: int, item_id: int, yard_value: Decimal, quantity: Decimal, shelf_allocations: list[dict], user) -> RecipeBreakdownItem:
+    """Re-derives wip_product from the (possibly changed) yard_value via the same resolver add_breakdown_item uses, then replaces quantity + shelf allocations in place (same row, same created_at)."""
+    from django.shortcuts import get_object_or_404
+    from rest_framework.exceptions import ValidationError
+
+    recipe = _get_locked_recipe(recipe_id)
+    _require_under_processing(recipe)
+
+    if yard_value <= 0:
+        raise ValidationError({"yard_value": "Yard value must be greater than zero."})
+    if quantity <= 0:
+        raise ValidationError({"quantity": "Quantity must be greater than zero."})
+
+    item = get_object_or_404(
+        RecipeBreakdownItem.objects.select_for_update().select_related("recipe"),
+        pk=item_id, recipe_id=recipe_id, is_deleted=False,
+    )
+
+    from django.http import Http404
+    try:
+        jumbo_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.JUMBO)
+        cores_material = get_issued_material(recipe_id=recipe_id, kind=RecipeIssuedMaterial.MaterialKind.CORES)
+    except Http404:
+        raise ValidationError({"issued_materials": "Both Jumbo and Cores must be issued before editing a breakdown item."})
+
+    wip_product = _resolve_or_create_rewound_wip_product(
+        jumbo_product=jumbo_material.product, cores_product=cores_material.product,
+        yard_value=yard_value, user=user,
+    )
+
+    merged, shelves_by_id = _normalize_shelf_allocations(shelf_allocations, required_total=quantity)
+
+    item.shelf_allocations.all().delete()
+    RecipeBreakdownItemShelfAllocation.objects.bulk_create([
+        RecipeBreakdownItemShelfAllocation(breakdown_item=item, shelf_id=sid, quantity=qty)
+        for sid, qty in merged.items() if qty > 0
+    ])
+
+    # remaining_quantity == quantity always, while under_processing —
+    # nothing can have consumed this batch yet (get_available_wip_batches_
+    # for_fifo only reads recipe__status=FINISHED batches, and this recipe
+    # is still under_processing by the check above).
+    item.wip_product = wip_product
+    item.quantity = quantity
+    item.remaining_quantity = quantity
+    item.updated_by = user
+    item.save(update_fields=["wip_product", "quantity", "remaining_quantity", "updated_by", "updated_at"])
+    return item
+
+
+@transaction.atomic
+def delete_breakdown_item(*, recipe_id: int, item_id: int, user) -> None:
+    """
+    Soft-delete only — no inventory reversal needed. This batch never put
+    anything into WipInventory/shelf stock (see add_breakdown_item's own
+    docstring: put-away only happens at finish_recipe), so there's nothing
+    to undo. The item's WipProduct/ProductRegistryEntry rows are
+    deliberately left untouched (shared catalog identity another
+    breakdown item may still reference) — see the plan's "known accepted
+    edge case" note.
+    """
+    from django.shortcuts import get_object_or_404
+
+    recipe = _get_locked_recipe(recipe_id)
+    _require_under_processing(recipe)
+
+    item = get_object_or_404(
+        RecipeBreakdownItem.objects.select_for_update(),
+        pk=item_id, recipe_id=recipe_id, is_deleted=False,
+    )
+    item.is_deleted = True
+    item.deleted_at = timezone.now()
+    item.deleted_by = user
+    item.save(update_fields=["is_deleted", "deleted_at", "deleted_by"])
 
 
 @transaction.atomic
