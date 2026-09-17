@@ -110,8 +110,15 @@ def get_all_recipes(*, status: str = None, search: str = None) -> QuerySet:
     should never appear in the normal Recipes list as if real manufacturing
     work happened — same reasoning purchases/billing already apply to their
     own is_data_entry rows.
+
+    recipe_type=REWINDING is explicit here (fixed 2026-09-18) — Recipe is
+    one shared table across all 3 stages, and get_all_cutting_recipes/
+    get_all_packing_recipes already filter by their own type; without the
+    same filter here, the Rewinding Recipes list silently showed every
+    Cutting/Packing recipe too. Found via a user report that the list
+    wasn't scoped to Rewinding only.
     """
-    qs = _recipe_qs().filter(is_deleted=False, is_data_entry=False)
+    qs = _recipe_qs().filter(is_deleted=False, is_data_entry=False, recipe_type=Recipe.RecipeType.REWINDING)
     if _clean(status):
         qs = qs.filter(status=_clean(status))
     if _clean(search):
@@ -120,7 +127,8 @@ def get_all_recipes(*, status: str = None, search: str = None) -> QuerySet:
 
 
 def get_recipe_by_id(pk: int) -> Recipe:
-    return get_object_or_404(_recipe_qs(), pk=pk, is_deleted=False)
+    """recipe_type=REWINDING filter added for the same reason as get_all_recipes above — a Cutting/Packing id must 404 here, not serialize under the wrong shape."""
+    return get_object_or_404(_recipe_qs(), pk=pk, is_deleted=False, recipe_type=Recipe.RecipeType.REWINDING)
 
 
 def get_issued_material(*, recipe_id: int, kind: str) -> RecipeIssuedMaterial:
