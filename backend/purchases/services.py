@@ -443,6 +443,64 @@ def _generate_carton_variant_for_new_size(*, carton_size_id: int, user) -> None:
     )
 
 
+def _rebuild_variant_name(product: Product) -> str:
+    """
+    Recomputes a variant Product's display name from its own CURRENT
+    attribute FK values — same join order/logic get_or_create_product_variant
+    uses at creation time. A variant's name is otherwise frozen at
+    creation (never re-derived on subsequent purchases of the same
+    combination — see that function's "found before create" early return),
+    so it silently drifts stale the moment its underlying Jumbo/Core/
+    Packing/Carton attribute value is renamed. Used both by
+    _cascade_rename_variants (below) and the one-off
+    resync_product_variant_names management command.
+    """
+    parts = [product.base_product.name]
+    if product.jumbo_name_id is not None:
+        parts.append(product.jumbo_name.value)
+    if product.core_name_id is not None:
+        parts.append(product.core_name.value)
+    if product.core_length_id is not None:
+        parts.append(product.core_length.value)
+    if product.core_thickness_id is not None:
+        parts.append(product.core_thickness.value)
+    if product.packing_size_id is not None:
+        parts.append(product.packing_size.value)
+    if product.carton_size_id is not None:
+        parts.append(product.carton_size.value)
+    return " — ".join(parts)
+
+
+_VARIANT_NAME_SELECT_RELATED = (
+    "base_product", "jumbo_name", "core_name", "core_length", "core_thickness", "packing_size", "carton_size",
+)
+
+
+def _cascade_rename_variants(*, field_name: str, lookup_obj, user) -> None:
+    """
+    Called right after a Jumbo/Core/Packing/Carton attribute lookup's
+    value is renamed — finds every Product variant built from it
+    (`field_name` is the matching Product FK, e.g. "jumbo_name") and
+    resyncs each one's name so it never drifts from what a fresh purchase
+    of the same combination would now produce. Bounded by how many
+    variants actually reference this ONE lookup row (never "all
+    products"), so this stays cheap regardless of catalog size. Individual
+    .save() calls (not bulk_update) deliberately — purchases.product is an
+    activity_log-tracked model, and bulk_update bypasses post_save signals
+    entirely, which would make a rename invisible in the audit log.
+    """
+    products = (
+        Product.all_objects.filter(**{field_name: lookup_obj})
+        .select_related(*_VARIANT_NAME_SELECT_RELATED)
+    )
+    for product in products:
+        new_name = _rebuild_variant_name(product)
+        if new_name != product.name:
+            product.name = new_name
+            product.updated_by = user
+            product.save(update_fields=["name", "updated_by", "updated_at"])
+
+
 @transaction.atomic
 def create_jumbo_name(*, value: str, user) -> JumboName:
     with _unique_constraint_guard("A Jumbo Name with this value already exists."):
@@ -452,11 +510,14 @@ def create_jumbo_name(*, value: str, user) -> JumboName:
 
 def update_jumbo_name(*, pk: int, value: str = None, user) -> JumboName:
     obj = get_jumbo_name_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Jumbo Name with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="jumbo_name", lookup_obj=obj, user=user)
     return obj
 
 def delete_jumbo_name(*, pk: int, user) -> None:
@@ -472,11 +533,14 @@ def create_core_name(*, value: str, user) -> CoreName:
 
 def update_core_name(*, pk: int, value: str = None, user) -> CoreName:
     obj = get_core_name_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Core Name with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="core_name", lookup_obj=obj, user=user)
     return obj
 
 def delete_core_name(*, pk: int, user) -> None:
@@ -489,11 +553,14 @@ def create_core_length(*, value: str, user) -> CoreLength:
 
 def update_core_length(*, pk: int, value: str = None, user) -> CoreLength:
     obj = get_core_length_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Core Length with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="core_length", lookup_obj=obj, user=user)
     return obj
 
 def delete_core_length(*, pk: int, user) -> None:
@@ -506,11 +573,14 @@ def create_core_thickness(*, value: str, user) -> CoreThickness:
 
 def update_core_thickness(*, pk: int, value: str = None, user) -> CoreThickness:
     obj = get_core_thickness_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Core Thickness with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="core_thickness", lookup_obj=obj, user=user)
     return obj
 
 def delete_core_thickness(*, pk: int, user) -> None:
@@ -526,11 +596,14 @@ def create_packing_size(*, value: str, user) -> PackingSize:
 
 def update_packing_size(*, pk: int, value: str = None, user) -> PackingSize:
     obj = get_packing_size_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Packing Size with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="packing_size", lookup_obj=obj, user=user)
     return obj
 
 def delete_packing_size(*, pk: int, user) -> None:
@@ -546,11 +619,14 @@ def create_carton_size(*, value: str, user) -> CartonSize:
 
 def update_carton_size(*, pk: int, value: str = None, user) -> CartonSize:
     obj = get_carton_size_by_id(pk)
+    renamed = value is not None and value != obj.value
     if value is not None:
         obj.value = value
     obj.updated_by = user
     with _unique_constraint_guard("A Carton Size with this value already exists."):
         obj.save(update_fields=["value", "updated_by", "updated_at"])
+    if renamed:
+        _cascade_rename_variants(field_name="carton_size", lookup_obj=obj, user=user)
     return obj
 
 def delete_carton_size(*, pk: int, user) -> None:
