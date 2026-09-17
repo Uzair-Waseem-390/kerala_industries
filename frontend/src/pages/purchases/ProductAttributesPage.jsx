@@ -15,8 +15,12 @@ import { useAuth } from '../../context/AuthContext';
 const TABS = [
     { value: 'jumbo-names', label: 'Jumbo Names', singular: 'Jumbo Name', resourceKey: 'jumboNames' },
     { value: 'core-names', label: 'Core Names', singular: 'Core Name', resourceKey: 'coreNames' },
-    { value: 'core-lengths', label: 'Core Lengths', singular: 'Core Length', resourceKey: 'coreLengths' },
-    { value: 'core-thicknesses', label: 'Core Thicknesses', singular: 'Core Thickness', resourceKey: 'coreThicknesses' },
+    // Length/thickness are real measurements consumed downstream as numbers
+    // (production.services.rewinding._parse_decimal, inches_to_mm) —
+    // restricted to numeric input only, unlike the other 4 tabs' free-text
+    // tag values (colors, size labels) which legitimately aren't numbers.
+    { value: 'core-lengths', label: 'Core Lengths', singular: 'Core Length', resourceKey: 'coreLengths', numericOnly: true },
+    { value: 'core-thicknesses', label: 'Core Thicknesses', singular: 'Core Thickness', resourceKey: 'coreThicknesses', numericOnly: true },
     { value: 'packing-sizes', label: 'Packing Sizes', singular: 'Packing Size', resourceKey: 'packingSizes' },
     { value: 'carton-sizes', label: 'Carton Sizes', singular: 'Carton Size', resourceKey: 'cartonSizes' },
 ];
@@ -54,6 +58,7 @@ const ProductAttributesPage = () => {
                 resource={purchasesApi[activeTabConfig.resourceKey]}
                 label={activeTabConfig.singular}
                 isAdmin={isAdmin}
+                numericOnly={!!activeTabConfig.numericOnly}
             />
         </div>
     );

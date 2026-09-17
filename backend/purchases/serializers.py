@@ -95,12 +95,17 @@ class CoreLengthWriteSerializer(serializers.ModelSerializer):
         fields = ["value"]
 
     def validate_value(self, value):
-        qs = CoreLength.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        value = value.strip()
+        try:
+            float(value)
+        except ValueError:
+            raise serializers.ValidationError("Must be a numeric value (e.g. 51 or 51.5) — no units or other text.")
+        qs = CoreLength.objects.filter(value__iexact=value, is_deleted=False)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("A Core Length with this value already exists.")
-        return value.strip()
+        return value
 
 
 class CoreThicknessReadSerializer(AuditReadMixin, serializers.ModelSerializer):
@@ -115,12 +120,17 @@ class CoreThicknessWriteSerializer(serializers.ModelSerializer):
         fields = ["value"]
 
     def validate_value(self, value):
-        qs = CoreThickness.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        value = value.strip()
+        try:
+            float(value)
+        except ValueError:
+            raise serializers.ValidationError("Must be a numeric value (e.g. 3 or 3.5) — no units or other text.")
+        qs = CoreThickness.objects.filter(value__iexact=value, is_deleted=False)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("A Core Thickness with this value already exists.")
-        return value.strip()
+        return value
 
 
 class PackingSizeReadSerializer(AuditReadMixin, serializers.ModelSerializer):

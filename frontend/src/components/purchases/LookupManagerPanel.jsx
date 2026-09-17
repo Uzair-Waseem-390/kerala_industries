@@ -21,7 +21,15 @@ import { extractErrorMessage } from '../../utils/errorMessage';
 // Name/Binding, Core Length/Thickness, Packing/Carton Size). All 6 share
 // this exact shape, so one component drives every tab on ProductAttributesPage
 // instead of 6 near-identical copies of CategoriesPage.
-const LookupManagerPanel = ({ resource, label, isAdmin }) => {
+// A value is "numeric" if it parses as a plain float/integer with nothing
+// else attached — Number("51.5") accepts leading/trailing whitespace and
+// even an empty string as 0, so trim first and reject empty explicitly.
+const isNumeric = (value) => {
+    const trimmed = value.trim();
+    return trimmed !== '' && !Number.isNaN(Number(trimmed));
+};
+
+const LookupManagerPanel = ({ resource, label, isAdmin, numericOnly }) => {
     const { toast } = useToast();
 
     const { data, meta, page, setPage, loading, error, create, update, delete: deleteItem, refetch } = useCRUD(resource);
@@ -54,8 +62,12 @@ const LookupManagerPanel = ({ resource, label, isAdmin }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        setFormLoading(true);
         setFormError('');
+        if (numericOnly && !isNumeric(formValue)) {
+            setFormError(`${label} must be a numeric value (e.g. 51 or 51.5) — no units or other text.`);
+            return;
+        }
+        setFormLoading(true);
         try {
             if (editingItem) {
                 await update(editingItem.id, { value: formValue });
@@ -199,9 +211,11 @@ const LookupManagerPanel = ({ resource, label, isAdmin }) => {
                     {formError && <InlineAlert variant="error" message={formError} />}
                     <Input
                         label="Value"
+                        type={numericOnly ? 'number' : 'text'}
+                        step={numericOnly ? 'any' : undefined}
                         value={formValue}
                         onChange={(e) => setFormValue(e.target.value)}
-                        placeholder={`Enter ${label.toLowerCase()} value`}
+                        placeholder={numericOnly ? 'e.g. 51.5' : `Enter ${label.toLowerCase()} value`}
                         required
                     />
                     <div className="flex justify-end gap-3 pt-4">
@@ -245,6 +259,11 @@ LookupManagerPanel.propTypes = {
     }).isRequired,
     label: PropTypes.string.isRequired,
     isAdmin: PropTypes.bool.isRequired,
+    numericOnly: PropTypes.bool,
+};
+
+LookupManagerPanel.defaultProps = {
+    numericOnly: false,
 };
 
 export default LookupManagerPanel;
