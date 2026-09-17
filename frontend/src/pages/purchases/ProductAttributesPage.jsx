@@ -21,7 +21,7 @@ const TABS = [
     // tag values (colors, size labels) which legitimately aren't numbers.
     { value: 'core-lengths', label: 'Core Lengths', singular: 'Core Length', resourceKey: 'coreLengths', numericOnly: true, unitSuffix: 'inches' },
     { value: 'core-thicknesses', label: 'Core Thicknesses', singular: 'Core Thickness', resourceKey: 'coreThicknesses', numericOnly: true, unitSuffix: 'mm' },
-    { value: 'packing-sizes', label: 'Packing Sizes', singular: 'Packing Size', resourceKey: 'packingSizes' },
+    { value: 'packing-sizes', label: 'Packing Sizes', singular: 'Packing Size', resourceKey: 'packingSizes', numericOnly: true, unitSuffix: 'inches' },
     { value: 'carton-sizes', label: 'Carton Sizes', singular: 'Carton Size', resourceKey: 'cartonSizes' },
 ];
 

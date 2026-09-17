@@ -145,12 +145,17 @@ class PackingSizeWriteSerializer(serializers.ModelSerializer):
         fields = ["value"]
 
     def validate_value(self, value):
-        qs = PackingSize.objects.filter(value__iexact=value.strip(), is_deleted=False)
+        value = value.strip()
+        try:
+            float(value)
+        except ValueError:
+            raise serializers.ValidationError("Must be a numeric value (e.g. 12 or 12.5) — no units or other text.")
+        qs = PackingSize.objects.filter(value__iexact=value, is_deleted=False)
         if self.instance:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError("A Packing Size with this value already exists.")
-        return value.strip()
+        return value
 
 
 class CartonSizeReadSerializer(AuditReadMixin, serializers.ModelSerializer):
