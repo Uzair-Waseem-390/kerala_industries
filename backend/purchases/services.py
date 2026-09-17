@@ -729,6 +729,7 @@ def get_or_create_product_variant(
     if existing:
         if not skip_unpriced_queue:
             _maybe_queue_for_pricing(existing)
+            _maybe_create_registry_entry(existing, base_product)
         return existing
 
     # Resolve + validate every attribute id passed, and collect its display
@@ -760,10 +761,11 @@ def get_or_create_product_variant(
                 created_by=user, updated_by=user,
                 **attribute_ids,
             )
-            create_registry_entry(
-                type=ProductRegistryEntry.Type.RAW_MATERIAL, rm_product=product,
-                name=product.name, code=product.code, category=base_product.family.name,
-            )
+            if not skip_unpriced_queue:
+                create_registry_entry(
+                    type=ProductRegistryEntry.Type.RAW_MATERIAL, rm_product=product,
+                    name=product.name, code=product.code, category=base_product.family.name,
+                )
     except IntegrityError:
         # Lost a create race against a concurrent identical purchase — same
         # variant, reuse it instead of erroring. Looked up via all_objects
@@ -786,11 +788,33 @@ def get_or_create_product_variant(
             })
         if not skip_unpriced_queue:
             _maybe_queue_for_pricing(existing)
+            _maybe_create_registry_entry(existing, base_product)
         return existing
 
     if not skip_unpriced_queue:
         _maybe_queue_for_pricing(product)
     return product
+
+
+def _maybe_create_registry_entry(product: Product, base_product: Product) -> None:
+    """
+    Creates `product`'s ProductRegistryEntry (the row that makes it show up
+    in the Inventory list) if it doesn't already have one — mirrors
+    _maybe_queue_for_pricing's shape. An attribute-only auto-created
+    variant (skip_unpriced_queue=True) gets no registry row yet; the first
+    time it's actually purchased, this lazily creates the one it should
+    have had all along. Fixed 2026-09-17: create_registry_entry used to
+    fire unconditionally inside get_or_create_product_variant's create
+    branch, so an attribute-only variant showed up in Inventory with
+    quantity 0 immediately — contradicting this function's own documented
+    "must not show up in Inventory/Rates until real stock exists" rule,
+    which only the Rates half (skip_unpriced_queue) actually enforced.
+    """
+    if not ProductRegistryEntry.objects.filter(rm_product=product).exists():
+        create_registry_entry(
+            type=ProductRegistryEntry.Type.RAW_MATERIAL, rm_product=product,
+            name=product.name, code=product.code, category=base_product.family.name,
+        )
 
 
 def _maybe_queue_for_pricing(product: Product) -> None:
