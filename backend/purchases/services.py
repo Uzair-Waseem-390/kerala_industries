@@ -704,6 +704,18 @@ def get_or_create_product_variant(
     show up in Inventory/Rates until real stock exists" rule those helpers
     already follow for the Inventory side. Every real purchase-time caller
     leaves this False (default), preserving today's behavior exactly.
+
+    This queueing must also fire when an ALREADY-EXISTING variant is
+    reused (both "found before create" below, and the create-race path in
+    the except IntegrityError branch) — not just on first-ever creation.
+    Fixed 2026-09-17: a variant auto-created by adding a new attribute
+    value (skip_unpriced_queue=True, no queue entry) that was THEN
+    actually purchased for the first time used to hit the "already
+    exists" early-return and skip queueing entirely — real stock existed,
+    but the product silently never appeared in Rates at all (neither
+    priced nor in the "needs a price" list). _maybe_queue_for_pricing
+    guards on skip_unpriced_queue AND on not already having a rate, so an
+    already-priced product being purchased again is never re-queued.
     """
     base_product = get_product_by_id(base_product_id)
     attribute_ids = {
@@ -715,6 +727,8 @@ def get_or_create_product_variant(
 
     existing = Product.objects.filter(variant_key=variant_key).first()
     if existing:
+        if not skip_unpriced_queue:
+            _maybe_queue_for_pricing(existing)
         return existing
 
     # Resolve + validate every attribute id passed, and collect its display
@@ -770,12 +784,28 @@ def get_or_create_product_variant(
                     f"this combination again."
                 )
             })
+        if not skip_unpriced_queue:
+            _maybe_queue_for_pricing(existing)
         return existing
 
     if not skip_unpriced_queue:
-        from rates.services import add_to_unpriced_queue
-        add_to_unpriced_queue(product)
+        _maybe_queue_for_pricing(product)
     return product
+
+
+def _maybe_queue_for_pricing(product: Product) -> None:
+    """
+    Adds `product` to the Rates "needs a price" queue, UNLESS it already
+    has a ProductRate — a product that's already priced must never be
+    dumped back into the unpriced queue just because a later purchase
+    reused its existing row (get_or_create_product_variant's two
+    already-exists paths both call this).
+    """
+    from rates.models import ProductRate
+    from rates.services import add_to_unpriced_queue
+
+    if not ProductRate.objects.filter(rm_product=product).exists():
+        add_to_unpriced_queue(product)
 
 
 @transaction.atomic
