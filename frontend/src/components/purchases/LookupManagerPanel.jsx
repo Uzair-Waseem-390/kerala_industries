@@ -29,7 +29,7 @@ const isNumeric = (value) => {
     return trimmed !== '' && !Number.isNaN(Number(trimmed));
 };
 
-const LookupManagerPanel = ({ resource, label, isAdmin, numericOnly }) => {
+const LookupManagerPanel = ({ resource, label, isAdmin, numericOnly, unitSuffix }) => {
     const { toast } = useToast();
 
     const { data, meta, page, setPage, loading, error, create, update, delete: deleteItem, refetch } = useCRUD(resource);
@@ -100,7 +100,11 @@ const LookupManagerPanel = ({ resource, label, isAdmin, numericOnly }) => {
 
     const columns = [
         { key: 'id', label: 'ID', width: '80px' },
-        { key: 'value', label: 'Value' },
+        {
+            key: 'value',
+            label: 'Value',
+            render: (value) => unitSuffix ? `${value} ${unitSuffix}` : value,
+        },
         {
             key: 'is_deleted',
             label: 'Status',
@@ -210,7 +214,7 @@ const LookupManagerPanel = ({ resource, label, isAdmin, numericOnly }) => {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {formError && <InlineAlert variant="error" message={formError} />}
                     <Input
-                        label="Value"
+                        label={unitSuffix ? `Value (${unitSuffix})` : 'Value'}
                         type={numericOnly ? 'number' : 'text'}
                         step={numericOnly ? 'any' : undefined}
                         value={formValue}
@@ -260,10 +264,12 @@ LookupManagerPanel.propTypes = {
     label: PropTypes.string.isRequired,
     isAdmin: PropTypes.bool.isRequired,
     numericOnly: PropTypes.bool,
+    unitSuffix: PropTypes.string,
 };
 
 LookupManagerPanel.defaultProps = {
     numericOnly: false,
+    unitSuffix: '',
 };
 
 export default LookupManagerPanel;
