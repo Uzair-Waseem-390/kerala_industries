@@ -645,7 +645,7 @@ def get_income_statement(*, period: str = None) -> dict:
 def _compute_equity_offsets() -> dict:
     """
     Net offset for go-live bootstrap data — sourced ENTIRELY from billing/
-    purchases/cash_flow/cash_management, NEVER from data_entry.models. The
+    purchases/cash_flow/cash_management/production, NEVER from data_entry.models. The
     data_entry app is a one-time bootstrap tool meant to be retired after
     go-live (per its own services.py docstrings, e.g. create_opening_stock:
     "Stored ... in cash_management ... so the record survives if this app
@@ -657,13 +657,25 @@ def _compute_equity_offsets() -> dict:
     across the whole backend to enumerate every bootstrap path, not just
     the ones already known about.
 
-    Five paths, each an asset OR liability/equity change with nothing
+    Seven paths, each an asset OR liability/equity change with nothing
     offsetting it elsewhere — the first three were found by tracing a real
-    Rs 1000 mismatch back to exactly this gap; the other two were added
-    after being asked to specifically audit every data_entry edge case:
+    Rs 1000 mismatch back to exactly this gap; the next two were added
+    after being asked to specifically audit every data_entry edge case; the
+    last two (WIP/FG opening stock) were found 2026-09-19 the same way —
+    every data_entry.services function was re-enumerated from scratch to
+    confirm this list is exhaustive, not just re-checked against what was
+    already here:
       + Customer Opening Balance    (billing.Invoice, receivable asset)
       + Opening Stock                (purchases.PurchaseOrder, inventory asset)
       + Opening Cash                  (cash_flow.CashMovement, cash asset)
+      + Opening WIP Stock — Core       (production.RecipeBreakdownItem under an
+        is_data_entry=True Recipe, inventory asset — the WIP twin of Opening
+        Stock above; valued at quantity * full_unit_cost_snapshot, the exact
+        field reports.selectors._snapshot_value reads for WIP inventory_value)
+      + Opening WIP Stock — Piece      (production.CuttingBreakdownItem,
+        same reasoning as Core, for the cutting stage)
+      + Opening FG Stock                (production.PackingOutputItem, same
+        reasoning, for Finished Goods)
       - Supplier Opening Balance        (purchases.PurchaseOrder, payable liability)
       - Opening Investor Investment       (cash_management.InvestorTransaction —
         inflates CashManagementFlow.net_investor_capital, which feeds this
@@ -701,13 +713,14 @@ def _compute_equity_offsets() -> dict:
     predicates are unchanged, so every figure is identical; only the number
     of round-trips moved.
     """
-    from django.db.models import DecimalField, Exists, IntegerField, OuterRef, Value
+    from django.db.models import DecimalField, Exists, F, IntegerField, OuterRef, Value
     from django.db.models.functions import Coalesce
 
     from assets.models import Asset, AssetValuationEntry
     from billing.models import Invoice
     from cash_flow.models import CashFlow, CashMovement
     from cash_management.models import InvestorTransaction
+    from production.models import CuttingBreakdownItem, PackingOutputItem, RecipeBreakdownItem
     from profits.models import MonthlyProfit
     from purchases.models import PurchaseItem, PurchaseOrder
 
@@ -764,6 +777,29 @@ def _compute_equity_offsets() -> dict:
                     is_data_entry=True, is_deleted=False,
                     transaction_type=InvestorTransaction.TransactionType.INVESTMENT),
                 "amount"),
+            # WIP/FG opening stock (2026-09-19 fix) — the WIP/FG twin of RM's
+            # own _opening_stock above, same reasoning: a real batch appears
+            # in inventory_value with nothing paid/owed for it, so it needs
+            # the same equity offset. Valued at full_unit_cost_snapshot,
+            # NOT unit_cost_snapshot — that's the exact field
+            # reports.selectors._snapshot_value reads for WIP/FG
+            # inventory_value, and production.services.opening_stock sets
+            # both to the same typed-in unit_cost (zero labor/machines, so
+            # no DL/FOH pool spread makes them diverge) — but only one of
+            # them is what the asset side actually sums, so only that one
+            # can be trusted to cancel it exactly.
+            _opening_wip_core=scalar(
+                RecipeBreakdownItem.objects.filter(
+                    recipe__is_data_entry=True, recipe__is_deleted=False, is_deleted=False),
+                F("quantity") * F("full_unit_cost_snapshot")),
+            _opening_wip_piece=scalar(
+                CuttingBreakdownItem.objects.filter(
+                    recipe__is_data_entry=True, recipe__is_deleted=False, is_deleted=False),
+                F("quantity") * F("full_unit_cost_snapshot")),
+            _opening_fg=scalar(
+                PackingOutputItem.objects.filter(
+                    recipe__is_data_entry=True, recipe__is_deleted=False, is_deleted=False),
+                F("quantity") * F("full_unit_cost_snapshot")),
             _pre_owned_cost=scalar(
                 Asset.objects.filter(
                     is_deleted=False,
@@ -780,7 +816,8 @@ def _compute_equity_offsets() -> dict:
                        & ~expensed),
         ).values(
             "_customer_ob", "_opening_stock", "_supplier_ob", "_opening_cash",
-            "_investor_ob", "_pre_owned_cost", "_revaluation", "_unexpensed_dep",
+            "_investor_ob", "_opening_wip_core", "_opening_wip_piece", "_opening_fg",
+            "_pre_owned_cost", "_revaluation", "_unexpensed_dep",
         ).first()
 
     # Read first; only create the singleton if it genuinely doesn't exist yet.
@@ -799,6 +836,7 @@ def _compute_equity_offsets() -> dict:
     return {
         "opening_balance_equity": (
             g("_customer_ob") + g("_opening_stock") + g("_opening_cash")
+            + g("_opening_wip_core") + g("_opening_wip_piece") + g("_opening_fg")
             - g("_supplier_ob") - g("_investor_ob")
         ),
         # `amount` is stored NEGATIVE for depreciation, so adding the

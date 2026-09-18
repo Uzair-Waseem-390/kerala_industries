@@ -219,3 +219,5 @@ frontend/.env
 .claude/skills/
 backend/accounting_capabilities_report.md
 db.sqlite3
+backend/wait.db
+backend/wait.db-*

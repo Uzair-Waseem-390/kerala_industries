@@ -21,7 +21,8 @@ from purchases.services import (
 from cash_management.services import create_investor
 from data_entry.services import (
     create_customer_opening_balance, create_opening_cash,
-    create_opening_investor_investment, create_supplier_opening_balance,
+    create_opening_fg_stock, create_opening_investor_investment,
+    create_opening_wip_stock, create_supplier_opening_balance,
 )
 from profits.services import _add_months, catch_up_monthly_profits
 from rates.services import create_rate
@@ -835,6 +836,64 @@ class BalanceSheetTests(AccountingTestBase):
         data = get_balance_sheet_live()
         self.assertEqual(data["equity"]["investor_capital"], Decimal("3000"))
         self.assertEqual(data["equity"]["opening_balance_equity"], Decimal("-3000"))
+        self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
+
+    def _jumbo_name(self, value="Test Binding"):
+        from purchases.models import JumboName
+        return JumboName.objects.create(value=value, created_by=self.admin, updated_by=self.admin)
+
+    def test_balances_with_wip_core_opening_stock(self):
+        """
+        Regression test for the 2026-09-19 bug: WIP Core opening stock
+        (data_entry Feature 6) inflated inventory_value with nothing
+        offsetting it in opening_balance_equity — found via a fresh test
+        database (REC-2026-0001), fixed by adding the same treatment RM
+        opening stock already gets.
+        """
+        from production.models import WipProduct
+
+        create_opening_wip_stock(items=[{
+            "jumbo_name_id": self._jumbo_name().id,
+            "yard_value": Decimal("500"), "length_mm_value": Decimal("100"),
+            "stage": WipProduct.Stage.REWINDING,
+            "quantity": Decimal("10"), "unit_cost": Decimal("40"),
+            "shelf_id": self.shelf.id,
+        }], user=self.admin)
+
+        data = get_balance_sheet_live()
+        # 10 * 40 = 400, same value now on both sides of the equation.
+        self.assertEqual(data["equity"]["opening_balance_equity"], Decimal("400"))
+        self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
+
+    def test_balances_with_wip_piece_opening_stock(self):
+        """Same bug, WIP Piece (Cutting stage) — CuttingBreakdownItem instead of RecipeBreakdownItem."""
+        from production.models import WipProduct
+
+        create_opening_wip_stock(items=[{
+            "jumbo_name_id": self._jumbo_name().id,
+            "yard_value": Decimal("500"), "length_mm_value": Decimal("50"),
+            "stage": WipProduct.Stage.CUTTING,
+            "quantity": Decimal("20"), "unit_cost": Decimal("15"),
+            "shelf_id": self.shelf.id,
+        }], user=self.admin)
+
+        data = get_balance_sheet_live()
+        # 20 * 15 = 300.
+        self.assertEqual(data["equity"]["opening_balance_equity"], Decimal("300"))
+        self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
+
+    def test_balances_with_fg_opening_stock(self):
+        """Same bug, Finished Goods — PackingOutputItem instead of a WIP breakdown item."""
+        create_opening_fg_stock(items=[{
+            "jumbo_name_id": self._jumbo_name().id,
+            "yard_value": Decimal("500"), "length_mm_value": Decimal("75"),
+            "quantity": Decimal("5"), "unit_cost": Decimal("120"),
+            "shelf_id": self.shelf.id,
+        }], user=self.admin)
+
+        data = get_balance_sheet_live()
+        # 5 * 120 = 600.
+        self.assertEqual(data["equity"]["opening_balance_equity"], Decimal("600"))
         self.assertTrue(data["is_balanced"], msg=f"balance_check={data['balance_check']}")
 
     def test_opening_balance_equity_never_imports_data_entry(self):
