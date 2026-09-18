@@ -492,11 +492,12 @@ class BalanceSheetPrintView(APIView):
                     {"label": "Money You Owe Suppliers", "amount": _fmt(data["liabilities"]["accounts_payable"])},
                     {"label": "GST Owed to FBR", "amount": _fmt(data["liabilities"]["gst_payable"])},
                     {"label": "WHT Owed to FBR", "amount": _fmt(data["liabilities"]["wht_payable"])},
-                    # Manufacturing Cost Payable (Accrued DL/FOH) hidden from
-                    # client-facing screens per client request (2026-09) — see
-                    # profits/dl_foh_payable_explained.md to reverse. Total
-                    # Liabilities below already folds it in correctly.
-                    # {"label": "Manufacturing Cost Payable (Accrued DL/FOH)", "amount": _fmt(data["liabilities"]["dl_foh_payable"])},
+                    # Manufacturing Cost Payable (Accrued DL/FOH) — restored
+                    # 2026-09-19, Balance Sheet only (Business Worth still
+                    # hides its own copy) — see profits/dl_foh_payable_explained.md's
+                    # "Update (2026-09-19)" section. Total Liabilities below now
+                    # genuinely includes it.
+                    {"label": "Manufacturing Cost Payable (Accrued DL/FOH)", "amount": _fmt(data["liabilities"]["dl_foh_payable"])},
                     {"label": "Total Liabilities", "amount": _fmt(data["liabilities"]["total"]), "bold": True},
                 ],
             },

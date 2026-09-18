@@ -122,3 +122,31 @@ and restore `+ dl_foh_payable` to `accounting.selectors
 ._assemble_balance_sheet`'s `total_liabilities` formula. The frontend
 display lines and `DlFohPayableReconciliationTests` would also need
 restoring to their pre-2026-09 form (see git history).
+
+## Update (2026-09-19): restored to the Balance Sheet only, Business Worth unchanged
+
+The 2026-09 exclusion's own accepted trade-off ("`balance_check` will no
+longer be exactly zero whenever there's an outstanding accrued-vs-paid
+DL/FOH gap") turned out to bite in practice almost immediately: finishing
+a real Rewinding recipe with an employee and machine attached (1 hour ×
+(Rs 100/hr labor + Rs 100/hr machine) = Rs 200 DL/FOH pool, unpaid) baked
+that Rs 200 into the new batch's `full_unit_cost_snapshot` — and therefore
+into the Balance Sheet's `inventory_value` — with nothing offsetting it
+once `dl_foh_payable` was excluded from `total_liabilities`. Verified
+empirically against the live figures at the time: `balance_check` was
+199.998989 and `dl_foh_payable` was exactly 200.0000 — folding the latter
+back into `total_liabilities` brought `balance_check` to -0.001011 (inside
+the existing `is_balanced` tolerance of 0.01), confirming this was the
+entire gap, not a coincidence.
+
+Decision: `dl_foh_payable` is folded back into
+`accounting.selectors._assemble_balance_sheet`'s `total_liabilities` —
+**Balance Sheet only**. `profits.selectors.get_business_worth`'s
+`total_business_worth` is deliberately left as-is (still excluding it) —
+the client's original reason for asking it out of Business Worth
+specifically (it feeds investor ownership-split percentages, which get
+permanently snapshotted at month-end) still applies and was never in
+question here; only the Balance Sheet's own "why doesn't this add up"
+problem was being fixed. `DlFohPayableReconciliationTests` in
+`accounting/tests.py` was updated to assert the new (folded-in, balances
+to zero) Balance Sheet behavior; nothing in `profits/` changed.

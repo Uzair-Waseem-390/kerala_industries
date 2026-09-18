@@ -157,11 +157,14 @@ const BalanceSheetPage = () => {
                                 <Line label="Money You Owe Suppliers" amount={data.liabilities.accounts_payable} />
                                 <Line label="GST Owed to FBR" amount={data.liabilities.gst_payable} />
                                 <Line label="WHT Owed to FBR" amount={data.liabilities.wht_payable} />
-                                {/* Manufacturing Cost Payable (Accrued DL/FOH) hidden from
-                                    client-facing screens per client request (2026-09) — see
-                                    backend/profits/dl_foh_payable_explained.md to reverse.
-                                    Total Liabilities below already folds it in correctly. */}
-                                {/* <Line label="Manufacturing Cost Payable (Accrued DL/FOH)" amount={data.liabilities.dl_foh_payable} /> */}
+                                {/* Manufacturing Cost Payable (Accrued DL/FOH) — restored
+                                    2026-09-19, Balance Sheet only (Business Worth still
+                                    hides its own copy of this figure) — see
+                                    backend/profits/dl_foh_payable_explained.md's
+                                    "Update (2026-09-19)" section. Total Liabilities below
+                                    now genuinely includes it, so showing the line keeps the
+                                    displayed lines summing to the displayed total. */}
+                                <Line label="Manufacturing Cost Payable (Accrued DL/FOH)" amount={data.liabilities.dl_foh_payable} />
                                 <div className="pt-3 mt-2 border-t border-neutral-200">
                                     <Line label="Total Liabilities" amount={data.liabilities.total} bold />
                                 </div>

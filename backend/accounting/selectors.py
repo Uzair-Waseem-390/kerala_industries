@@ -907,15 +907,15 @@ def _assemble_balance_sheet(*, cash_in_hand, accounts_receivable, accounts_payab
                               dl_foh_payable=Decimal("0"),
                               freshness=None) -> dict:
     total_assets = cash_in_hand + accounts_receivable + inventory_value + fixed_assets_nbv
-    # dl_foh_payable excluded from total_liabilities per explicit client
-    # request (2026-09) — see profits/dl_foh_payable_explained.md for what
-    # this reconciling figure represented and why the sheet may no longer
-    # balance to zero when there's an outstanding accrued-vs-paid DL/FOH
-    # gap now that it isn't folded in. Still computed/returned below
-    # (informational only), same "keep the field, drop it from the total"
-    # treatment already used for sales_tax_outstanding/wht_outstanding in
-    # profits.selectors.get_business_worth.
-    total_liabilities = accounts_payable + gst_payable + wht_payable
+    # dl_foh_payable RESTORED to total_liabilities (2026-09-19) — reverses
+    # the 2026-09 exclusion for the Balance Sheet ONLY (NOT
+    # profits.selectors.get_business_worth's total_business_worth, which
+    # deliberately still excludes it — see
+    # profits/dl_foh_payable_explained.md's "2026-09-19" section for why).
+    # Without it, any real recipe finish with unpaid labor/machine hours
+    # attached drifts balance_check by exactly that unpaid amount, which is
+    # what surfaced this — see the same doc for the worked example.
+    total_liabilities = accounts_payable + gst_payable + wht_payable + dl_foh_payable
     total_equity = (
         owner_capital + investor_capital + opening_balance_equity
         + pre_owned_asset_equity + asset_revaluation_surplus + retained_earnings
