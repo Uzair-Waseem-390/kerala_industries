@@ -88,6 +88,7 @@
     padding-top: 6px;
   }
   .statement-line .amount { font-variant-numeric: tabular-nums; }
+  .statement-line .amount.negative { color: #a3271f; }
 
   .empty-note {
     padding: 20px;
@@ -133,7 +134,11 @@
     {% for line in section.lines %}
     <div class="statement-line {% if line.bold %}bold{% endif %}">
       <span class="label">{{ line.label }}</span>
+      {% if line.amount|first == "-" %}
+      <span class="amount negative">-Rs. {{ line.amount|slice:"1:" }}</span>
+      {% else %}
       <span class="amount">Rs. {{ line.amount }}</span>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
