@@ -16,14 +16,18 @@ const fmt = (value) => {
     return isNaN(num) ? '0.00' : num.toFixed(2);
 };
 
-const Line = ({ label, amount, bold }) => (
-    <div className={`flex items-center justify-between py-2 ${bold ? '' : 'border-b border-neutral-100'}`}>
-        <span className={bold ? 'font-semibold text-neutral-900' : 'text-sm text-neutral-600'}>{label}</span>
-        <span className={bold ? 'font-bold text-neutral-900' : 'text-sm font-medium text-neutral-800'}>
-            Rs. {fmt(amount)}
-        </span>
-    </div>
-);
+const Line = ({ label, amount, bold }) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : Number(amount);
+    const isNegative = !isNaN(num) && num < 0;
+    return (
+        <div className={`flex items-center justify-between py-2 ${bold ? '' : 'border-b border-neutral-100'}`}>
+            <span className={bold ? 'font-semibold text-neutral-900' : 'text-sm text-neutral-600'}>{label}</span>
+            <span className={`${bold ? 'font-bold' : 'text-sm font-medium'} ${isNegative ? 'text-error-600' : bold ? 'text-neutral-900' : 'text-neutral-800'}`}>
+                {isNegative ? '-' : ''}Rs. {fmt(Math.abs(num))}
+            </span>
+        </div>
+    );
+};
 
 const BalanceSheetPage = () => {
     const { user } = useAuth();

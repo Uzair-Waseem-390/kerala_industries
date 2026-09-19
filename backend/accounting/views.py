@@ -473,6 +473,41 @@ class BalanceSheetPrintView(APIView):
             data = get_balance_sheet_live()
             filter_description = f"As of today ({timezone.localdate().isoformat()})"
 
+        # Print-only presentation choice (2026-09-19), distinct from the
+        # live view/API, which always shows the real figure per
+        # profits/dl_foh_payable_explained.md's "Update (2026-09-19)"
+        # section. When dl_foh_payable is a POSITIVE real liability (cost
+        # accrued but not yet paid), the client wants the printed sheet to
+        # instead fold it into Owner's Capital rather than list it as a
+        # liability — moving the exact same rupee amount from one side of
+        # the equation's total to the other keeps the print's own
+        # Assets = Liabilities + Equity identity intact without changing
+        # what actually happened. A NEGATIVE dl_foh_payable (a prepayment —
+        # cash paid ahead of accrued work) is left exactly as-is: it's
+        # already a real liability-side reduction, nothing to move.
+        dl_foh = data["liabilities"]["dl_foh_payable"]
+        fold_dl_foh_into_owner_capital_for_print = dl_foh > 0
+
+        liabilities_lines = [
+            {"label": "Money You Owe Suppliers", "amount": _fmt(data["liabilities"]["accounts_payable"])},
+            {"label": "GST Owed to FBR", "amount": _fmt(data["liabilities"]["gst_payable"])},
+            {"label": "WHT Owed to FBR", "amount": _fmt(data["liabilities"]["wht_payable"])},
+        ]
+        if fold_dl_foh_into_owner_capital_for_print:
+            printed_total_liabilities = data["liabilities"]["total"] - dl_foh
+            printed_owner_capital = data["equity"]["owner_capital"] + dl_foh
+            printed_total_equity = data["equity"]["total"] + dl_foh
+        else:
+            liabilities_lines.append({
+                "label": "Manufacturing Cost Payable (Accrued DL/FOH)", "amount": _fmt(dl_foh),
+            })
+            printed_total_liabilities = data["liabilities"]["total"]
+            printed_owner_capital = data["equity"]["owner_capital"]
+            printed_total_equity = data["equity"]["total"]
+        liabilities_lines.append(
+            {"label": "Total Liabilities", "amount": _fmt(printed_total_liabilities), "bold": True},
+        )
+
         sections = [
             {
                 "heading": "Assets",
@@ -488,24 +523,13 @@ class BalanceSheetPrintView(APIView):
             {
                 "heading": "Liabilities",
                 "subtitle": "Everything the business owes.",
-                "lines": [
-                    {"label": "Money You Owe Suppliers", "amount": _fmt(data["liabilities"]["accounts_payable"])},
-                    {"label": "GST Owed to FBR", "amount": _fmt(data["liabilities"]["gst_payable"])},
-                    {"label": "WHT Owed to FBR", "amount": _fmt(data["liabilities"]["wht_payable"])},
-                    # Manufacturing Cost Payable (Accrued DL/FOH) — restored
-                    # 2026-09-19, Balance Sheet only (Business Worth still
-                    # hides its own copy) — see profits/dl_foh_payable_explained.md's
-                    # "Update (2026-09-19)" section. Total Liabilities below now
-                    # genuinely includes it.
-                    {"label": "Manufacturing Cost Payable (Accrued DL/FOH)", "amount": _fmt(data["liabilities"]["dl_foh_payable"])},
-                    {"label": "Total Liabilities", "amount": _fmt(data["liabilities"]["total"]), "bold": True},
-                ],
+                "lines": liabilities_lines,
             },
             {
                 "heading": "Equity",
                 "subtitle": "The owner's stake in the business.",
                 "lines": [
-                    {"label": "Owner's Capital", "amount": _fmt(data["equity"]["owner_capital"])},
+                    {"label": "Owner's Capital", "amount": _fmt(printed_owner_capital)},
                     {"label": "Investors' Capital", "amount": _fmt(data["equity"]["investor_capital"])},
                     {"label": "Opening Balance (Pre-Existing Debts/Stock)",
                      "amount": _fmt(data["equity"]["opening_balance_equity"])},
@@ -514,7 +538,7 @@ class BalanceSheetPrintView(APIView):
                     {"label": "Increase in Equipment Value (Revaluation)",
                      "amount": _fmt(data["equity"]["asset_revaluation_surplus"])},
                     {"label": "Retained Earnings (Undistributed Profit)", "amount": _fmt(data["equity"]["retained_earnings"])},
-                    {"label": "Total Equity", "amount": _fmt(data["equity"]["total"]), "bold": True},
+                    {"label": "Total Equity", "amount": _fmt(printed_total_equity), "bold": True},
                 ],
             },
         ]
