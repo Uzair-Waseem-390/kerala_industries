@@ -46,6 +46,7 @@ from .serializers import (
     CoreNameReadSerializer, CoreNameWriteSerializer,
     CorePurchaseCreateSerializer,
     CoreThicknessReadSerializer, CoreThicknessWriteSerializer,
+    CreateCoreProductSerializer,
     FamilyReadSerializer,
     JumboExactLengthCorrectionSerializer,
     JumboNameReadSerializer, JumboNameWriteSerializer,
@@ -76,6 +77,7 @@ from .services import (
     accept_purchase_return, cancel_purchase_return, confirm_purchase_order,
     correct_jumbo_exact_length,
     create_carton_purchase, create_carton_size, create_core_length, create_core_name,
+    create_core_product,
     create_core_purchase, create_core_thickness, create_jumbo_name,
     create_jumbo_purchase,
     create_lost_inventory_record,
@@ -530,6 +532,23 @@ class ProductRetrieveView(generics.RetrieveAPIView):
     def get_object(self):
         from .selectors import get_product_by_id
         return get_product_by_id(self.kwargs["pk"])
+
+
+class CreateCoreProductView(APIView):
+    """
+    POST /purchases/products/create-core/ — Products page's Create Core
+    Product button (2026-09). Builds one Cores variant from a real
+    Name + Length + Thickness combination, no purchase involved (see
+    purchases.services.create_core_product). Stays out of Inventory/Rates
+    until actually purchased, same as every other attribute-only variant.
+    """
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request):
+        serializer = CreateCoreProductSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        product = create_core_product(**serializer.validated_data, user=request.user)
+        return Response(ProductReadSerializer(product).data, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------------------------------------------------------

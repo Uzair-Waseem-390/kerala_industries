@@ -85,6 +85,10 @@ export const purchasesApi = {
             return api.get(`/products/${query ? `?${query}` : ''}`);
         },
         getById: (id) => api.get(`/products/${id}/`),
+        // Builds one Cores variant from a Name + Length + Thickness
+        // combination directly, no purchase involved — stays out of
+        // Inventory/Rates until actually purchased.
+        createCore: (data) => api.post('/products/create-core/', data),
     },
 
     // Product attribute lookups — standalone tag values, not attached to

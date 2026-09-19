@@ -616,6 +616,13 @@ class JumboPurchaseCreateSerializer(_PaymentIntakeMixin):
     expected_length_m = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
 
 
+class CreateCoreProductSerializer(serializers.Serializer):
+    """Products page's Create Core Product action — all three required, unlike CorePurchaseCreateSerializer's optional attributes (see purchases.services.create_core_product)."""
+    core_name_id      = serializers.IntegerField()
+    core_length_id    = serializers.IntegerField()
+    core_thickness_id = serializers.IntegerField()
+
+
 class CorePurchaseCreateSerializer(_PaymentIntakeMixin):
     quantity           = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))
     unit_price         = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal("0.0001"))

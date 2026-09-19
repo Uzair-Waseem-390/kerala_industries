@@ -422,13 +422,6 @@ def _generate_jumbo_variant_for_new_name(*, jumbo_name_id: int, user) -> None:
     )
 
 
-def _generate_core_variant_for_new_name(*, core_name_id: int, user) -> None:
-    cores_anchor = get_product_by_code(CORES_PRODUCT_CODE)
-    get_or_create_product_variant(
-        base_product_id=cores_anchor.id, core_name_id=core_name_id, user=user, skip_unpriced_queue=True,
-    )
-
-
 def _generate_packing_variant_for_new_size(*, packing_size_id: int, user) -> None:
     packing_anchor = get_product_by_code(PACKING_PRODUCT_CODE)
     get_or_create_product_variant(
@@ -526,9 +519,19 @@ def delete_jumbo_name(*, pk: int, user) -> None:
 
 @transaction.atomic
 def create_core_name(*, value: str, user) -> CoreName:
+    """
+    No longer auto-generates a Core variant Product on creation (2026-09) —
+    per explicit user request, now that the Products page's Create Core
+    Product button lets a user build a real Name+Length+Thickness
+    combination deliberately, an auto-created Name-only variant (with
+    null length/thickness) was just clutter. Unlike Jumbo/Packing/Carton
+    — which still auto-generate on their own attribute creation — Core
+    products are meant to always be created via that explicit 3-attribute
+    action from now on, or lazily by a real purchase (create_core_purchase),
+    same as before.
+    """
     with _unique_constraint_guard("A Core Name with this value already exists."):
         obj = CoreName.objects.create(value=value, created_by=user, updated_by=user)
-    _generate_core_variant_for_new_name(core_name_id=obj.id, user=user)
     return obj
 
 def update_core_name(*, pk: int, value: str = None, user) -> CoreName:
@@ -1209,6 +1212,35 @@ def create_jumbo_purchase(
         "gross_amount", "gst_amount", "wht_amount", "total_price",
     ])
     return order
+
+
+def create_core_product(*, core_name_id: int, core_length_id: int, core_thickness_id: int, user) -> Product:
+    """
+    Manual "build your own Core variant" action (2026-09) — Products page's
+    Create Core Product button. All three attributes required (unlike
+    create_core_purchase, where each is optional per line item) since this
+    exists specifically to let the user pin down one exact combination as
+    a real catalog row, not to record a purchase.
+
+    Reuses get_or_create_product_variant with skip_unpriced_queue=True —
+    same "attribute-only, no real stock yet" treatment
+    _generate_jumbo_variant_for_new_name/_generate_packing_variant_for_new_size/
+    _generate_carton_variant_for_new_size still use for their own families:
+    the row exists immediately (selectable everywhere a Product is picked),
+    but stays out of the Inventory list and the Rates "needs a price" queue
+    until it's actually purchased — _maybe_queue_for_pricing/
+    _maybe_create_registry_entry (both already wired into
+    get_or_create_product_variant) handle that automatically the first time
+    a real purchase reuses this same variant_key. Core Name creation
+    (create_core_name) no longer has an equivalent auto-generation helper
+    (removed 2026-09, same date as this function) — this explicit action is
+    now the only non-purchase way to create a Core variant.
+    """
+    cores_anchor = get_product_by_code(CORES_PRODUCT_CODE)
+    return get_or_create_product_variant(
+        base_product_id=cores_anchor.id, user=user, skip_unpriced_queue=True,
+        core_name_id=core_name_id, core_length_id=core_length_id, core_thickness_id=core_thickness_id,
+    )
 
 
 def create_core_purchase(

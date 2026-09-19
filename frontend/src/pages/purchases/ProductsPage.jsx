@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { SlidersHorizontal, X, PackageSearch } from 'lucide-react';
+import { SlidersHorizontal, X, PackageSearch, Plus } from 'lucide-react';
 import { usePaginatedList } from '../../hooks/usePaginatedList';
 import { purchasesApi } from '../../services/purchasesApi';
 import Table from '../../components/ui/Table';
@@ -11,13 +11,120 @@ import Badge from '../../components/ui/Badge';
 import Pagination from '../../components/ui/Pagination';
 import EmptyState from '../../components/ui/EmptyState';
 import InlineAlert from '../../components/ui/InlineAlert';
+import Modal from '../../components/ui/Modal';
+import SearchableSelect from '../../components/ui/SearchableSelect';
 import { useToast } from '../../context/ToastContext';
 import { extractErrorMessage } from '../../utils/errorMessage';
 
-// Product is now a frozen catalog of 4 fixed rows (Jumbo, Cores, Packing,
-// Cartons), seeded by a management command — create/edit/delete were
-// deliberately removed from both the backend and this page. This is a
-// read-only list + filter view; nothing here mutates a Product.
+const searchCoreNames = async (query) => {
+    const res = await purchasesApi.coreNames.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
+const searchCoreLengths = async (query) => {
+    const res = await purchasesApi.coreLengths.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
+const searchCoreThicknesses = async (query) => {
+    const res = await purchasesApi.coreThicknesses.getAll({ search: query, page_size: 25 });
+    const results = res?.results ?? res ?? [];
+    return results.map((n) => ({ value: n.id, label: n.value }));
+};
+
+const emptyCoreProductForm = {
+    core_name_id: '', core_name_label: '',
+    core_length_id: '', core_length_label: '',
+    core_thickness_id: '', core_thickness_label: '',
+};
+
+// Search name -> search length -> search thickness -> Create. Builds one
+// real Cores variant Product from that exact combination, no purchase
+// involved — it stays out of Inventory/Rates until actually purchased,
+// same as every other attribute-only variant (purchases.services
+// .create_core_product).
+const CreateCoreProductModal = ({ isOpen, onClose, onCreated }) => {
+    const { toast } = useToast();
+    const [form, setForm] = useState(emptyCoreProductForm);
+    const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState('');
+
+    const canSubmit = form.core_name_id && form.core_length_id && form.core_thickness_id;
+
+    const handleClose = () => {
+        setForm(emptyCoreProductForm);
+        setError('');
+        onClose();
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSubmitting(true);
+        try {
+            const product = await purchasesApi.products.createCore({
+                core_name_id: parseInt(form.core_name_id, 10),
+                core_length_id: parseInt(form.core_length_id, 10),
+                core_thickness_id: parseInt(form.core_thickness_id, 10),
+            });
+            toast.success(`Core product '${product.name}' created`);
+            setForm(emptyCoreProductForm);
+            onCreated();
+        } catch (err) {
+            setError(extractErrorMessage(err, 'Failed to create core product'));
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={handleClose} title="Create Core Product">
+            <form onSubmit={handleSubmit} className="space-y-4">
+                {error && <InlineAlert variant="error" message={error} />}
+                <SearchableSelect
+                    label="Core Name"
+                    value={form.core_name_id}
+                    selectedLabel={form.core_name_label}
+                    onChange={(val, option) => setForm({ ...form, core_name_id: val, core_name_label: option?.label ?? '' })}
+                    onSearch={searchCoreNames}
+                    placeholder="Search core name..."
+                    required
+                />
+                <SearchableSelect
+                    label="Core Length (inches)"
+                    value={form.core_length_id}
+                    selectedLabel={form.core_length_label}
+                    onChange={(val, option) => setForm({ ...form, core_length_id: val, core_length_label: option?.label ?? '' })}
+                    onSearch={searchCoreLengths}
+                    placeholder="Search core length..."
+                    required
+                />
+                <SearchableSelect
+                    label="Core Thickness (mm)"
+                    value={form.core_thickness_id}
+                    selectedLabel={form.core_thickness_label}
+                    onChange={(val, option) => setForm({ ...form, core_thickness_id: val, core_thickness_label: option?.label ?? '' })}
+                    onSearch={searchCoreThicknesses}
+                    placeholder="Search core thickness..."
+                    required
+                />
+                <div className="flex justify-end gap-3 pt-2">
+                    <Button type="button" variant="secondary" onClick={handleClose}>Cancel</Button>
+                    <Button type="submit" loading={submitting} disabled={!canSubmit}>Create</Button>
+                </div>
+            </form>
+        </Modal>
+    );
+};
+
+// Product is a frozen catalog of 4 fixed anchor rows (Jumbo, Cores,
+// Packing, Cartons), seeded by a management command, plus their
+// attribute-bearing variants — create/edit/delete of the anchors
+// themselves stays off this page. The one exception (2026-09): Create
+// Core Product below, a narrow, controlled way to build a Cores variant
+// from a real attribute combination without going through a purchase.
 const ProductsPage = () => {
     const { toast } = useToast();
 
@@ -35,6 +142,7 @@ const ProductsPage = () => {
     const [familyFilter, setFamilyFilter] = useState('');
     const [showFilters, setShowFilters] = useState(false);
     const [activeFilters, setActiveFilters] = useState({});
+    const [showCreateCore, setShowCreateCore] = useState(false);
 
     useEffect(() => {
         loadLookups();
@@ -112,6 +220,9 @@ const ProductsPage = () => {
                     <h1 className="text-3xl font-bold text-neutral-900">Products</h1>
                     <p className="text-neutral-500 mt-1">Fixed product catalog</p>
                 </div>
+                <Button icon={Plus} onClick={() => setShowCreateCore(true)}>
+                    Create Core Product
+                </Button>
             </div>
 
             {error && (
@@ -181,6 +292,12 @@ const ProductsPage = () => {
                     onPageChange={setPage}
                 />
             )}
+
+            <CreateCoreProductModal
+                isOpen={showCreateCore}
+                onClose={() => setShowCreateCore(false)}
+                onCreated={() => { setShowCreateCore(false); refetch(); }}
+            />
         </div>
     );
 };

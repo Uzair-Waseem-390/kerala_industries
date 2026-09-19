@@ -33,6 +33,7 @@ from .views import (
     AllSupplierPaymentsView,
 
     # Product
+    CreateCoreProductView,
     ProductListView,
     ProductRetrieveView,
 
@@ -141,6 +142,7 @@ urlpatterns = [
     # Product
     # -----------------------------------------------------------------------
     path("products/",            ProductListView.as_view(),                   name="product-list-create"),
+    path("products/create-core/", CreateCoreProductView.as_view(),            name="product-create-core"),
     path("products/<int:pk>/",   ProductRetrieveView.as_view(),               name="product-detail"),
 
     # -----------------------------------------------------------------------
