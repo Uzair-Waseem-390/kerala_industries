@@ -44,6 +44,15 @@ class CreditScoreTestBase(TestCase):
             name="Big Mart", code="BM", address="Main St", user=self.admin,
         )
         self.cash = PaymentMethod.objects.get_or_create(name="Cash", defaults={"balance": Decimal("1000000")})[0]
+        # rates/billing only allow selling RM products in the Cartons line
+        # (see purchases.selectors.is_cartons_product) — every product these
+        # tests price/sell must be a variant of the Cartons anchor. Same
+        # setup as billing.tests.BillingTestBase.
+        from purchases.models import CARTONS_PRODUCT_CODE, Family, Product
+        self.cartons_anchor, _ = Product.objects.get_or_create(
+            code=CARTONS_PRODUCT_CODE,
+            defaults={"name": "Cartons", "family": Family.objects.get(name="Raw Material")},
+        )
 
     def cash_split(self, amount):
         return [(self.cash, Decimal(amount))]
@@ -53,8 +62,9 @@ class CreditScoreTestBase(TestCase):
         from purchases.models import Family, Product
         product = Product.objects.create(
             name=name, code=code, family=Family.objects.get(name="Raw Material"),
+            base_product=self.cartons_anchor,
         )
-        create_rate(product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
+        create_rate(rm_product_id=product.id, selling_price=Decimal(selling_price), user=self.admin)
         order = create_purchase_order(
             supplier_id=self.supplier.id,
             items=[{"product_id": product.id, "quantity": stock, "unit_price": Decimal(unit_cost)}],
@@ -72,7 +82,7 @@ class CreditScoreTestBase(TestCase):
     def confirm_invoice_for(self, product, quantity=1, due_date=None, customer=None):
         invoice = create_invoice(
             customer_id=(customer or self.customer).id,
-            items=[{"product_id": product.id, "quantity": quantity}],
+            items=[{"rm_product_id": product.id, "quantity": quantity}],
             payment_due_date=due_date, user=self.admin,
         )
         for item in invoice.items.all():
