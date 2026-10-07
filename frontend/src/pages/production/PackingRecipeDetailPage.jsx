@@ -205,6 +205,8 @@ const IssuedPiecePanel = ({ piece, disabled, onIssue, onUpdate }) => {
                                     shelves={candidateShelves}
                                     requiredQuantity={issueQty}
                                     mode="consumption"
+                                    productId={productId}
+                                    autoAllocateApi={productionApi.wipShelfCandidates.autoAllocate}
                                 />
                             )
                         )}
@@ -287,6 +289,8 @@ const IssuedPiecePanel = ({ piece, disabled, onIssue, onUpdate }) => {
                                                 shelves={editShelves}
                                                 requiredQuantity={requiredQuantity}
                                                 mode="consumption"
+                                                productId={piece.wip_product?.id}
+                                                autoAllocateApi={productionApi.wipShelfCandidates.autoAllocate}
                                             />
                                         )
                                     ) : (

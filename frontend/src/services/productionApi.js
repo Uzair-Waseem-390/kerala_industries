@@ -138,6 +138,16 @@ export const productionApi = {
             const query = new URLSearchParams({ wip_product_id: wipProductId, ...params }).toString();
             return api.get(`/production/wip-shelves/candidates/?${query}`);
         },
+        // Fills `quantity` of a WIP product across shelves holding it (largest
+        // first), skipping excludeShelfIds. Same call shape as
+        // purchasesApi.shelves.autoAllocate, so it plugs straight into
+        // ShelfAllocationEditor's `autoAllocateApi` prop.
+        autoAllocate: (wipProductId, quantity, excludeShelfIds = []) =>
+            api.post('/production/wip-shelves/auto-allocate/', {
+                product_id: wipProductId,
+                quantity,
+                exclude_shelf_ids: excludeShelfIds,
+            }),
     },
 
     // WIP Products / Inventory — read-only overview.

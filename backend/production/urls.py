@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     AddBreakdownItemView,
     AddCuttingBreakdownItemView,
+    AutoAllocateWipShelvesView,
     BreakdownItemDetailView,
     CandidateShelvesForFgProductListView,
     CandidateShelvesForWipProductListView,
@@ -77,6 +78,7 @@ urlpatterns = [
 
     # Shelves currently holding a given WIP product (consumption-side picker)
     path("wip-shelves/candidates/", CandidateShelvesForWipProductListView.as_view(), name="wip-shelf-candidates"),
+    path("wip-shelves/auto-allocate/", AutoAllocateWipShelvesView.as_view(), name="wip-shelf-auto-allocate"),
 
     # Recipes (Rewinding)
     path("recipes/",     RecipeListCreateView.as_view(), name="recipe-list-create"),

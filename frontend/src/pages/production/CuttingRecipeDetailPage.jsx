@@ -194,6 +194,8 @@ const CuttingIssuedMaterialPanel = ({ material, disabled, onIssue, onUpdate }) =
                                     shelves={candidateShelves}
                                     requiredQuantity={issueQty}
                                     mode="consumption"
+                                    productId={productId}
+                                    autoAllocateApi={productionApi.wipShelfCandidates.autoAllocate}
                                 />
                             )
                         )}
@@ -276,6 +278,8 @@ const CuttingIssuedMaterialPanel = ({ material, disabled, onIssue, onUpdate }) =
                                                 shelves={editShelves}
                                                 requiredQuantity={requiredQuantity}
                                                 mode="consumption"
+                                                productId={material.wip_product_id}
+                                                autoAllocateApi={productionApi.wipShelfCandidates.autoAllocate}
                                             />
                                         )
                                     ) : (

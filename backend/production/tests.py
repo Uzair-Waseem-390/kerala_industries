@@ -7,7 +7,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from inventory.models import FgInventory, FgInventoryStatsFlow, FgShelfStock, WipInventoryStatsFlow
+from inventory.models import FgInventory, FgInventoryStatsFlow, FgShelfStock, WipInventoryStatsFlow, WipShelfStock
 from manufacturing_costs.models import Machine
 from manufacturing_costs.services import create_employee, create_machine
 from purchases.models import Family, Shelf, Supplier
@@ -27,7 +27,7 @@ from .services import (
     issue_packing_material, issue_packing_piece, set_recipe_time, update_packing_issued_material,
     update_packing_issued_piece, update_recipe_description,
 )
-from .views import PackingRecipeListCreateView, PackingRecipeRetrieveView
+from .views import AutoAllocateWipShelvesView, PackingRecipeListCreateView, PackingRecipeRetrieveView
 
 
 def make_admin(email="admin@example.com"):
@@ -504,3 +504,68 @@ class FgProductCodeTests(PackingRecipeTestBase):
         fg_product = finished.packing_output_item.fg_product
         self.assertIsNotNone(fg_product.code)
         self.assertTrue(fg_product.code.startswith("FG-"))
+
+
+class WipAutoAllocateTests(PackingRecipeTestBase):
+    """POST /production/wip-shelves/auto-allocate/ — Cutting's core / Packing's Cut Piece Auto-Allocate button."""
+
+    def setUp(self):
+        super().setUp()
+        # self.piece sits 10 on Shelf A after the base fixture; spread it: A=4, B=6, C=2.
+        self.shelf_b = Shelf.objects.create(name="Shelf B")
+        self.shelf_c = Shelf.objects.create(name="Shelf C")
+        WipShelfStock.objects.filter(shelf=self.shelf, product=self.piece).update(quantity=Decimal("4"))
+        WipShelfStock.objects.create(shelf=self.shelf_b, product=self.piece, quantity=Decimal("6"))
+        WipShelfStock.objects.create(shelf=self.shelf_c, product=self.piece, quantity=Decimal("2"))
+
+    def _post(self, body, user=None):
+        request = self.factory.post("/production/wip-shelves/auto-allocate/", body, format="json")
+        force_authenticate(request, user=user or self.admin)
+        return AutoAllocateWipShelvesView.as_view()(request)
+
+    def test_fills_largest_shelf_first(self):
+        response = self._post({"product_id": self.piece.id, "quantity": "8"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(a["shelf_name"], Decimal(a["quantity"])) for a in response.data["allocations"]],
+            [("Shelf B", Decimal("6")), ("Shelf A", Decimal("2"))],
+        )
+        self.assertEqual(Decimal(response.data["shortfall"]), Decimal("0"))
+
+    def test_exclude_shelf_ids_only_fills_the_gap(self):
+        response = self._post({"product_id": self.piece.id, "quantity": "5", "exclude_shelf_ids": [self.shelf_b.id]})
+        self.assertEqual(
+            [(a["shelf_name"], Decimal(a["quantity"])) for a in response.data["allocations"]],
+            [("Shelf A", Decimal("4")), ("Shelf C", Decimal("1"))],
+        )
+
+    def test_reports_shortfall_when_stock_is_insufficient(self):
+        response = self._post({"product_id": self.piece.id, "quantity": "20"})
+        self.assertEqual(sum(Decimal(a["quantity"]) for a in response.data["allocations"]), Decimal("12"))
+        self.assertEqual(Decimal(response.data["shortfall"]), Decimal("8"))
+
+    def test_deleted_shelf_is_skipped(self):
+        Shelf.objects.filter(pk=self.shelf_b.pk).update(is_deleted=True)
+        response = self._post({"product_id": self.piece.id, "quantity": "10"})
+        self.assertNotIn("Shelf B", [a["shelf_name"] for a in response.data["allocations"]])
+
+    def test_does_not_write_anything(self):
+        before = list(WipShelfStock.objects.order_by("id").values_list("id", "quantity"))
+        self._post({"product_id": self.piece.id, "quantity": "8"})
+        self.assertEqual(before, list(WipShelfStock.objects.order_by("id").values_list("id", "quantity")))
+
+    def test_non_admin_gets_403(self):
+        response = self._post({"product_id": self.piece.id, "quantity": "1"}, user=make_normal_user())
+        self.assertEqual(response.status_code, 403)
+
+    def test_query_count_is_one_regardless_of_shelf_count(self):
+        request = self.factory.post(
+            "/production/wip-shelves/auto-allocate/", {"product_id": self.piece.id, "quantity": "12"}, format="json",
+        )
+        force_authenticate(request, user=self.admin)
+        with CaptureQueriesContext(connection) as ctx:
+            response = AutoAllocateWipShelvesView.as_view()(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["allocations"]), 3)
+        # 1 allocation query + auth/session overhead is none under force_authenticate.
+        self.assertLessEqual(len(ctx.captured_queries), 2)

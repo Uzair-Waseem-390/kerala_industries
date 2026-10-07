@@ -345,6 +345,36 @@ def compute_auto_fg_shelf_allocation(*, fg_product_id: int, quantity: int, exclu
     return {"allocations": allocations, "shortfall": max(remaining, 0)}
 
 
+def compute_auto_wip_shelf_allocation(*, product_id: int, quantity: int, exclude_shelf_ids: list = None) -> dict:
+    """
+    WIP-equivalent of purchases.selectors.compute_auto_shelf_allocation —
+    same greedy largest-quantity-first algorithm, against WipShelfStock.
+    Used by Cutting (issuing a core) and Packing (issuing a Cut Piece). See
+    that function's docstring for the full reasoning (advisory only, no
+    select_for_update()). One query (shelf joined), served by the product FK
+    index; loop exits as soon as the quantity is covered.
+    """
+    exclude_shelf_ids = set(exclude_shelf_ids or [])
+    rows = (
+        WipShelfStock.objects
+        .select_related("shelf")
+        .filter(product_id=product_id, quantity__gt=0, shelf__is_deleted=False)
+        .exclude(shelf_id__in=exclude_shelf_ids)
+        .order_by("-quantity", "shelf__name")
+    )
+
+    remaining = quantity
+    allocations = []
+    for row in rows:
+        if remaining <= 0:
+            break
+        take = min(row.quantity, remaining)
+        allocations.append({"shelf_id": row.shelf_id, "shelf_name": row.shelf.name, "quantity": take})
+        remaining -= take
+
+    return {"allocations": allocations, "shortfall": max(remaining, 0)}
+
+
 def get_candidate_shelves_for_wip_product(wip_product_id: int, *, search: str = None):
     """
     WIP-equivalent of purchases.selectors.get_candidate_shelves_for_product

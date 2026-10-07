@@ -7,13 +7,15 @@ from .permissions import IsAdminOrSuperuser
 from .selectors import (
     get_all_cutting_recipes, get_all_fg_inventory, get_all_packing_recipes, get_all_recipes,
     get_all_rewound_core_bindings, get_all_rewound_core_length_mms, get_all_rewound_core_yards,
-    get_all_wip_inventory, get_all_wip_products, get_candidate_shelves_for_fg_product,
+    compute_auto_wip_shelf_allocation, get_all_wip_inventory, get_all_wip_products,
+    get_candidate_shelves_for_fg_product,
     get_candidate_shelves_for_wip_product, get_cutting_recipe_by_id, get_fg_shelf_stock_rows,
     get_issuable_cutting_pieces, get_issuable_products, get_issuable_wip_cores,
     get_packing_recipe_by_id, get_recipe_by_id, get_rewound_core_binding_by_id,
     get_rewound_core_length_mm_by_id, get_rewound_core_yard_by_id, get_wip_product_by_id,
     get_wip_shelf_stock_rows,
 )
+from purchases.serializers import AutoAllocateShelvesRequestSerializer, AutoAllocateShelvesResponseSerializer
 from .serializers import (
     AddBreakdownItemSerializer, AddCuttingBreakdownItemSerializer, AddRecipeLaborSerializer,
     AddRecipeMachineSerializer, CandidateShelfSerializer, CreateCuttingRecipeSerializer,
@@ -183,6 +185,23 @@ class CandidateShelvesForWipProductListView(generics.ListAPIView):
         return get_candidate_shelves_for_wip_product(
             int(wip_product_id), search=self.request.query_params.get("search"),
         )
+
+
+class AutoAllocateWipShelvesView(APIView):
+    """
+    POST /production/wip-shelves/auto-allocate/
+    Body: {product_id (the WIP product), quantity, exclude_shelf_ids: [...]}
+    WIP twin of purchases.AutoAllocateShelvesView — fills `quantity` across
+    shelves holding the WIP product (largest first), skipping excluded
+    shelves. Advisory only; the save path re-validates under lock.
+    """
+    permission_classes = [IsAdminOrSuperuser]
+
+    def post(self, request):
+        req = AutoAllocateShelvesRequestSerializer(data=request.data)
+        req.is_valid(raise_exception=True)
+        result = compute_auto_wip_shelf_allocation(**req.validated_data)
+        return Response(AutoAllocateShelvesResponseSerializer(result).data)
 
 
 # ---------------------------------------------------------------------------

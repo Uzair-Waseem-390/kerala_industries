@@ -23,8 +23,9 @@ from .packing import (
 # re-exported here so `from production.selectors import X` still works
 # unchanged for production/views.py.
 from inventory.selectors import (
-    get_all_fg_inventory, get_all_wip_inventory, get_candidate_shelves_for_fg_product,
-    get_candidate_shelves_for_wip_product, get_fg_shelf_stock_rows, get_wip_shelf_stock_rows,
+    compute_auto_wip_shelf_allocation, get_all_fg_inventory, get_all_wip_inventory,
+    get_candidate_shelves_for_fg_product, get_candidate_shelves_for_wip_product,
+    get_fg_shelf_stock_rows, get_wip_shelf_stock_rows,
 )
 
 __all__ = [
@@ -39,4 +40,5 @@ __all__ = [
     "get_fg_product_by_id", "get_issuable_cutting_pieces",
     "get_packing_issued_material", "get_packing_issued_piece", "get_packing_recipe_by_id",
     "get_all_fg_inventory", "get_candidate_shelves_for_fg_product", "get_fg_shelf_stock_rows",
+    "compute_auto_wip_shelf_allocation",
 ]
