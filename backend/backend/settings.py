@@ -218,19 +218,3 @@ SIMPLE_JWT = {
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-
-
-
-# Legacy source database — used by one-off data-import management commands
-# (e.g. purchases.import_legacy_lookup_data) to read from the old DB and
-# write into the new "default" DB. Not used for routine app traffic.
-DATA_GMAIL = os.getenv("DATA_GMAIL")
-if os.getenv("DB_NAME1"):
-    DATABASES["legacy"] = {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME1"),
-        "USER": os.getenv("DB_USER1"),
-        "PASSWORD": os.getenv("DB_PASSWORD1"),
-        "HOST": os.getenv("DB_HOST1"),
-        "PORT": os.getenv("DB_PORT1"),
-    }
