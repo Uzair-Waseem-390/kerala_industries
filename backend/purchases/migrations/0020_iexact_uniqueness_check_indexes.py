@@ -24,7 +24,6 @@ _INDEXED_COLUMNS = [
     ("purchases_shelf", "name"),
     ("purchases_supplier", "code"),
     ("purchases_jumboname", "value"),
-    ("purchases_corename", "value"),
     ("purchases_corelength", "value"),
     ("purchases_corethickness", "value"),
     ("purchases_packingsize", "value"),

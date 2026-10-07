@@ -3,6 +3,21 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def create_corename_iexact_index(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_purchases_corename_value_upper "
+        "ON purchases_corename (UPPER(value));"
+    )
+
+
+def drop_corename_iexact_index(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    schema_editor.execute("DROP INDEX IF EXISTS idx_purchases_corename_value_upper;")
+
+
 class Migration(migrations.Migration):
     # Genuinely two separate operations, not a rename: JumboBinding is
     # dropped (client decided this Jumbo attribute isn't needed), CoreName
@@ -38,4 +53,6 @@ class Migration(migrations.Migration):
         migrations.DeleteModel(
             name="JumboBinding",
         ),
+        migrations.RunPython(create_corename_iexact_index, drop_corename_iexact_index),
     ]
+
